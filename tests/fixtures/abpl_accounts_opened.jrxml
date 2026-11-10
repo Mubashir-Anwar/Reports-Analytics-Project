@@ -1,0 +1,753 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Created with Jaspersoft Studio version 6.20.5.final using JasperReports Library version 6.20.5-3efcf2e67f959db3888d79f73dde2dbd7acb4f8e  -->
+<jasperReport xmlns="http://jasperreports.sourceforge.net/jasperreports" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://jasperreports.sourceforge.net/jasperreports http://jasperreports.sourceforge.net/xsd/jasperreport.xsd" name="ABPL_Accounts_Successfully_Opened_Report" pageWidth="870" pageHeight="612" orientation="Landscape" columnWidth="830" leftMargin="20" rightMargin="20" topMargin="20" bottomMargin="20" isIgnorePagination="true" uuid="7331e97f-dd48-4167-8dea-089c840a98f7">
+	<property name="com.jaspersoft.studio.data.defaultdataadapter" value="ABPL-UAT"/>
+	<property name="com.jaspersoft.studio.report.description" value=""/>
+	<property name="com.jaspersoft.studio.unit." value="pixel"/>
+	<property name="com.jaspersoft.studio.unit.pageHeight" value="pixel"/>
+	<property name="com.jaspersoft.studio.unit.pageWidth" value="pixel"/>
+	<property name="com.jaspersoft.studio.unit.topMargin" value="pixel"/>
+	<property name="com.jaspersoft.studio.unit.bottomMargin" value="pixel"/>
+	<property name="com.jaspersoft.studio.unit.leftMargin" value="pixel"/>
+	<property name="com.jaspersoft.studio.unit.rightMargin" value="pixel"/>
+	<property name="com.jaspersoft.studio.unit.columnWidth" value="pixel"/>
+	<property name="com.jaspersoft.studio.unit.columnSpacing" value="pixel"/>
+	<property name="ireport.jasperserver.report.resource" value="/cascade/ABPL/Reports/ABPL_Accounts_Successfully_Opened_Report_files/main_jrxml"/>
+	<property name="ireport.jasperserver.reportUnit" value="/cascade/ABPL/Reports/ABPL_Accounts_Successfully_Opened_Report"/>
+	<style name="Table_TH" mode="Opaque" backcolor="#F0F8FF">
+		<box>
+			<pen lineWidth="0.5" lineColor="#000000"/>
+			<topPen lineWidth="0.5" lineColor="#000000"/>
+			<leftPen lineWidth="0.5" lineColor="#000000"/>
+			<bottomPen lineWidth="0.5" lineColor="#000000"/>
+			<rightPen lineWidth="0.5" lineColor="#000000"/>
+		</box>
+	</style>
+	<style name="Table_CH" mode="Opaque" backcolor="#BFE1FF">
+		<box>
+			<pen lineWidth="0.5" lineColor="#000000"/>
+			<topPen lineWidth="0.5" lineColor="#000000"/>
+			<leftPen lineWidth="0.5" lineColor="#000000"/>
+			<bottomPen lineWidth="0.5" lineColor="#000000"/>
+			<rightPen lineWidth="0.5" lineColor="#000000"/>
+		</box>
+	</style>
+	<style name="Table_TD" mode="Opaque" backcolor="#FFFFFF">
+		<box>
+			<pen lineWidth="0.5" lineColor="#000000"/>
+			<topPen lineWidth="0.5" lineColor="#000000"/>
+			<leftPen lineWidth="0.5" lineColor="#000000"/>
+			<bottomPen lineWidth="0.5" lineColor="#000000"/>
+			<rightPen lineWidth="0.5" lineColor="#000000"/>
+		</box>
+	</style>
+	<subDataset name="Dataset1" uuid="feac7f71-e918-4eaa-89b4-409cc8d2368f">
+		<property name="com.jaspersoft.studio.data.defaultdataadapter" value="Staging DB"/>
+		<parameter name="StartDate" class="java.util.Date"/>
+		<parameter name="EndDate" class="java.util.Date"/>
+		<parameter name="AdjustedStartDate" class="java.util.Date" isForPrompting="false">
+			<defaultValueExpression><![CDATA[new java.util.GregorianCalendar(
+    $P{StartDate}.getYear() + 1900, 
+    $P{StartDate}.getMonth(), 
+    $P{StartDate}.getDate(), 
+    0, 0, 0
+).getTime()]]></defaultValueExpression>
+		</parameter>
+		<parameter name="AdjustedEndDate" class="java.util.Date" isForPrompting="false">
+			<defaultValueExpression><![CDATA[new java.util.GregorianCalendar(
+    $P{EndDate}.getYear() + 1900, 
+    $P{EndDate}.getMonth(), 
+    $P{EndDate}.getDate(), 
+    23, 59, 59
+).getTime()]]></defaultValueExpression>
+		</parameter>
+		<parameter name="Branch" class="java.lang.String"/>
+		<parameter name="Branch_1" class="java.lang.String" isForPrompting="false">
+			<defaultValueExpression><![CDATA[$P{Branch}.equals(null) || $P{Branch}.equals("") ?"{'$ne': 'Branch'}": "{'$in': [$P!{Branch}]}"]]></defaultValueExpression>
+		</parameter>
+		<parameter name="Region" class="java.lang.String"/>
+		<parameter name="Region_1" class="java.lang.String" isForPrompting="false">
+			<defaultValueExpression><![CDATA[$P{Region}.equals(null) || $P{Region}.equals("") ?"{'$ne': 'Region'}": "{'$in': [$P!{Region}]}"]]></defaultValueExpression>
+		</parameter>
+		<parameter name="AccountType" class="java.lang.String"/>
+		<parameter name="AccountType_1" class="java.lang.String" isForPrompting="false">
+			<defaultValueExpression><![CDATA[$P{AccountType}.equals(null) || $P{AccountType}.equals("") ?"{'$ne': 'AccountType'}": "{'$in': [$P!{AccountType}]}"]]></defaultValueExpression>
+		</parameter>
+		<queryString language="MongoDbQuery">
+			<![CDATA[{
+  "runCommand": {
+    "aggregate": "Edith-DOABPL-Workflows",
+    "pipeline":	[
+        {
+            "$match" : {
+                "Status" : NumberInt(1)
+            }
+        },
+        {
+            "$addFields" : {
+                "CreationDateTime" : {
+                    "$toDate" : "$CreationDateTime"
+                },
+                "LastUpdateDateTime" : {
+                    "$toDate" : "$LastUpdateDateTime"
+                },
+                "AccountTypeCode" : {
+                    "$arrayElemAt" : [
+                        "$GridFields.ABPL37.ABPL40",
+                        0.0
+                    ]
+                },
+                "BranchCode" : {
+                    "$arrayElemAt" : [
+                        "$GridFields.ABPL37.ABPL26",
+                        0.0
+                    ]
+                },
+                "RegionCode" : {
+                    "$arrayElemAt" : [
+                        "$GridFields.ABPL37.ABPL110",
+                        0.0
+                    ]
+                },
+            }
+        }, 
+	{
+		"$match" : {
+			"$and" : [
+				{'LastUpdateDateTime' : { '$gte' : $P{AdjustedStartDate},  '$lte' :$P{AdjustedEndDate}}},      
+				{'BranchCode' : $P!{Branch_1}},
+				{'RegionCode' : $P!{Region_1}},
+				{'AccountTypeCode' : $P!{AccountType_1}},
+			]
+		}
+	},
+        {
+            "$lookup" : {
+                "from" : "Quantum-ABPL1S",
+                "localField" : "GridFields.ABPL37.ABPL26",
+                "foreignField" : "Code",
+                "as" : "Branch"
+            }
+        }, 
+        {
+            "$set" : {
+                "Date" : "$LastUpdateDateTime",
+                "Week" : {
+                    "$week" : "$LastUpdateDateTime"
+                },
+                "Month" : {
+                    "$arrayElemAt" : [
+                        [
+                            "",
+                            "January",
+                            "February",
+                            "March",
+                            "April",
+                            "May",
+                            "June",
+                            "July",
+                            "August",
+                            "September",
+                            "October",
+                            "November",
+                            "December"
+                        ],
+                        {
+                            "$month" : "$LastUpdateDateTime"
+                        }
+                    ]
+                },
+                "Quarter" : {
+                    "$concat" : [
+                        "Q",
+                        {
+                            "$toString" : {
+                                "$ceil" : {
+                                    "$divide" : [
+                                        {
+                                            "$month" : "$LastUpdateDateTime"
+                                        },
+                                        3.0
+                                    ]
+                                }
+                            }
+                        }
+                    ]
+                },
+                "Year" : {
+                    "$year" : "$LastUpdateDateTime"
+                }
+            }
+        }, 
+        {
+            "$lookup" : {
+                "from" : "Quantum-ABPL40S",
+                "localField" : "GridFields.ABPL37.ABPL40",
+                "foreignField" : "Code",
+                "as" : "AccountType"
+            }
+        }, 
+        {
+            "$project" : {
+                "AccountType" : {
+                    "$arrayElemAt" : [
+                        "$AccountType.Name",
+                        0.0
+                    ]
+                },
+                "Branch" : {
+                    "$arrayElemAt" : [
+                        "$Branch.Name",
+                        0.0
+                    ]
+                },
+                "Region" : {
+                    "$arrayElemAt" : [
+                        "$GridFields.ABPL37.ABPL110",
+                        0.0
+                    ]
+                },
+                "LastUpdateDateTime" : 1.0,
+                "CreationDateTime" : 1.0,
+                "Date" : 1.0,
+                "Week" : 1.0,
+                "Month" : 1.0,
+                "Quarter" : 1.0,
+                "Year" : 1.0
+            }
+        },
+        {
+            "$group" : {
+                "_id" : {
+                    "Branch" : "$Branch",
+                    "Region" : "$Region",
+                    "AccountType" : "$AccountType",
+                    "Week" : "$Week",
+                    "Month" : "$Month",
+                    "Quarter" : "$Quarter",
+                    "Year" : "$Year",
+                },
+                "count" : {
+                    "$sum" : 1.0
+                },
+                "LastUpdateDateTime" : {
+                    "$max" : "$LastUpdateDateTime"
+                }
+            }
+        },
+        {
+            "$project" : {
+                "_id" : 0.0,
+                "Branch" : "$_id.Branch",
+                "Region" : "$_id.Region",
+                "AccountType" : "$_id.AccountType",
+                "Month" : "$_id.Month",
+                "Week" : "$_id.Week",
+                "Quarter" : "$_id.Quarter",
+                "Year" : "$_id.Year",
+                "count" : {
+                    "$toInt" : "$count"
+                },
+                "LastUpdateDateTime" : 1.0
+            }
+        },
+{
+  "$sort": {
+    "count": -1.0,
+    "Date": -1.0
+  }
+}
+    ]
+  }
+}]]>
+		</queryString>
+		<field name="Date" class="java.util.Date"/>
+		<field name="LastUpdateDateTime" class="java.util.Date"/>
+		<field name="Month" class="java.lang.String"/>
+		<field name="Quarter" class="java.lang.String"/>
+		<field name="Week" class="java.lang.Integer"/>
+		<field name="Year" class="java.lang.Integer"/>
+		<field name="count" class="java.lang.Integer"/>
+		<field name="AccountType" class="java.lang.String"/>
+		<field name="Branch" class="java.lang.String"/>
+		<sortField name="LastUpdateDateTime" order="Descending"/>
+	</subDataset>
+	<parameter name="StartDate" class="java.util.Date"/>
+	<parameter name="EndDate" class="java.util.Date"/>
+	<parameter name="AdjustedStartDate" class="java.util.Date" isForPrompting="false">
+		<defaultValueExpression><![CDATA[new java.util.GregorianCalendar(
+    $P{StartDate}.getYear() + 1900, 
+    $P{StartDate}.getMonth(), 
+    $P{StartDate}.getDate(), 
+    0, 0, 0
+).getTime()]]></defaultValueExpression>
+	</parameter>
+	<parameter name="AdjustedEndDate" class="java.util.Date" isForPrompting="false">
+		<defaultValueExpression><![CDATA[new java.util.GregorianCalendar(
+    $P{EndDate}.getYear() + 1900, 
+    $P{EndDate}.getMonth(), 
+    $P{EndDate}.getDate(), 
+    23, 59, 59
+).getTime()]]></defaultValueExpression>
+	</parameter>
+	<parameter name="Branch" class="java.lang.String"/>
+	<parameter name="Branch_1" class="java.lang.String" isForPrompting="false">
+		<defaultValueExpression><![CDATA[$P{Branch}.equals(null) || $P{Branch}.equals("") ?"{'$ne': 'Branch'}": "{'$in': [$P!{Branch}]}"]]></defaultValueExpression>
+	</parameter>
+	<parameter name="Region" class="java.lang.String"/>
+	<parameter name="Region_1" class="java.lang.String" isForPrompting="false">
+		<defaultValueExpression><![CDATA[$P{Region}.equals(null) || $P{Region}.equals("") ?"{'$ne': 'Region'}": "{'$in': [$P!{Region}]}"]]></defaultValueExpression>
+	</parameter>
+	<parameter name="AccountType" class="java.lang.String"/>
+	<parameter name="AccountType_1" class="java.lang.String" isForPrompting="false">
+		<defaultValueExpression><![CDATA[$P{AccountType}.equals(null) || $P{AccountType}.equals("") ?"{'$ne': 'AccountType'}": "{'$in': [$P!{AccountType}]}"]]></defaultValueExpression>
+	</parameter>
+	<queryString language="MongoDbQuery">
+		<![CDATA[{
+  "runCommand": {
+    "aggregate": "Edith-DOABPL-Workflows",
+    "pipeline":	[
+        {
+            "$match" : {
+                "Status" : NumberInt(1)
+            }
+        },
+        {
+            "$addFields" : {
+                "CreationDateTime" : {
+                    "$toDate" : "$CreationDateTime"
+                },
+                "LastUpdateDateTime" : {
+                    "$toDate" : "$LastUpdateDateTime"
+                },
+                "AccountTypeCode" : {
+                    "$arrayElemAt" : [
+                        "$GridFields.ABPL37.ABPL40",
+                        0.0
+                    ]
+                },
+                "BranchCode" : {
+                    "$arrayElemAt" : [
+                        "$GridFields.ABPL37.ABPL26",
+                        0.0
+                    ]
+                },
+                "RegionCode" : {
+                    "$arrayElemAt" : [
+                        "$GridFields.ABPL37.ABPL110",
+                        0.0
+                    ]
+                },
+            }
+        }, 
+	{
+		"$match" : {
+			"$and" : [
+				{'LastUpdateDateTime' : { '$gte' : $P{AdjustedStartDate},  '$lte' :$P{AdjustedEndDate}}},      
+				{'BranchCode' : $P!{Branch_1}},
+				{'RegionCode' : $P!{Region_1}},
+				{'AccountTypeCode' : $P!{AccountType_1}},
+			]
+		}
+	},
+        {
+            "$lookup" : {
+                "from" : "Quantum-ABPL1S",
+                "localField" : "GridFields.ABPL37.ABPL26",
+                "foreignField" : "Code",
+                "as" : "Branch"
+            }
+        }, 
+        {
+            "$set" : {
+                "Date" : "$LastUpdateDateTime",
+                "Week" : {
+                    "$week" : "$LastUpdateDateTime"
+                },
+                "Month" : {
+                    "$arrayElemAt" : [
+                        [
+                            "",
+                            "January",
+                            "February",
+                            "March",
+                            "April",
+                            "May",
+                            "June",
+                            "July",
+                            "August",
+                            "September",
+                            "October",
+                            "November",
+                            "December"
+                        ],
+                        {
+                            "$month" : "$LastUpdateDateTime"
+                        }
+                    ]
+                },
+                "Quarter" : {
+                    "$concat" : [
+                        "Q",
+                        {
+                            "$toString" : {
+                                "$ceil" : {
+                                    "$divide" : [
+                                        {
+                                            "$month" : "$LastUpdateDateTime"
+                                        },
+                                        3.0
+                                    ]
+                                }
+                            }
+                        }
+                    ]
+                },
+                "Year" : {
+                    "$year" : "$LastUpdateDateTime"
+                }
+            }
+        }, 
+        {
+            "$lookup" : {
+                "from" : "Quantum-ABPL40S",
+                "localField" : "GridFields.ABPL37.ABPL40",
+                "foreignField" : "Code",
+                "as" : "AccountType"
+            }
+        }, 
+        {
+            "$project" : {
+                "AccountType" : {
+                    "$arrayElemAt" : [
+                        "$AccountType.Name",
+                        0.0
+                    ]
+                },
+                "Branch" : {
+                    "$arrayElemAt" : [
+                        "$Branch.Name",
+                        0.0
+                    ]
+                },
+                "Region" : {
+                    "$arrayElemAt" : [
+                        "$GridFields.ABPL37.ABPL110",
+                        0.0
+                    ]
+                },
+                "LastUpdateDateTime" : 1.0,
+                "CreationDateTime" : 1.0,
+                "Date" : 1.0,
+                "Week" : 1.0,
+                "Month" : 1.0,
+                "Quarter" : 1.0,
+                "Year" : 1.0
+            }
+        },
+        {
+            "$group" : {
+                "_id" : {
+                    "Branch" : "$Branch",
+                    "Region" : "$Region",
+                    "AccountType" : "$AccountType",
+                    "Week" : "$Week",
+                    "Month" : "$Month",
+                    "Quarter" : "$Quarter",
+                    "Year" : "$Year",
+                },
+                "count" : {
+                    "$sum" : 1.0
+                },
+                "LastUpdateDateTime" : {
+                    "$max" : "$LastUpdateDateTime"
+                }
+            }
+        },
+        {
+            "$project" : {
+                "_id" : 0.0,
+                "Branch" : "$_id.Branch",
+                "Region" : "$_id.Region",
+                "AccountType" : "$_id.AccountType",
+                "Month" : "$_id.Month",
+                "Week" : "$_id.Week",
+                "Quarter" : "$_id.Quarter",
+                "Year" : "$_id.Year",
+                "count" : {
+                    "$toInt" : "$count"
+                },
+                "LastUpdateDateTime" : 1.0
+            }
+        },
+{
+  "$sort": {
+    "count": -1.0,
+    "Date": -1.0
+  }
+}
+    ]
+  }
+}]]>
+	</queryString>
+	<background>
+		<band splitType="Stretch"/>
+	</background>
+	<title>
+		<band height="80" splitType="Stretch">
+			<staticText>
+				<reportElement x="-20" y="-20" width="870" height="40" uuid="6be2efed-2189-4646-b244-1c7b4e63906d"/>
+				<textElement textAlignment="Center" verticalAlignment="Middle">
+					<font size="14" isBold="true"/>
+				</textElement>
+				<text><![CDATA[ABPL Accounts Successfully Opened Report]]></text>
+			</staticText>
+			<componentElement>
+				<reportElement x="-19" y="20" width="869" height="60" uuid="36260229-e97e-400e-b29a-2c349ca27646">
+					<property name="com.jaspersoft.studio.layout" value="com.jaspersoft.studio.editor.layout.VerticalRowLayout"/>
+					<property name="com.jaspersoft.studio.table.style.table_header" value="Table_TH"/>
+					<property name="com.jaspersoft.studio.table.style.column_header" value="Table_CH"/>
+					<property name="com.jaspersoft.studio.table.style.detail" value="Table_TD"/>
+				</reportElement>
+				<jr:table xmlns:jr="http://jasperreports.sourceforge.net/jasperreports/components" xsi:schemaLocation="http://jasperreports.sourceforge.net/jasperreports/components http://jasperreports.sourceforge.net/xsd/components.xsd">
+					<datasetRun subDataset="Dataset1" uuid="1444be54-28a9-402e-a56e-0b80e0777514">
+						<datasetParameter name="StartDate">
+							<datasetParameterExpression><![CDATA[$P{StartDate}]]></datasetParameterExpression>
+						</datasetParameter>
+						<datasetParameter name="EndDate">
+							<datasetParameterExpression><![CDATA[$P{EndDate}]]></datasetParameterExpression>
+						</datasetParameter>
+						<datasetParameter name="AdjustedStartDate">
+							<datasetParameterExpression><![CDATA[$P{AdjustedStartDate}]]></datasetParameterExpression>
+						</datasetParameter>
+						<datasetParameter name="AdjustedEndDate">
+							<datasetParameterExpression><![CDATA[$P{AdjustedEndDate}]]></datasetParameterExpression>
+						</datasetParameter>
+						<datasetParameter name="Region">
+							<datasetParameterExpression><![CDATA[$P{Region}]]></datasetParameterExpression>
+						</datasetParameter>
+						<datasetParameter name="AccountType">
+							<datasetParameterExpression><![CDATA[$P{AccountType}]]></datasetParameterExpression>
+						</datasetParameter>
+						<datasetParameter name="Branch">
+							<datasetParameterExpression><![CDATA[$P{Branch}]]></datasetParameterExpression>
+						</datasetParameter>
+						<connectionExpression><![CDATA[$P{REPORT_CONNECTION}]]></connectionExpression>
+					</datasetRun>
+					<jr:column width="130" uuid="856c258f-7314-4cc7-979c-afe20e01f2e0">
+						<property name="com.jaspersoft.studio.components.table.model.column.name" value="Column1"/>
+						<jr:columnHeader style="Table_CH" height="30" rowSpan="1">
+							<property name="com.jaspersoft.studio.unit.width" value="px"/>
+							<staticText>
+								<reportElement x="0" y="0" width="130" height="30" uuid="5af85144-4f94-452e-9588-1a2657e67916"/>
+								<textElement textAlignment="Center" verticalAlignment="Middle">
+									<font isBold="true"/>
+									<paragraph leftIndent="3"/>
+								</textElement>
+								<text><![CDATA[Date]]></text>
+							</staticText>
+						</jr:columnHeader>
+						<jr:detailCell style="Table_TD" height="30">
+							<textField textAdjust="StretchHeight" isBlankWhenNull="true">
+								<reportElement x="0" y="0" width="130" height="30" uuid="b245b1c5-22a9-4453-bf56-e04e4c277cbc">
+									<property name="com.jaspersoft.studio.unit.leftIndent" value="px"/>
+								</reportElement>
+								<textElement textAlignment="Center" verticalAlignment="Middle">
+									<paragraph leftIndent="3"/>
+								</textElement>
+								<textFieldExpression><![CDATA[new java.text.SimpleDateFormat("MMM-yyyy").format($F{LastUpdateDateTime})]]></textFieldExpression>
+							</textField>
+						</jr:detailCell>
+					</jr:column>
+					<jr:column width="80" uuid="85b6ae84-cff9-44f7-b3fa-e2a405b5348a">
+						<property name="com.jaspersoft.studio.components.table.model.column.name" value="Column2"/>
+						<jr:columnHeader style="Table_CH" height="30" rowSpan="1">
+							<property name="com.jaspersoft.studio.unit.width" value="px"/>
+							<staticText>
+								<reportElement x="0" y="0" width="80" height="30" uuid="41d785f5-18de-45ea-9c84-ec22771c9930"/>
+								<textElement textAlignment="Center" verticalAlignment="Middle">
+									<font isBold="true"/>
+									<paragraph leftIndent="3"/>
+								</textElement>
+								<text><![CDATA[Week]]></text>
+							</staticText>
+						</jr:columnHeader>
+						<jr:detailCell style="Table_TD" height="30">
+							<textField textAdjust="StretchHeight" isBlankWhenNull="true">
+								<reportElement x="0" y="0" width="80" height="30" uuid="457c426b-8944-40c4-8d16-96c91b7d5be7">
+									<property name="com.jaspersoft.studio.unit.leftIndent" value="px"/>
+								</reportElement>
+								<textElement textAlignment="Center" verticalAlignment="Middle">
+									<paragraph leftIndent="3"/>
+								</textElement>
+								<textFieldExpression><![CDATA[$F{Week}]]></textFieldExpression>
+							</textField>
+						</jr:detailCell>
+					</jr:column>
+					<jr:column width="80" uuid="a2b525ef-c0b2-416d-aa44-de1816f3ea09">
+						<property name="com.jaspersoft.studio.components.table.model.column.name" value="Column3"/>
+						<jr:columnHeader style="Table_CH" height="30" rowSpan="1">
+							<property name="com.jaspersoft.studio.unit.width" value="px"/>
+							<staticText>
+								<reportElement x="0" y="0" width="80" height="30" uuid="f128b886-545d-484d-adb4-e4500372b165">
+									<property name="com.jaspersoft.studio.unit.width" value="pixel"/>
+								</reportElement>
+								<textElement textAlignment="Center" verticalAlignment="Middle">
+									<font isBold="true"/>
+									<paragraph leftIndent="3"/>
+								</textElement>
+								<text><![CDATA[Month]]></text>
+							</staticText>
+						</jr:columnHeader>
+						<jr:detailCell style="Table_TD" height="30">
+							<textField textAdjust="StretchHeight" isBlankWhenNull="true">
+								<reportElement x="0" y="0" width="80" height="30" uuid="d794d3f1-89ad-4919-b4a7-97598fe61ee8">
+									<property name="com.jaspersoft.studio.unit.leftIndent" value="px"/>
+								</reportElement>
+								<textElement textAlignment="Center" verticalAlignment="Middle">
+									<paragraph leftIndent="3"/>
+								</textElement>
+								<textFieldExpression><![CDATA[$F{Month}]]></textFieldExpression>
+							</textField>
+						</jr:detailCell>
+					</jr:column>
+					<jr:column width="90" uuid="b765b0cc-9bf9-4a2b-b7d0-a1098efd1148">
+						<property name="com.jaspersoft.studio.components.table.model.column.name" value="Column4"/>
+						<jr:columnHeader style="Table_CH" height="30" rowSpan="1">
+							<staticText>
+								<reportElement x="0" y="0" width="90" height="30" uuid="1eb4eda9-42fa-4235-b1b3-907eb49c0929">
+									<property name="com.jaspersoft.studio.unit.width" value="pixel"/>
+								</reportElement>
+								<textElement textAlignment="Center" verticalAlignment="Middle">
+									<font isBold="true"/>
+									<paragraph leftIndent="3"/>
+								</textElement>
+								<text><![CDATA[Quarter]]></text>
+							</staticText>
+						</jr:columnHeader>
+						<jr:detailCell style="Table_TD" height="30">
+							<textField textAdjust="StretchHeight" isBlankWhenNull="true">
+								<reportElement x="0" y="0" width="90" height="30" uuid="4894c262-f693-4d63-958e-3a53a8f4b294">
+									<property name="com.jaspersoft.studio.unit.leftIndent" value="px"/>
+								</reportElement>
+								<textElement textAlignment="Center" verticalAlignment="Middle">
+									<paragraph leftIndent="3"/>
+								</textElement>
+								<textFieldExpression><![CDATA[$F{Quarter}]]></textFieldExpression>
+							</textField>
+						</jr:detailCell>
+					</jr:column>
+					<jr:column width="80" uuid="7c0999c0-6265-490d-8911-7eaff100af8d">
+						<property name="com.jaspersoft.studio.components.table.model.column.name" value="Column5"/>
+						<jr:columnHeader style="Table_CH" height="30" rowSpan="1">
+							<property name="com.jaspersoft.studio.unit.width" value="px"/>
+							<staticText>
+								<reportElement x="0" y="0" width="80" height="30" uuid="c7ae8543-7c52-4ac1-b0af-1b6ba87450a3"/>
+								<textElement textAlignment="Center" verticalAlignment="Middle">
+									<font isBold="true"/>
+									<paragraph leftIndent="3"/>
+								</textElement>
+								<text><![CDATA[Year]]></text>
+							</staticText>
+						</jr:columnHeader>
+						<jr:detailCell style="Table_TD" height="30">
+							<textField textAdjust="StretchHeight" isBlankWhenNull="true">
+								<reportElement x="0" y="0" width="80" height="30" uuid="6d775acd-e1a3-4591-9de6-e8f7fca25e35">
+									<property name="com.jaspersoft.studio.unit.leftIndent" value="px"/>
+								</reportElement>
+								<textElement textAlignment="Center" verticalAlignment="Middle">
+									<paragraph leftIndent="3"/>
+								</textElement>
+								<textFieldExpression><![CDATA[$F{Year}]]></textFieldExpression>
+							</textField>
+						</jr:detailCell>
+					</jr:column>
+					<jr:column width="90" uuid="0db7dec8-6543-4ce2-9ea4-d7b07f663c43">
+						<property name="com.jaspersoft.studio.components.table.model.column.name" value="Column6"/>
+						<jr:columnHeader style="Table_CH" height="30" rowSpan="1">
+							<staticText>
+								<reportElement x="0" y="0" width="90" height="30" uuid="3ee05ea8-65a3-439b-943d-a6f4df2c62ab"/>
+								<textElement textAlignment="Center" verticalAlignment="Middle">
+									<font isBold="true"/>
+									<paragraph leftIndent="3"/>
+								</textElement>
+								<text><![CDATA[Account Opened (Count)]]></text>
+							</staticText>
+						</jr:columnHeader>
+						<jr:detailCell style="Table_TD" height="30">
+							<textField textAdjust="StretchHeight" isBlankWhenNull="true">
+								<reportElement x="0" y="0" width="90" height="30" uuid="69b15ca4-99d6-4e66-ace1-aa3cfb71e190">
+									<property name="com.jaspersoft.studio.unit.leftIndent" value="px"/>
+								</reportElement>
+								<textElement textAlignment="Center" verticalAlignment="Middle">
+									<paragraph leftIndent="3"/>
+								</textElement>
+								<textFieldExpression><![CDATA[$F{count}]]></textFieldExpression>
+							</textField>
+						</jr:detailCell>
+					</jr:column>
+					<jr:column width="189" uuid="ad6827e0-ba71-42bd-8aa6-2e0addc79bb7">
+						<property name="com.jaspersoft.studio.components.table.model.column.name" value="Column7"/>
+						<jr:columnHeader style="Table_CH" height="30" rowSpan="1">
+							<staticText>
+								<reportElement x="0" y="0" width="189" height="30" uuid="1d2dcd24-d790-42d1-9841-90efe2c6bb46"/>
+								<textElement textAlignment="Center" verticalAlignment="Middle">
+									<font isBold="true"/>
+									<paragraph leftIndent="3"/>
+								</textElement>
+								<text><![CDATA[Branch]]></text>
+							</staticText>
+						</jr:columnHeader>
+						<jr:detailCell style="Table_TD" height="30">
+							<textField textAdjust="StretchHeight" isBlankWhenNull="true">
+								<reportElement x="0" y="0" width="189" height="30" uuid="8ec0dae6-ae1e-45ce-9397-c21fb6d2b7a7">
+									<property name="com.jaspersoft.studio.unit.leftIndent" value="px"/>
+								</reportElement>
+								<textElement textAlignment="Center" verticalAlignment="Middle">
+									<paragraph leftIndent="3"/>
+								</textElement>
+								<textFieldExpression><![CDATA[$F{Branch}]]></textFieldExpression>
+							</textField>
+						</jr:detailCell>
+					</jr:column>
+					<jr:column width="130" uuid="e0b998bf-6dd5-41a4-9184-ead4a2e3d7c9">
+						<property name="com.jaspersoft.studio.components.table.model.column.name" value="Column8"/>
+						<jr:columnHeader style="Table_CH" height="30" rowSpan="1">
+							<staticText>
+								<reportElement x="0" y="0" width="130" height="30" uuid="5f70fc5a-087c-4dd9-8625-9332166264b0"/>
+								<textElement textAlignment="Center" verticalAlignment="Middle">
+									<font isBold="true"/>
+									<paragraph leftIndent="3"/>
+								</textElement>
+								<text><![CDATA[Account Type]]></text>
+							</staticText>
+						</jr:columnHeader>
+						<jr:detailCell style="Table_TD" height="30">
+							<textField textAdjust="StretchHeight" isBlankWhenNull="true">
+								<reportElement x="0" y="0" width="130" height="30" uuid="19868460-7e02-4a22-ae66-17c7aaacb14f">
+									<property name="com.jaspersoft.studio.unit.leftIndent" value="px"/>
+								</reportElement>
+								<textElement textAlignment="Center" verticalAlignment="Middle">
+									<paragraph leftIndent="3"/>
+								</textElement>
+								<textFieldExpression><![CDATA[$F{AccountType}]]></textFieldExpression>
+							</textField>
+						</jr:detailCell>
+					</jr:column>
+				</jr:table>
+			</componentElement>
+		</band>
+	</title>
+	<pageHeader>
+		<band splitType="Stretch"/>
+	</pageHeader>
+	<columnFooter>
+		<band splitType="Stretch"/>
+	</columnFooter>
+	<pageFooter>
+		<band splitType="Stretch"/>
+	</pageFooter>
+	<summary>
+		<band splitType="Stretch"/>
+	</summary>
+</jasperReport>

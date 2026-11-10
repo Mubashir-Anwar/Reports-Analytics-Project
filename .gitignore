@@ -1,0 +1,15 @@
+__pycache__/
+.venv/
+.env
+data/private_secrets.json
+data/private_secrets.json.tmp
+data/audit/
+*.pyc
+frontend/node_modules/
+.pytest_cache/
+
+# user data (bank/internal names) - keep out of public repo
+data/connections.json
+data/folders.json
+data/reports/
+data/audit/
