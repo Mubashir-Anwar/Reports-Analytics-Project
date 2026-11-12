@@ -12,6 +12,10 @@ async function call(path, { method = 'GET', body, raw = false } = {}) {
   if (!response.ok) {
     let detail = '';
     try { detail = (await response.json()).detail || ''; } catch { /* not JSON */ }
+    // A bare "Not Found" means the route itself is missing: the running server is an older version.
+    if (response.status === 404 && (!detail || detail === 'Not Found')) {
+      detail = 'The server does not have this feature yet (HTTP 404): it is still running an older version. Restart the reporting service (uvicorn) and reload this page.';
+    }
     const error = new Error(typeof detail === 'string' && detail ? detail : `Request failed (HTTP ${response.status})`);
     error.status = response.status;
     if (response.status === 401 && path !== '/api/server/login' && path !== '/api/server/me') onSignedOut();
