@@ -1,12 +1,19 @@
-import { useCallback, useEffect, useReducer, useState } from 'react';
+import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react';
 import { api, hasToken, setToken } from './api.js';
 import Canvas from './Canvas.jsx';
+import ContextMenu from './ContextMenu.jsx';
+import ExpressionEditor from './ExpressionEditor.jsx';
+import { makeActions } from './outlineActions.js';
 import Preview from './Preview.jsx';
 import Properties from './Properties.jsx';
 import SetupForm from './SetupForm.jsx';
-import { AdaptersPanel, Outline, Palette, ServerPanel } from './panels.jsx';
-import { emptyDesign, findElement, getBand, setBand } from './designModel.js';
-import { blankReport, initialState, reducer } from './store.js';
+import { AdaptersPanel, Outline, Palette, ServerPanel, WorkspacePanel, publishState } from './panels.jsx';
+import { ZOOM_LIMITS, bandWidth, clampZoom, emptyDesign, findElement, getBand, setBand } from './designModel.js';
+import ComponentWizard from './ComponentWizard.jsx';
+import PublishDialog from './PublishDialog.jsx';
+import { MRD_ACCEPT, buildMrd, downloadText, fileKind, parseMrd } from './mrd.js';
+import { blankReport, initialState, reducer, reportPayload } from './store.js';
+import { readClipboard } from './arrange.js';
 
 const DEMO_COLUMNS = ['Identifier', 'Branch', 'Name', 'Amount', 'LastUpdateDateTime'];
 
@@ -27,74 +34,243 @@ export default function App() {
   const [ready, setReady] = useState(false);
   const [needToken, setNeedToken] = useState(false);
   const [tab, setTab] = useState('setup');
-  const [leftTab, setLeftTab] = useState('server');
+  const [leftTab, setLeftTab] = useState('workspace');
+  const [publishing, setPublishing] = useState(null); // { folders, folder, replace, busy }
   const [zoom, setZoom] = useState(1);
-  const [message, setMessage] = useState({ text: 'Tayyar', kind: '' });
+  const [message, setMessage] = useState({ text: 'Ready', kind: '' });
   const [refreshKey, setRefreshKey] = useState(0);
   const [importInfo, setImportInfo] = useState(null);
 
   const notify = useCallback((text, kind = '') => setMessage({ text, kind }), []);
 
+  // Canvas view options (grid, snap, smart guides, rulers) are kept per browser, like Studio's preferences.
+  const [canvasPrefs, setCanvasPrefs] = useState(() => {
+    const defaults = { showGrid: true, snapGrid: false, gridSize: 10, smartGuides: true, showRulers: true };
+    try { return { ...defaults, ...JSON.parse(localStorage.getItem('reporting-designer-canvas') || '{}') }; } catch { return defaults; }
+  });
+  useEffect(() => { try { localStorage.setItem('reporting-designer-canvas', JSON.stringify(canvasPrefs)); } catch { /* ignore */ } }, [canvasPrefs]);
+
+  // Right-click menus (Outline and canvas) read the newest state through this ref.
+  const stateRef = useRef(state);
+  stateRef.current = state;
+  const actions = useMemo(() => makeActions({ get: () => stateRef.current, dispatch, notify }), [notify]);
+  const [menu, setMenu] = useState(null);
+  const openMenu = useCallback((event, items) => setMenu({ x: event.clientX, y: event.clientY, items }), []);
+  const closeMenu = useCallback(() => setMenu(null), []);
+
+  // Palette → Percentage: ask for the field, then add "<field>_TOTAL" (Sum) and a Text Field field / total
+  const [percent, setPercent] = useState(null); // { bandKey, element, field }
+  const onPercentage = useCallback((bandKey, element) => setPercent({ bandKey, element, field: '' }), []);
+  const confirmPercentage = () => {
+    const { bandKey, element, field } = percent;
+    const base = `${field.replace(/[^A-Za-z0-9_]/g, '_').replace(/^([^A-Za-z_])/, '_$1').slice(0, 50)}_TOTAL`;
+    const existing = state.design.variables.find((v) => v.field === field && v.calculation === 'Sum' && v.resetType === 'Report');
+    const taken = new Set([...state.design.variables.map((v) => v.name), 'PAGE_NUMBER', 'PAGE_COUNT', 'REPORT_COUNT', 'CURRENT_DATE']);
+    let name = existing ? existing.name : base;
+    for (let n = 2; !existing && taken.has(name); n += 1) name = `${base}${n}`;
+    const textField = {
+      ...element, type: 'textField', expression: `=$F{${field}} / $V{${name}}`, pattern: '0.00%', blankWhenNull: true,
+      evaluationTime: 'Auto', align: 'right',
+    };
+    dispatch({
+      type: 'DESIGN',
+      update: (d) => {
+        const band = getBand(d, bandKey);
+        const variables = existing ? d.variables : [...d.variables, { name, calculation: 'Sum', field, resetType: 'Report', resetGroup: '' }];
+        return setBand({ ...d, variables }, bandKey, { ...band, height: Math.max(band.height, Math.ceil(textField.y + textField.height)), elements: [...band.elements, textField] });
+      },
+    });
+    dispatch({ type: 'SELECT', selection: { kind: 'element', id: textField.id } });
+    notify(`Percentage of ${field} added${existing ? '' : ` with the variable ${name} (report total)`}`, 'ok');
+    setPercent(null);
+  };
+
+  // Table / Crosstab / Subreport wizards (open when the component is dropped on a band)
+  const [wizard, setWizard] = useState(null); // { bandKey, element }
+  const onWizard = useCallback((bandKey, element) => setWizard({ bandKey, element }), []);
+  const finishWizard = (element) => {
+    const { bandKey } = wizard;
+    dispatch({
+      type: 'DESIGN',
+      update: (d) => {
+        const band = getBand(d, bandKey);
+        return setBand(d, bandKey, { ...band, height: Math.max(band.height, Math.ceil(element.y + element.height)), elements: [...band.elements, element] });
+      },
+    });
+    dispatch({ type: 'SELECT', selection: { kind: 'element', id: element.id } });
+    notify(`${element.type === 'table' ? 'Table' : element.type === 'crosstab' ? 'Crosstab' : 'Subreport'} added — fine-tune it in Properties; Preview shows it with the records`, 'ok');
+    setWizard(null);
+  };
+
+  // Expression Editor (double-click a Text Field / Static Text on the canvas or in the Outline)
+  const [exprId, setExprId] = useState(null);
+  const editExpression = useCallback((id) => { dispatch({ type: 'SELECT', selection: { kind: 'element', id } }); setExprId(id); }, []);
+  const saveExpression = (values) => {
+    const found = findElement(state.design, exprId);
+    if (found) {
+      dispatch({
+        type: 'DESIGN',
+        update: (d) => {
+          const band = getBand(d, found.bandKey);
+          return setBand(d, found.bandKey, {
+            ...band,
+            elements: band.elements.map((el) => {
+              if (el.id !== exprId) return el;
+              const next = { ...el, ...values };
+              if (values.type === 'textField') delete next.text;
+              return next;
+            }),
+          });
+        },
+      });
+      if (values.type === 'textField') notify('The Static Text now shows data, so it became a Text Field', 'ok');
+    }
+    setExprId(null);
+  };
+
   const connect = useCallback(async () => {
     if (!hasToken()) await api.bootstrap().catch(() => false);
-    try { await api.folders(); setNeedToken(false); setReady(true); notify('Server se connected', 'ok'); }
-    catch (error) { setNeedToken(true); setReady(false); notify(error.status === 401 ? 'Admin token chahiye' : error.message, 'error'); }
+    try { await api.folders(); setNeedToken(false); setReady(true); notify('Connected to the server', 'ok'); }
+    catch (error) { setNeedToken(true); setReady(false); notify(error.status === 401 ? 'An admin or designer token is needed' : error.message, 'error'); }
   }, [notify]);
   useEffect(() => { connect(); }, [connect]);
 
-  const open = (item) => {
-    if (state.dirty && !window.confirm('Unsaved changes hain. Chhod kar nayi report kholni hai?')) return;
-    const { design, layout, ...rest } = item; // eslint-disable-line no-unused-vars
+  const load = (item, status) => {
+    const { design, layout, workspace, ...rest } = item; // eslint-disable-line no-unused-vars
     dispatch({
       type: 'LOAD',
       report: {
-        isNew: false, id: item.id, title: item.title, description: item.description || '', folder: item.folder || 'General',
+        isNew: false, id: item.id, title: item.title || item.id, description: item.description || '', folder: item.folder || 'General',
         connectionId: item.connectionId || 'default', collection: item.collection || '',
         queryLanguage: item.queryLanguage || 'mongosh', querySource: item.querySource || '',
-        parameters: item.parameters || [], columns: item.columns || [], extra: rest,
+        parameters: item.parameters || [], columns: item.columns || [], extra: rest, status: status || workspace || null,
       },
       design: design || emptyDesign(),
     });
     setTab(design ? 'design' : 'setup');
   };
 
-  const importJrxml = async (file) => {
-    if (!file) return;
-    if (state.dirty && !window.confirm('Unsaved changes hain. JRXML import karne se woh chali jayengi. Jaari rakhein?')) return;
+  /** Open a report from the designer's workspace. */
+  const open = async (summary) => {
+    if (state.dirty && !window.confirm('You have unsaved changes. Discard them and open another report?')) return;
+    try { load(await api.workspaceReport(summary.id)); notify(`Opened ${summary.id} from your workspace`, 'ok'); }
+    catch (error) { notify(`Could not open the report: ${error.message}`, 'error'); }
+  };
+
+  /** Open a published report: its workspace copy if there is one, else a new workspace copy of the server version. */
+  const openFromServer = async (item) => {
+    if (state.dirty && !window.confirm('You have unsaved changes. Discard them and open another report?')) return;
     try {
-      const result = await api.importJrxml(await file.text());
+      const workspaceCopy = await api.workspaceReport(item.id).catch((error) => { if (error.status === 404) return null; throw error; });
+      if (workspaceCopy) {
+        load(workspaceCopy);
+        setLeftTab('workspace');
+        notify(`${item.id} is already in your workspace — opened that copy. Publish it to update the server.`, 'ok');
+        return;
+      }
+      const published = await api.report(item.id);
+      const saved = await api.saveWorkspace({ ...published, design: published.design }, true);
+      load(published, saved.report);
+      setRefreshKey((n) => n + 1);
+      setLeftTab('workspace');
+      notify(`Copied ${item.id} from the server into your workspace`, 'ok');
+    } catch (error) { notify(`Could not open the server report: ${error.message}`, 'error'); }
+  };
+
+  /** Open file…: a .mrd report file, or a Jaspersoft Studio .jrxml (converted). Nothing is saved until Save. */
+  const openFile = async (file) => {
+    if (!file) return;
+    const text = await file.text();
+    const kind = fileKind(text);
+    if (kind === 'jrxml') { importJrxml(text, file.name); return; }
+    if (kind !== 'mrd') { notify(`${file.name} is not a .mrd or .jrxml report file`, 'error'); return; }
+    if (state.dirty && !window.confirm('You have unsaved changes. Opening a file will discard them. Continue?')) return;
+    try {
+      const definition = parseMrd(text);
+      const inWorkspace = await api.workspaceReport(definition.id).then(() => true).catch((error) => { if (error.status === 404) return false; throw error; });
+      if (inWorkspace && !window.confirm(`${definition.id} is already in your workspace. Open the file anyway? When you Save, the file's version replaces the workspace copy.`)) return;
+      load(definition);
+      dispatch({ type: 'REPORT', patch: { isNew: !inWorkspace, status: null } });
+      notify(`Opened ${file.name} — ${inWorkspace ? 'Save replaces your workspace copy' : 'Save to add it to your workspace'}`, 'ok');
+    } catch (error) { notify(`Could not open ${file.name}: ${error.message}`, 'error'); }
+  };
+
+  /** Save as file: the whole report (query, parameters, adapter, design, images) as one .mrd file. */
+  const saveFile = () => {
+    const payload = reportPayload(state);
+    downloadText(buildMrd(payload), `${payload.id || 'report'}.mrd`);
+    notify(`Downloaded ${payload.id || 'report'}.mrd — open it again with “Open file…”, or upload it on /server (Add Resource)`, 'ok');
+  };
+
+  // /designer?open=<ID> (from /server → "Open in Designer"): open that published report once connected
+  useEffect(() => {
+    if (!ready) return;
+    const id = new URLSearchParams(window.location.search).get('open');
+    if (!id) return;
+    window.history.replaceState(null, '', window.location.pathname);
+    openFromServer({ id });
+  }, [ready]); // eslint-disable-line react-hooks/exhaustive-deps -- only once, right after connecting
+
+  const importJrxml = async (text, name) => {
+    if (state.dirty && !window.confirm('You have unsaved changes. Importing a JRXML will discard them. Continue?')) return;
+    const file = { name };
+    try {
+      const result = await api.importJrxml(text);
       dispatch({ type: 'LOAD', report: { ...blankReport(), ...result.report, extra: {} }, design: result.design });
       dispatch({ type: 'REPORT', patch: {} });
       setImportInfo({ name: file.name, warnings: result.warnings, hints: result.hints, columns: result.report.columns.length, parameters: result.report.parameters.length });
       setTab('design');
-      notify(`JRXML import hui: ${result.report.id} — review kar ke Save karein`, 'ok');
-    } catch (error) { notify(`JRXML import nahi hui: ${error.message}`, 'error'); }
+      notify(`JRXML imported: ${result.report.id} — review it, then Save`, 'ok');
+    } catch (error) { notify(`JRXML import failed: ${error.message}`, 'error'); }
   };
 
+  /** Save inside the designer workspace. The server is not changed; that needs "Publish to server". */
   const save = async () => {
-    const { report, design } = state;
-    if (!report.id || !report.collection || !report.querySource.trim() || !report.columns.length) {
-      notify('Save ke liye Report ID, collection, query aur fields lazmi hain (Setup tab)', 'error');
+    const { report } = state;
+    if (!report.id) {
+      notify('Give the report an ID first (Setup tab)', 'error');
       setTab('setup');
-      return;
+      return null;
     }
-    const base = { ...report.extra };
-    delete base.pipeline; // backend re-parses the query source
-    const payload = {
-      ...base,
-      id: report.id, title: report.title, description: report.description, folder: report.folder,
-      connectionId: report.connectionId, collection: report.collection,
-      queryLanguage: report.queryLanguage, querySource: report.querySource,
-      parameters: report.parameters, columns: report.columns,
-      formats: base.formats || ['csv', 'xlsx', 'pdf'], defaultFormat: base.defaultFormat || 'pdf',
-      design,
-    };
     try {
-      await api.saveReport(payload, report.isNew);
-      dispatch({ type: 'SAVED', id: report.id });
+      const result = await api.saveWorkspace(reportPayload(state), report.isNew);
+      dispatch({ type: 'SAVED', id: report.id, status: result.report });
       setRefreshKey((n) => n + 1);
-      notify(`Saved ✓  —  /generate/${report.id}.pdf`, 'ok');
-    } catch (error) { notify(`Save nahi hui: ${error.message}`, 'error'); }
+      const where = result.report.onServer ? 'The server still has the last published version.' : 'Not on the server yet.';
+      notify(result.readyToPublish
+        ? `Saved in your workspace ✓  ${where} Use “Publish to server” to update it.`
+        : `Saved in your workspace as a draft. Before publishing: ${result.problem}`, result.readyToPublish ? 'ok' : '');
+      return result;
+    } catch (error) { notify(`Save failed: ${error.message}`, 'error'); return null; }
+  };
+
+  /** Publish: save to the workspace if needed, then copy the report into a server folder. */
+  const startPublish = async () => {
+    let saved = null;
+    if (state.dirty || state.report.isNew) {
+      saved = await save();
+      if (!saved) return;
+      if (!saved.readyToPublish) { setTab('setup'); return; }
+    }
+    try {
+      const repo = await api.folders();
+      const status = saved?.report || state.report.status || {}; // the fresh save knows whether it is on the server
+      setPublishing({ folders: repo.folders, folder: status.publishedFolder || state.report.folder || 'General', replace: false, busy: false, onServer: Boolean(status.onServer) });
+    } catch (error) { notify(`Could not read the server folders: ${error.message}`, 'error'); }
+  };
+  const confirmPublish = async () => {
+    const { report } = state;
+    setPublishing((p) => ({ ...p, busy: true }));
+    try {
+      const result = await api.publish(report.id, { folder: publishing.folder, replace: publishing.replace });
+      dispatch({ type: 'STATUS', status: result.workspace });
+      setPublishing(null);
+      setRefreshKey((n) => n + 1);
+      notify(`Published to the server ✓  ${publishing.folder} / ${report.id}  —  /generate/${report.id}.pdf`, 'ok');
+    } catch (error) {
+      if (error.status === 409) setPublishing((p) => ({ ...p, busy: false, onServer: true, error: error.message }));
+      else { setPublishing((p) => ({ ...p, busy: false, error: error.message })); }
+    }
   };
 
   const loadDemo = () => {
@@ -110,30 +286,53 @@ export default function App() {
       const tag = (event.target.tagName || '').toLowerCase();
       const typing = ['input', 'textarea', 'select'].includes(tag);
       if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 's') { event.preventDefault(); save(); return; }
-      if (typing || tab !== 'design') return;
+      if (typing) return;
+      // Del in the Outline deletes a band, parameter, variable, calculated field or group (also outside the Design tab)
+      if (event.key === 'Delete' && ['band', 'param', 'variable', 'calc', 'group'].includes(state.selection.kind) && event.target.closest?.('.outline, .canvas-scroll')) {
+        event.preventDefault();
+        actions.deleteSelection(state.selection);
+        return;
+      }
+      if (event.key === 'Delete' && state.selection.kind === 'element' && tab !== 'design' && event.target.closest?.('.outline')) {
+        event.preventDefault();
+        actions.deleteSelection(state.selection);
+        return;
+      }
+      if (tab !== 'design') return;
+      // zoom: Ctrl + / Ctrl - / Ctrl 0 (100%)
+      if ((event.ctrlKey || event.metaKey) && ['+', '=', 'Add'].includes(event.key)) { event.preventDefault(); setZoom((z) => clampZoom(z + ZOOM_LIMITS.step)); return; }
+      if ((event.ctrlKey || event.metaKey) && ['-', '_', 'Subtract'].includes(event.key)) { event.preventDefault(); setZoom((z) => clampZoom(z - ZOOM_LIMITS.step)); return; }
+      if ((event.ctrlKey || event.metaKey) && event.key === '0') { event.preventDefault(); setZoom(1); return; }
       if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'z') { event.preventDefault(); dispatch({ type: event.shiftKey ? 'REDO' : 'UNDO' }); return; }
       if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'y') { event.preventDefault(); dispatch({ type: 'REDO' }); return; }
-      if (event.key === 'Escape') { dispatch({ type: 'TOOL', tool: null }); return; }
       const { selection, design } = state;
-      if (selection.kind !== 'element') return;
-      const found = findElement(design, selection.id);
-      if (!found) return;
-      const apply = (values, key) => dispatch({ type: 'DESIGN', key, update: (d) => { const band = getBand(d, found.bandKey); return setBand(d, found.bandKey, { ...band, elements: band.elements.map((el) => (el.id === selection.id ? { ...el, ...values } : el)) }); } });
-      if (event.key === 'Delete' || event.key === 'Backspace') {
-        event.preventDefault();
-        dispatch({ type: 'DESIGN', update: (d) => { const band = getBand(d, found.bandKey); return setBand(d, found.bandKey, { ...band, elements: band.elements.filter((el) => el.id !== selection.id) }); } });
-        dispatch({ type: 'SELECT', selection: { kind: 'band', key: found.bandKey } });
+      if (event.key === 'Escape') {
+        if (state.tool) dispatch({ type: 'TOOL', tool: null });
+        else if (selection.kind === 'element') { const found = findElement(design, selection.id); dispatch({ type: 'SELECT', selection: found ? { kind: 'band', key: found.bandKey } : { kind: 'report' } }); }
+        return;
       }
-      const step = event.shiftKey ? 10 : 1;
-      const nudge = { ArrowLeft: { x: found.element.x - step }, ArrowRight: { x: found.element.x + step }, ArrowUp: { y: found.element.y - step }, ArrowDown: { y: found.element.y + step } }[event.key];
-      if (nudge) { event.preventDefault(); apply(nudge, 'nudge'); }
+      const ctrl = event.ctrlKey || event.metaKey;
+      const key = event.key.toLowerCase();
+      // clipboard and selection shortcuts, like Jaspersoft Studio / Photoshop
+      if (ctrl && key === 'v') { event.preventDefault(); actions.paste(); return; }
+      if (ctrl && key === 'a') { event.preventDefault(); actions.selectAll(); return; }
+      if (selection.kind !== 'element' || !findElement(design, selection.id)) return;
+      if (ctrl && key === 'c') { event.preventDefault(); actions.copy(); return; }
+      if (ctrl && key === 'x') { event.preventDefault(); actions.cut(); return; }
+      if (ctrl && key === 'd') { event.preventDefault(); actions.duplicateSelected(); return; }
+      if (ctrl && key === 'l') { event.preventDefault(); actions.toggleLock(); return; }
+      if (event.key === 'Delete' || event.key === 'Backspace') { event.preventDefault(); actions.removeSelected(); return; }
+      // arrows: 1px, Shift = 10px, Ctrl = one grid step
+      const step = ctrl ? canvasPrefs.gridSize : (event.shiftKey ? 10 : 1);
+      const delta = { ArrowLeft: [-step, 0], ArrowRight: [step, 0], ArrowUp: [0, -step], ArrowDown: [0, step] }[event.key];
+      if (delta) { event.preventDefault(); actions.nudge(...delta); }
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
   });
 
-  if (needToken) return <Login hint="Local par token khud mil jata hai. Deployed server par REPORTING_ADMIN_TOKEN daalein." onDone={connect} />;
-  if (!ready) return <div className="login"><p>Server se connect ho raha hai…</p></div>;
+  if (needToken) return <Login hint="On your own computer the token is picked up automatically. On a deployed server enter REPORTING_ADMIN_TOKEN or REPORTING_DESIGNER_TOKEN." onDone={connect} />;
+  if (!ready) return <div className="login"><p>Connecting to the server…</p></div>;
 
   const { report, design, selection, tool, past, future, dirty } = state;
   return (
@@ -142,34 +341,38 @@ export default function App() {
         <a className="brand" href="/ui"><span className="brand-mark">M</span>Report Designer</a>
         <span className="doc-title">{report.title || 'Untitled'}{dirty ? ' •' : ''}</span>
         <div className="spacer" />
-        <label className="btn" title="Jaspersoft Studio .jrxml import karein">Import JRXML
-          <input type="file" accept=".jrxml,.xml,text/xml,application/xml" hidden onChange={(e) => { importJrxml(e.target.files[0]); e.target.value = ''; }} />
+        <label className="btn" title="Open a .mrd report file, or import a Jaspersoft Studio .jrxml">📂 Open file…
+          <input type="file" accept={MRD_ACCEPT} hidden onChange={(e) => { openFile(e.target.files[0]); e.target.value = ''; }} />
         </label>
-        <button className="btn" onClick={loadDemo} title="Sample fields ke saath demo design">Demo design</button>
+        <button className="btn" onClick={saveFile} title="Download this report as one .mrd file (query, parameters, data adapter, design and images)">💾 Save as file</button>
+        <button className="btn" onClick={loadDemo} title="Demo design with sample fields">Demo design</button>
         <button className="btn" disabled={!past.length} onClick={() => dispatch({ type: 'UNDO' })}>↶ Undo</button>
         <button className="btn" disabled={!future.length} onClick={() => dispatch({ type: 'REDO' })}>↷ Redo</button>
         <div className="zoom">
-          <button className="btn sm" onClick={() => setZoom((z) => Math.max(0.4, +(z - 0.1).toFixed(2)))}>−</button>
-          <span>{Math.round(zoom * 100)}%</span>
-          <button className="btn sm" onClick={() => setZoom((z) => Math.min(2.5, +(z + 0.1).toFixed(2)))}>+</button>
+          <button className="btn sm" title="Zoom out (Ctrl −, Ctrl + wheel)" onClick={() => setZoom((z) => clampZoom(z - ZOOM_LIMITS.step))}>−</button>
+          <button className="btn sm zoom-value" title="Reset to 100% (Ctrl 0)" onClick={() => setZoom(1)}>{Math.round(zoom * 100)}%</button>
+          <button className="btn sm" title="Zoom in (Ctrl +, Ctrl + wheel)" onClick={() => setZoom((z) => clampZoom(z + ZOOM_LIMITS.step))}>+</button>
         </div>
-        <button className="btn primary" onClick={save}>Save</button>
+        {(() => { const s = report.isNew ? { icon: '○', label: 'Not saved yet', cls: 'draft' } : publishState(report.status); return <span className={`pub-chip ${s.cls}`} title={s.label}>{s.icon} {report.isNew ? 'Not saved' : s.cls === 'published' ? 'Published' : s.cls === 'changed' ? 'Changed' : 'Draft'}</span>; })()}
+        <button className="btn" onClick={save} title="Save in your designer workspace (Ctrl+S). The server is not changed.">Save</button>
+        <button className="btn primary" onClick={startPublish} title="Copy this report to a folder on the report server">Publish to server ⇪</button>
       </header>
 
       <div className="workspace">
         <aside className="left">
           <div className="dock">
             <div className="dock-tabs">
-              <button className={leftTab === 'server' ? 'on' : ''} onClick={() => setLeftTab('server')}>Server</button>
+              <button className={leftTab === 'workspace' ? 'on' : ''} onClick={() => setLeftTab('workspace')} title="Reports saved inside the designer">Workspace</button>
+              <button className={leftTab === 'server' ? 'on' : ''} onClick={() => setLeftTab('server')} title="Published reports on the report server">Server</button>
               <button className={leftTab === 'adapters' ? 'on' : ''} onClick={() => setLeftTab('adapters')}>Data Adapters</button>
             </div>
-            {leftTab === 'server'
-              ? <ServerPanel report={report} onOpen={open} onNew={() => { dispatch({ type: 'NEW' }); setTab('setup'); }} notify={notify} refreshKey={refreshKey} />
-              : <AdaptersPanel report={report} dispatch={dispatch} notify={notify} />}
+            {leftTab === 'workspace' && <WorkspacePanel report={report} onOpen={open} onNew={(folder) => { if (state.dirty && !window.confirm('You have unsaved changes. Discard them?')) return; dispatch({ type: 'NEW', folder }); setTab('setup'); }} notify={notify} refreshKey={refreshKey} onChanged={() => setRefreshKey((n) => n + 1)} />}
+            {leftTab === 'server' && <ServerPanel report={report} onOpenFromServer={openFromServer} openMenu={openMenu} notify={notify} refreshKey={refreshKey} onChanged={() => setRefreshKey((n) => n + 1)} />}
+            {leftTab === 'adapters' && <AdaptersPanel notify={notify} openMenu={openMenu} refreshKey={refreshKey} onChanged={() => setRefreshKey((n) => n + 1)} />}
           </div>
           <div className="dock">
             <div className="dock-tabs"><button className="on">Outline</button></div>
-            <Outline report={report} design={design} selection={selection} dispatch={dispatch} />
+            <Outline report={report} design={design} selection={selection} dispatch={dispatch} actions={actions} openMenu={openMenu} onDetectFields={() => setTab('setup')} onEditExpression={editExpression} />
           </div>
         </aside>
 
@@ -181,26 +384,50 @@ export default function App() {
           </div>
           <div className="stage">
             {tab === 'setup' && <SetupForm state={state} dispatch={dispatch} notify={notify} onAutoLayout={() => setTab('design')} />}
-            {tab === 'design' && <Canvas design={design} selection={selection} tool={tool} zoom={zoom} dispatch={dispatch} />}
+            {tab === 'design' && <Canvas design={design} selection={selection} tool={tool} zoom={zoom} setZoom={setZoom} dispatch={dispatch} actions={actions} openMenu={openMenu} onEditExpression={editExpression} onPercentage={onPercentage} onWizard={onWizard} prefs={canvasPrefs} setPrefs={setCanvasPrefs} hasClipboard={Boolean(readClipboard()?.items?.length)} />}
             {tab === 'preview' && <Preview state={state} notify={notify} />}
           </div>
         </main>
 
         <aside className="right">
           <div className="dock"><div className="dock-tabs"><button className="on">Palette</button></div><Palette tool={tool} dispatch={dispatch} /></div>
-          <div className="dock grow"><div className="dock-tabs"><button className="on">Properties</button></div><Properties state={state} dispatch={dispatch} notify={notify} /></div>
+          <div className="dock grow"><div className="dock-tabs"><button className="on">Properties</button></div><Properties state={state} dispatch={dispatch} notify={notify} actions={actions} onEditExpression={editExpression} /></div>
         </aside>
       </div>
       <footer className={`status ${message.kind}`}>{message.text}</footer>
+      <ContextMenu menu={menu} onClose={closeMenu} />
+      {percent && (
+        <div className="modal-back" onMouseDown={(e) => e.target === e.currentTarget && setPercent(null)}>
+          <div className="modal" role="dialog" aria-label="Percentage">
+            <h3>Percentage</h3>
+            <p className="muted">Shows the field of each record as a percentage of its total over the whole report (Evaluation Time Auto, pattern 0.00%).</p>
+            <label className="modal-field">Field
+              <select autoFocus value={percent.field} onChange={(e) => setPercent({ ...percent, field: e.target.value })}>
+                <option value="">Choose a numeric field…</option>
+                {[...report.columns, ...design.calculatedFields.map((c) => c.name)].map((f) => <option key={f} value={f}>{f}</option>)}
+              </select>
+            </label>
+            <div className="row">
+              <button className="btn" onClick={() => setPercent(null)}>Cancel</button>
+              <button className="btn primary" disabled={!percent.field} onClick={confirmPercentage}>OK</button>
+            </div>
+          </div>
+        </div>
+      )}
+      {wizard && <ComponentWizard wizard={wizard} report={report} design={design} bandWidth={bandWidth(design)} onCancel={() => setWizard(null)} onDone={finishWizard} />}
+      {exprId && findElement(design, exprId) && (
+        <ExpressionEditor element={findElement(design, exprId).element} report={report} design={design} onSave={saveExpression} onClose={() => setExprId(null)} />
+      )}
+      {publishing && <PublishDialog publishing={publishing} setPublishing={setPublishing} report={report} design={design} onConfirm={confirmPublish} />}
       {importInfo && (
         <div className="modal-back" onClick={() => setImportInfo(null)}>
           <div className="modal" onClick={(e) => e.stopPropagation()}>
-            <h3>JRXML import ho gayi</h3>
+            <h3>JRXML imported</h3>
             <p><b>{importInfo.name}</b> — {importInfo.parameters} parameters, {importInfo.columns} fields.</p>
-            {importInfo.hints?.dataAdapter && <p>Original Data Adapter: <code>{importInfo.hints.dataAdapter}</code>. Left panel ke <b>Data Adapters</b> tab se apna adapter chunein.</p>}
-            {importInfo.warnings.length ? (<><p><b>Yeh cheezen khud check karein:</b></p><ul>{importInfo.warnings.map((w) => <li key={w}>{w}</li>)}</ul></>) : <p className="ok">Koi warning nahi.</p>}
-            <p className="muted">Abhi tak kuch save nahi hua. Design tab mein dekh kar Save karein.</p>
-            <button className="btn primary" onClick={() => setImportInfo(null)}>Theek hai</button>
+            {importInfo.hints?.dataAdapter && <p>Original Data Adapter: <code>{importInfo.hints.dataAdapter}</code>. Choose your adapter in the <b>Data Adapters</b> tab on the left, or in Setup.</p>}
+            {importInfo.warnings.length ? (<><p><b>Please check these yourself:</b></p><ul>{importInfo.warnings.map((w) => <li key={w}>{w}</li>)}</ul></>) : <p className="ok">No warnings.</p>}
+            <p className="muted">Nothing has been saved yet. Review it in the Design tab, then Save.</p>
+            <button className="btn primary" onClick={() => setImportInfo(null)}>OK</button>
           </div>
         </div>
       )}

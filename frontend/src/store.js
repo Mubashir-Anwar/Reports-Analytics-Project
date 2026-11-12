@@ -6,7 +6,7 @@ export const blankReport = () => ({
   title: 'New report',
   description: '',
   folder: 'General',
-  connectionId: 'default',
+  connectionId: '', // chosen by the user in Setup; nothing is preselected
   collection: '',
   queryLanguage: 'mongosh',
   querySource: '',
@@ -26,6 +26,22 @@ export const initialState = {
   lastKey: '',
   lastTime: 0,
 };
+
+/** The report definition as it is saved in the workspace and published to the server. */
+export function reportPayload({ report, design }) {
+  const base = { ...report.extra };
+  delete base.pipeline; // the backend re-parses the query source
+  delete base.workspace;
+  return {
+    ...base,
+    id: report.id, title: report.title, description: report.description, folder: report.folder,
+    connectionId: report.connectionId, collection: report.collection,
+    queryLanguage: report.queryLanguage, querySource: report.querySource,
+    parameters: report.parameters, columns: report.columns,
+    formats: base.formats || ['csv', 'xlsx', 'pdf'], defaultFormat: base.defaultFormat || 'pdf',
+    design,
+  };
+}
 
 const HISTORY_LIMIT = 80;
 
@@ -48,7 +64,7 @@ export function reducer(state, action) {
     case 'LOAD':
       return { ...initialState, report: action.report, design: action.design, dirty: false };
     case 'NEW':
-      return { ...initialState, report: blankReport(), design: emptyDesign() };
+      return { ...initialState, report: { ...blankReport(), ...(action.folder ? { folder: action.folder } : {}) }, design: emptyDesign() };
     case 'REPORT':
       return { ...state, report: { ...state.report, ...action.patch }, dirty: true };
     case 'DESIGN': // history-tracked; `update` is design => design, `key` coalesces rapid edits
@@ -72,7 +88,9 @@ export function reducer(state, action) {
     case 'TOOL':
       return { ...state, tool: action.tool };
     case 'SAVED':
-      return { ...state, dirty: false, report: { ...state.report, isNew: false, id: action.id } };
+      return { ...state, dirty: false, report: { ...state.report, isNew: false, id: action.id, status: action.status || state.report.status } };
+    case 'STATUS': // workspace/publish status of the open report
+      return { ...state, report: { ...state.report, status: action.status } };
     default:
       return state;
   }

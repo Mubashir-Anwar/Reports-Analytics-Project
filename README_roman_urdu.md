@@ -2,6 +2,18 @@
 
 Yeh FastAPI service MongoDB aggregation se CSV, Excel (XLSX) aur PDF report results banati hai. `/admin` se report definition XML file export/import ki ja sakti hai; is file mein query, parameters, folder, layout aur format settings hoti hain. MongoDB connection ka password portable report file mein nahi hota.
 
+## Teen hisse: Designer → Server, aur Admin
+
+| Path | Kis ke liye | Login |
+|---|---|---|
+| `/designer` | Report banana/edit karna (Jaspersoft Studio jaisa) | Admin ya designer token |
+| `/server` | Published reports ki repository: folders dekhna, report chalana | Username/password (sign in / sign out) |
+| `/admin` | Sirf admin kaam: **Users**, **Data sources**, **Logs**, Overview | Admin token |
+
+**Designer workspace:** Designer mein **Save** (Ctrl+S) report ko sirf designer ke apne workspace (`REPORTING_DATA_DIR/workspace/`) mein rakhta hai — server par kuch nahi badalta. Draft adhoora bhi save ho sakta hai. **Publish to server** button report ko server ki repository (`REPORTING_DATA_DIR/reports/`) ke kisi folder mein copy karta hai; pehle se published report ho to "Replace" tick karna hota hai. `/server`, `/ui`, `/reports` aur `/generate` sirf published reports dikhate/chalate hain. Workspace tree mein ● = draft (server par nahi), ✓ = published, ✎ = publish ke baad badla gaya. Designer ke **Server** tab se published report ko workspace mein khol sakte hain. Preview (live data ke saath bhi) publish kiye baghair chalta hai. Workspace pehli dafa khulne par server ki maujooda reports ki copy se shuru hota hai.
+
+**Server login:** Users `/admin` → **Users** tab se bante hain (roles: `viewer` = reports chalana, `designer` = folder bhi bana sakta hai, `admin` = server se report/folder delete bhi). Passwords PBKDF2 hash ke saath `REPORTING_DATA_DIR/users.json` mein hote hain. Pehli setup: jab tak koi admin user nahi bana, `/server` par username `admin` aur password = admin token se sign in ho sakta hai; admin user banate hi yeh band ho jata hai. Session HttpOnly cookie hai (default 8 ghante, `REPORTING_SESSION_HOURS`); HTTPS proxy ke peeche `REPORTING_SECURE_COOKIES=true` rakhein. Password/role badalne par us user ke sab sessions khatam ho jate hain. 10 ghalat koshishon par 10 minute ke liye sign-in ruk jata hai. `REPORTING_ENABLED_AREAS` mein `server` na ho to `/server` band.
+
 ## Local setup
 
 Python 3.11+ aur MongoDB ke saath PowerShell mein project folder khol kar:
@@ -13,7 +25,7 @@ python -m pip install -r requirements.txt
 Copy-Item .env.example .env
 ```
 
-`.env` mein default MongoDB URI/database set karein. Misal ke taur par local Mongo ke liye `MONGODB_URI=mongodb://localhost:27017` aur `MONGODB_DATABASE=cas-cade` ho sakta hai. `REPORTING_ADMIN_TOKEN` khali chhor sakte hain: app pehli run par ek random token bana kar `data/private_secrets.json` mein save karti hai. `/admin` ko `127.0.0.1` ya `localhost` se kholne par browser token khud uthata hai; copy/paste ki zaroorat nahi. `.env` aur private secrets file share ya source control mein commit na karein.
+`.env` mein default MongoDB URI/database set karein. Misal ke taur par local Mongo ke liye `MONGODB_URI=mongodb://localhost:27017` aur `MONGODB_DATABASE=cas-cade` ho sakta hai. `REPORTING_ADMIN_TOKEN` khali chhor sakte hain: app pehli run par ek random token bana kar `data/private_secrets.json` mein save karti hai. Apne computer par `.env` mein `REPORTING_LOCAL_BOOTSTRAP=true` set karein; phir `/admin` ko `127.0.0.1` ya `localhost` se kholne par browser token khud uthata hai, copy/paste ki zaroorat nahi. Yeh setting default `false` hai aur server ya reverse proxy (nginx/IIS) ke peeche hamesha `false` rehni chahiye: proxy ki har request `127.0.0.1` se aati hai, is liye `true` hone par proxy ke zariye koi bhi admin token le sakta hai. `false` hone par token `data/private_secrets.json` ke `admin_token` se ya `REPORTING_ADMIN_TOKEN` se lekar admin page par enter karein. `.env` aur private secrets file share ya source control mein commit na karein.
 
 Service start karein:
 
@@ -24,7 +36,9 @@ uvicorn app:app --host 127.0.0.1 --port 8000
 Browser mein:
 
 - `http://127.0.0.1:8000/ui` reports chalane ke liye.
-- `http://127.0.0.1:8000/admin` folders, reports aur Mongo connections manage karne ke liye. Local admin token automatically load hota hai.
+- `http://127.0.0.1:8000/designer` reports banane, workspace mein save karne aur server par publish karne ke liye.
+- `http://127.0.0.1:8000/server` sign in karke published reports ki repository dekhne aur chalane ke liye.
+- `http://127.0.0.1:8000/admin` sirf admin kaam: users, Mongo data sources aur logs. `REPORTING_LOCAL_BOOTSTRAP=true` ho to local admin token automatically load hota hai.
 - `http://127.0.0.1:8000/reports` report IDs aur URL parameters ke liye.
 - `http://127.0.0.1:8000/health` default Mongo connection status ke liye.
 - `http://127.0.0.1:8000/docs` API documentation ke liye.
@@ -39,7 +53,39 @@ Runner form se report chala sakte hain, ya website ka existing URL format rakh s
 http://127.0.0.1:8000/generate/MCBCC_SBP_REPORT.csv?StartDate=2025-10-27&EndDate=2025-10-31&GeneratedBy=demo-user&GeneratedByCode=local-test&Folder=demo&Generate
 ```
 
-`.csv` ko `.xlsx` ya `.pdf` se badal kar format chunein. XML report definition transfer file hoti hai, generated data output nahi. `GeneratedBy`, `GeneratedByCode`, `Folder` aur `Generate` audit metadata hain; yeh report filter ya access check nahi karte. Website ka pehle se maujood access control hi requests ko authorize kare.
+`.csv` ko `.xlsx` ya `.pdf` se badal kar format chunein. XML report definition transfer file hoti hai, generated data output nahi. `GeneratedBy`, `GeneratedByCode`, `Folder` aur `Generate` audit metadata hain; yeh report filter nahi karte. Signed link mein yeh bhi sign hote hain, is liye audit mein unhein badla nahi ja sakta.
+
+## Report access (`/generate` aur `/reports`)
+
+Default `REPORTING_ACCESS_MODE=required` hai: in dono endpoints ko neeche mein se koi ek chahiye, warna `401`.
+
+1. **Signed link** (sirf `/generate`): website user ke browser ko aisa link deti hai jo `REPORTING_ACCESS_SECRET` se sign ho. Link badla jaye, doosra format/parameter lagaya jaye, ya waqt guzar jaye to `403`.
+2. **`X-Report-Token: <REPORTING_ACCESS_SECRET>` header**: jab website ka server khud service ko call karke file aage bhejta hai. Yeh secret kabhi browser tak na bhejein.
+3. **`X-Admin-Token`**: admin page aur `/ui` runner (runner usi browser tab mein admin page par Connect hone ke baad token istemal karta hai).
+
+`REPORTING_ACCESS_MODE=open` purana behaviour hai (koi check nahi); sirf band private network mein istemal karein.
+
+Signed link banane ka tareeqa (website ke **server** par):
+
+1. Normal link banayein, aakhir mein `Expires=<Unix seconds>` lagayein (abhi se zyada se zyada `REPORTING_SIGNED_LINK_MAX_SECONDS`, default 3600).
+2. `/generate/...` se shuru hone wale path aur poori query ka HMAC-SHA256 (hex) secret se banayein.
+3. Usay sab se aakhir mein `&Signature=<hex>` ke taur par jor dein. Signature ke baad query mein kuch na badlein ya order na badlein.
+
+```python
+import hashlib, hmac, time
+from urllib.parse import urlencode
+
+secret = b"<REPORTING_ACCESS_SECRET>"
+query = urlencode({"StartDate": "2025-10-27", "EndDate": "2025-10-31", "GeneratedBy": "ali",
+                   "Expires": int(time.time()) + 300})
+path_and_query = f"/generate/KMBL_REPORT.pdf?{query}"
+signature = hmac.new(secret, path_and_query.encode(), hashlib.sha256).hexdigest()
+link = f"https://reports.example.com{path_and_query}&Signature={signature}"
+```
+
+Service ke saamne reverse proxy koi path prefix (misal `/reporting`) hata kar bhejta ho tab bhi sign hamesha `/generate/...` se shuru hone wala path karein. Audit record ke `access` field mein likha hota hai ke request `signed-link`, `report-token`, `admin-token` ya `open` se aayi.
+
+CSV mein `=`, `+`, `-`, `@`, tab ya carriage return se shuru hone wali **text** values ke aage `'` lag jata hai, taa ke Excel unhein formula ke taur par na chalaye (asal numbers jaise `-5` waise hi rehte hain). XLSX mein aisi values hamesha text cells hoti hain. Collection naam `$P{...}` parameter se bane to us parameter ki `allowedValues` dena lazmi hai.
 
 ## UI se nayi report banana
 
@@ -92,7 +138,7 @@ Deployment ko ASGI app `app:app` chahiye. Start command yeh rakhein; platform ka
 uvicorn app:app --host 0.0.0.0 --port $PORT
 ```
 
-Grizzly environment mein `MONGODB_URI`, `MONGODB_DATABASE`, `REPORTING_ADMIN_TOKEN` aur audit/query limit variables configure karein. Public deployment par local browser bootstrap token share nahi karta; admin token platform ke private environment settings mein rakhein. `REPORTING_DATA_DIR` ko persistent writable storage par set karein; isi mein reports, `connections.json`, `private_secrets.json` aur local audit file save hote hain. Deploy ke baad `/health`, `/ui` aur `/admin` check karein. Extra MongoDB connection URLs admin UI se save ho sakte hain, lekin persistent storage private aur access-controlled honi chahiye.
+Grizzly environment mein `MONGODB_URI`, `MONGODB_DATABASE`, `REPORTING_ADMIN_TOKEN` aur audit/query limit variables configure karein. Deployment par `REPORTING_LOCAL_BOOTSTRAP` set na karein (ya `false` rakhein); admin token platform ke private environment settings mein rakhein. `REPORTING_DATA_DIR` ko persistent writable storage par set karein; isi mein reports, `connections.json`, `private_secrets.json` aur local audit file save hote hain. Deploy ke baad `/health`, `/ui` aur `/admin` check karein. Extra MongoDB connection URLs admin UI se save ho sakte hain, lekin persistent storage private aur access-controlled honi chahiye.
 
 ## Service ki hadain
 
@@ -101,11 +147,23 @@ Reports MongoDB aggregation pipeline se define hoti hain; Mongo Shell/JS/Python 
 
 ## Report Designer (Jasper Studio jaisa) — `/designer`
 
-React (Vite) based designer. Build ho chuka hai (`ui/designer/`), is liye Node ke baghair bhi `uvicorn app:app` ke baad `http://127.0.0.1:8000/designer` khul jata hai. Local par admin token khud mil jata hai; deployed server par `REPORTING_ADMIN_TOKEN` daalna hoga.
+React (Vite) based designer. Build ho chuka hai (`ui/app/`; isi ek React build se `/designer`, `/server` aur `/admin` teeno chalte hain), is liye Node ke baghair bhi `uvicorn app:app` ke baad `http://127.0.0.1:8000/designer` khul jata hai. Local par `REPORTING_LOCAL_BOOTSTRAP=true` ho to admin token khud mil jata hai; warna aur deployed server par `REPORTING_ADMIN_TOKEN` daalna hoga.
 
-**Panels:** left par **Server** (folders/reports ka repository tree, new/open/delete) aur **Data Adapters** (MongoDB connections: test, save, report ke liye chunna), neeche **Outline** (Parameters, Fields, Calculated Fields, Variables, Groups, Bands aur un ke elements). Right par **Palette** (Static Text, Text Field, Line, Rectangle, Image, Chart) aur **Properties**. Beech mein 3 tabs: **Setup** (form-based: naam, adapter, collection, query, fields detect, parameters, auto layout), **Design** (bands wala canvas, drag/resize, Fields ko band par drag karna) aur **Preview** (PDF; sample data ya live Mongo ke 20 rows).
+**Panels:** left par **Workspace**, **Server** aur **Data Adapters**, neeche **Outline**. Right par **Palette** (Static Text, Text Field, Line, Rectangle, Image, Chart) aur **Properties**. Beech mein 3 tabs: **Setup** (naam, adapter, collection, query, fields detect, parameters, auto layout), **Design** (bands wala canvas) aur **Preview**.
 
-**Design model:** bands = Title, Page Header, Column Header, Group Header/Footer (har group ke liye), Detail, Column Footer, Page Footer, Summary. Expressions: `$F{field}`, `$P{param}`, `$V{variable}`; `=` se shuru hone wali expression mein +,-,*,/,% (code execute nahi hota). Variables: Sum/Count/Average/Min/Max/First, reset Report ya Group par. Built-in: `PAGE_NUMBER`, `PAGE_COUNT`, `REPORT_COUNT`, `CURRENT_DATE`. Patterns: `#,##0.00`, `Rs. #,##0`, `dd/MM/yyyy`. Charts: bar/line/pie.
+**Outline (Jaspersoft Studio jaisa):** report ke neeche Parameters, Fields (calculated fields bhi), Variables, aur phir saare bands print order mein: Title, Page Header, Column Header, Group Header, Detail 1, Group Footer, Column Footer, Page Footer, Last Page Footer, Summary, No Data, Background — har band ke andar us ke elements. Jo band report mein nahi (delete ho chuka) wo grey dikhta hai aur canvas par nahi aata. Har node par **right-click** menu:
+- Report: Create Parameter / Variable / Calculated Field / Group, Create Band.
+- Band: Create Band ya Delete Band, Add element (Static Text, Text Field…), Fit band to content, group ke bands par Rename / Delete group.
+- Element: Properties, Duplicate, Bring to Front / Send to Back, Move to band, Delete.
+- Parameter / Variable / Calculated field: Rename (F2 ya double-click; `$P{…}`/`$V{…}`/`$F{…}` expressions aur query mein bhi badal jata hai), Place in band, Delete.
+- Field: Place in Detail (label ke saath Column Header mein), Group by, Create Variable (Sum).
+Canvas par band ya element ko right-click karne se wahi menu aata hai. Del se select ki hui cheez delete hoti hai; Ctrl+Z undo.
+
+**Data Adapters:** tree (folders ke saath); right-click → Create Data Adapter (wizard: type → URL/database/folder → Test → Finish), Edit, Duplicate, Test connection, Move to folder, Delete.
+
+**Preview:** upar Data Adapter (ya sample data), Records (pehle 20 ya saare), hara ▶ Run button aur Export (PDF / Excel / CSV); baayen **Input Parameters**; beech mein bhari hui report. Preview tab kholte hi sample data se report ban jati hai; draft save kiye baghair chalti hai.
+
+**Design model:** bands = Title, Page Header, Column Header, Group Header/Footer (har group ke liye), Detail, Column Footer, Page Footer, Last Page Footer (aakhri page par Page Footer ki jagah), Summary, No Data (koi row na ho to sirf yahi band print hota hai), Background (har page par baqi bands ke peeche). Expressions: `$F{field}`, `$P{param}`, `$V{variable}`; `=` se shuru hone wali expression mein +,-,*,/,% (code execute nahi hota). Variables: Sum/Count/Average/Min/Max/First, reset Report ya Group par. Built-in: `PAGE_NUMBER`, `PAGE_COUNT`, `REPORT_COUNT`, `CURRENT_DATE`. Patterns: `#,##0.00`, `Rs. #,##0`, `dd/MM/yyyy`. Charts: bar/line/pie.
 
 **Save:** report JSON mein `design` key banti hai. PDF format par `/generate/ID.pdf` is design se render hota hai; CSV/XLSX tabular hi rehte hain. Design na ho to purana PDF layout chalta hai.
 
@@ -116,7 +174,7 @@ React (Vite) based designer. Build ho chuka hai (`ui/designer/`), is liye Node k
 cd frontend
 npm install
 npm run dev      # http://localhost:5173 (API 127.0.0.1:8000 par proxy)
-npm run build    # ../ui/designer mein output
+npm run build    # ../ui/app mein output (designer, server, admin)
 ```
 
 **Tests:** `python -m pip install -r requirements-dev.txt` phir `python -m pytest -q tests`.

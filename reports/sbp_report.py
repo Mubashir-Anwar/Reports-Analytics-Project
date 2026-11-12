@@ -19,7 +19,7 @@ try:
     PIPELINE_TEMPLATE: list[dict[str, Any]] = RUN_COMMAND["pipeline"]
 except (KeyError, TypeError) as exc:
     raise RuntimeError(
-        "reports/sbp_pipeline.json mein runCommand.aggregate aur runCommand.pipeline lazmi hain"
+        "reports/sbp_pipeline.json needs runCommand.aggregate and runCommand.pipeline"
     ) from exc
 
 # The report columns are the output fields in the pipeline's final $project.
@@ -41,7 +41,7 @@ def build_pipeline(params: dict[str, Any]) -> list[dict[str, Any]]:
             break
     else:
         raise RuntimeError(
-            "sbp_pipeline.json mein LastUpdateDateTime ka date $match stage nahi mila"
+            "sbp_pipeline.json has no date $match stage on LastUpdateDateTime"
         )
 
     return pipeline

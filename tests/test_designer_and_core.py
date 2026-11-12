@@ -51,8 +51,8 @@ def test_validate_design_ok_and_normalizes():
 
 @pytest.mark.parametrize("mutate,message", [
     (lambda d: d["bands"]["detail"]["elements"].append({"type": "script"}), "element type"),
-    (lambda d: d["bands"]["detail"]["elements"][0].update(expression="$F{Nope}"), "define nahi"),
-    (lambda d: d["groups"].append({"name": "G2", "field": "Missing"}), "maujood nahi"),
+    (lambda d: d["bands"]["detail"]["elements"][0].update(expression="$F{Nope}"), "is not defined"),
+    (lambda d: d["groups"].append({"name": "G2", "field": "Missing"}), "does not exist"),
     (lambda d: d["variables"][0].update(calculation="Eval"), "calculation"),
     (lambda d: d["bands"]["detail"]["elements"][0].update(color="red"), "#RRGGBB"),
 ])
@@ -152,6 +152,6 @@ def test_audit_required_blocks_release_when_audit_cannot_be_written(tmp_path, mo
     # connection is unreachable in tests; patch the DB handle used by generate()
     import pymongo
     monkeypatch.setattr(pymongo.MongoClient, "admin", property(lambda self: type("A", (), {"command": lambda *_a, **_k: {"ok": 1}})()), raising=False)
-    response = client.get("/generate/T1.csv")
+    response = client.get("/generate/T1.csv", headers={"X-Admin-Token": "t"})
     assert response.status_code in (503, 500)
     assert "Audit" in response.text or response.status_code == 503

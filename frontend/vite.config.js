@@ -1,12 +1,24 @@
+import { resolve } from 'node:path';
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 
-// Build goes into ../ui/designer and is served by FastAPI at /designer
-// (assets under /assets/designer/). For `npm run dev`, API calls are proxied to uvicorn.
+// One React project, three pages. The build goes into ../ui/app and FastAPI serves
+//   /designer -> index.html, /server -> server.html, /admin -> admin.html
+// (assets under /assets/app/). For `npm run dev`, API calls are proxied to uvicorn.
 export default defineConfig({
   plugins: [react()],
-  base: '/assets/designer/',
-  build: { outDir: '../ui/designer', emptyOutDir: true },
+  base: '/assets/app/',
+  build: {
+    outDir: '../ui/app',
+    emptyOutDir: true,
+    rollupOptions: {
+      input: {
+        designer: resolve(__dirname, 'index.html'),
+        server: resolve(__dirname, 'server.html'),
+        admin: resolve(__dirname, 'admin.html'),
+      },
+    },
+  },
   server: {
     port: 5173,
     proxy: {

@@ -1,0 +1,387 @@
+// Actions behind the right-click menus of the Outline and the canvas (like Jaspersoft Studio's).
+import {
+  BUILTIN_VARIABLES, NAME_PATTERN, PALETTE_GROUPS, addElementToBand, bandKeys, bandLabel, bandPresent, contentBottom, createBand, deleteBand,
+  findElement, getBand, groupOfBand, moveElementToBand, nextName, placeField, removeElement, removeGroup,
+  renameCalculated, renameGroup, renameInElements, renameToken, reorderElement, setBand,
+} from './designModel.js';
+import {
+  alignElements, copyToClipboard, distributeElements, matchSize as matchSizeOf, nudgeElements, pasteElements, readClipboard,
+  removeElements, selectedElements, selectedIds, selectionOf, setLocked,
+} from './arrange.js';
+
+export const ELEMENT_TYPES = [
+  ['staticText', 'T', 'Static Text'],
+  ['textField', '𝑓', 'Text Field'],
+  ['line', '─', 'Line'],
+  ['rectangle', '▭', 'Rectangle'],
+  ['image', '🖼', 'Image'],
+  ['chart', '▦', 'Chart'],
+];
+
+const escapeRe = (text) => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+const renameParamIn = (text, from, to) => (typeof text === 'string'
+  ? renameToken(text, 'P', from, to).replace(new RegExp(`("\\$paramIn"\\s*:\\s*")${escapeRe(from)}(")`, 'g'), `$1${to}$2`)
+  : text);
+
+/** `base` itself when free, else base2, base3… (base made a valid name first). */
+function freeName(base, taken) {
+  let clean = String(base || 'Name').replace(/[^A-Za-z0-9_]/g, '_');
+  if (!/^[A-Za-z_]/.test(clean)) clean = `_${clean}`;
+  const used = new Set(taken);
+  if (!used.has(clean)) return clean;
+  let n = 2;
+  while (used.has(`${clean}${n}`)) n += 1;
+  return `${clean}${n}`;
+}
+
+/** `get()` returns the current { report, design }; menus read it when they are opened. */
+export function makeActions({ get, dispatch, notify }) {
+  const design$ = (update) => dispatch({ type: 'DESIGN', update });
+  const select = (selection) => dispatch({ type: 'SELECT', selection });
+  const fieldNames = () => { const { report, design } = get(); return [...report.columns, ...design.calculatedFields.map((c) => c.name)]; };
+  const takenNames = (kind) => {
+    const { report, design } = get();
+    if (kind === 'param') return report.parameters.map((p) => p.name);
+    if (kind === 'variable') return [...design.variables.map((v) => v.name), ...BUILTIN_VARIABLES];
+    if (kind === 'calc') return [...design.calculatedFields.map((c) => c.name), ...report.columns];
+    if (kind === 'group') return design.groups.map((g) => g.name);
+    return [];
+  };
+
+  /* ---------- create ---------- */
+  const createParameter = () => {
+    const name = nextName('Parameter', takenNames('param'));
+    const { report } = get();
+    dispatch({ type: 'REPORT', patch: { parameters: [...report.parameters, { name, type: 'string', label: name, required: false }] } });
+    select({ kind: 'param', name });
+    return name;
+  };
+  const createVariable = (field = '') => {
+    const name = field ? freeName(`${field}_SUM`, takenNames('variable')) : nextName('Variable', takenNames('variable'));
+    design$((d) => ({ ...d, variables: [...d.variables, { name, calculation: field ? 'Sum' : 'Count', field: field || fieldNames()[0] || '', resetType: 'Report', resetGroup: '' }] }));
+    select({ kind: 'variable', name });
+    return name;
+  };
+  const createCalc = () => {
+    const name = nextName('Calc', takenNames('calc'));
+    design$((d) => ({ ...d, calculatedFields: [...d.calculatedFields, { name, expression: '' }] }));
+    select({ kind: 'calc', name });
+    return name;
+  };
+  const createGroup = (field) => {
+    const target = field || fieldNames()[0];
+    if (!target) { notify('Detect the fields first (Setup tab), then create a group', 'error'); return null; }
+    const name = freeName(target, takenNames('group'));
+    design$((d) => ({
+      ...d,
+      groups: [...d.groups, { name, field: target }],
+      bands: { ...d.bands, groupHeaders: { ...d.bands.groupHeaders, [name]: { height: 22, elements: [] } }, groupFooters: { ...d.bands.groupFooters, [name]: { height: 22, elements: [] } } },
+    }));
+    select({ kind: 'band', key: `groupHeader:${name}` });
+    notify(`Group ${name} created: its Group Header and Group Footer bands are on the canvas`, 'ok');
+    return name;
+  };
+  const createBandAt = (key) => { design$((d) => createBand(d, key)); select({ kind: 'band', key }); notify(`${bandLabel(key)} band created`, 'ok'); };
+
+  /* ---------- delete ---------- */
+  const deleteBandAt = (key) => {
+    const count = getBand(get().design, key).elements.length;
+    design$((d) => deleteBand(d, key));
+    select({ kind: 'report' });
+    notify(`${bandLabel(key)} band deleted${count ? ` with ${count} element(s)` : ''} — Ctrl+Z to undo`, 'ok');
+  };
+  const deleteElementById = (id) => {
+    const found = findElement(get().design, id);
+    if (!found) return;
+    design$((d) => removeElement(d, found.bandKey, id));
+    select({ kind: 'band', key: found.bandKey });
+  };
+  const deleteParameter = (name) => {
+    if (!window.confirm(`Delete the parameter ${name}? Expressions and the query that use $P{${name}} must be changed by hand.`)) return;
+    const { report } = get();
+    dispatch({ type: 'REPORT', patch: { parameters: report.parameters.filter((p) => p.name !== name) } });
+    select({ kind: 'report' });
+  };
+  const deleteVariable = (name) => { design$((d) => ({ ...d, variables: d.variables.filter((v) => v.name !== name) })); select({ kind: 'report' }); notify(`Variable ${name} deleted — Ctrl+Z to undo`, 'ok'); };
+  const deleteCalc = (name) => { design$((d) => ({ ...d, calculatedFields: d.calculatedFields.filter((c) => c.name !== name) })); select({ kind: 'report' }); notify(`Calculated field ${name} deleted — Ctrl+Z to undo`, 'ok'); };
+  const deleteGroup = (name) => { design$((d) => removeGroup(d, name)); select({ kind: 'report' }); notify(`Group ${name} and its bands deleted — Ctrl+Z to undo`, 'ok'); };
+
+  /* ---------- arrange (multi-selection: toolbar, menus and keyboard) ---------- */
+  const ids = () => selectedIds(get().selection);
+  const arrange = (operation, message) => {
+    const chosen = ids();
+    if (!chosen.length) return;
+    design$((d) => operation(d, chosen));
+    if (message) notify(message, 'ok');
+  };
+  const align = (mode) => arrange((d, chosen) => alignElements(d, chosen, mode));
+  const distribute = (axis) => arrange((d, chosen) => distributeElements(d, chosen, axis));
+  const matchSize = (which) => arrange((d, chosen) => matchSizeOf(d, chosen, which));
+  const nudge = (dx, dy) => {
+    const chosen = ids();
+    if (chosen.length) dispatch({ type: 'DESIGN', key: 'nudge', update: (d) => nudgeElements(d, chosen, dx, dy) });
+  };
+  const order = (toFront) => arrange((d, chosen) => selectedElements(d, chosen).reduce((next, { bandKey, element }) => reorderElement(next, bandKey, element.id, toFront), d));
+  const toggleLock = () => {
+    const chosen = ids();
+    if (!chosen.length) return;
+    const lock = !selectedElements(get().design, chosen).every(({ element }) => element.locked);
+    design$((d) => setLocked(d, chosen, lock));
+    notify(lock ? `${chosen.length} element(s) locked: they cannot be moved or resized` : `${chosen.length} element(s) unlocked`, 'ok');
+  };
+  const copy = () => {
+    const count = copyToClipboard(get().design, ids());
+    if (count) notify(`${count} element(s) copied — Ctrl+V pastes them (also in another report)`, 'ok');
+    return count;
+  };
+  const removeSelected = () => {
+    const chosen = ids();
+    if (!chosen.length) return;
+    const first = selectedElements(get().design, chosen)[0];
+    design$((d) => removeElements(d, chosen));
+    select(first ? { kind: 'band', key: first.bandKey } : { kind: 'report' });
+    if (chosen.length > 1) notify(`${chosen.length} elements deleted — Ctrl+Z to undo`, 'ok');
+  };
+  const cut = () => { if (copy()) removeSelected(); };
+  /** Paste into `bandKey`, else into the selected band, else back into the elements' own bands. */
+  const paste = (bandKey) => {
+    const clipboard = readClipboard();
+    if (!clipboard?.items?.length) { notify('The clipboard is empty: select elements and press Ctrl+C first', 'error'); return; }
+    const { selection, design } = get();
+    const target = bandKey || (selection.kind === 'band' ? selection.key : null);
+    const result = pasteElements(design, clipboard, target);
+    design$(() => result.design);
+    select(selectionOf(result.ids));
+    notify(`${result.ids.length} element(s) pasted${target ? ` in ${bandLabel(target)}` : ''}`, 'ok');
+  };
+  const duplicateSelected = () => {
+    const { design } = get();
+    const items = selectedElements(design, ids());
+    if (!items.length) return;
+    const result = pasteElements(design, { items }, null);
+    design$(() => result.design);
+    select(selectionOf(result.ids));
+  };
+  /** Ctrl+A: every element of the selected band, else of the band of the selected element, else all. */
+  const selectAll = () => {
+    const { selection, design } = get();
+    const bandKey = selection.kind === 'band' ? selection.key : (selection.kind === 'element' ? findElement(design, selection.id)?.bandKey : null);
+    const keys = bandKey && !(selection.kind === 'element' && getBand(design, bandKey).elements.every((el) => ids().includes(el.id))) ? [bandKey] : bandKeys(design);
+    const all = keys.flatMap((key) => getBand(design, key).elements.map((el) => el.id));
+    if (all.length) select(selectionOf(all));
+  };
+
+  const arrangeMenu = (count) => ({
+    label: 'Align', icon: '⇤',
+    items: [
+      { header: count > 1 ? 'To each other' : 'In the band' },
+      { label: 'Left', onClick: () => align('left') }, { label: 'Center', onClick: () => align('hcenter') }, { label: 'Right', onClick: () => align('right') },
+      '-',
+      { label: 'Top', onClick: () => align('top') }, { label: 'Middle', onClick: () => align('vmiddle') }, { label: 'Bottom', onClick: () => align('bottom') },
+    ],
+  });
+
+  /** Delete key on whatever is selected (element, band, parameter, variable, calculated field, group). */
+  const deleteSelection = (selection) => {
+    if (selection.kind === 'element') removeSelected();
+    else if (selection.kind === 'band' && bandPresent(getBand(get().design, selection.key))) deleteBandAt(selection.key);
+    else if (selection.kind === 'param') deleteParameter(selection.name);
+    else if (selection.kind === 'variable') deleteVariable(selection.name);
+    else if (selection.kind === 'calc') deleteCalc(selection.name);
+    else if (selection.kind === 'group') deleteGroup(selection.name);
+  };
+
+  /* ---------- rename (returns an error text, or '' when done) ---------- */
+  const rename = (kind, from, rawTo) => {
+    const to = String(rawTo || '').trim();
+    if (!to || to === from) return '';
+    if (!NAME_PATTERN.test(to)) return 'Use letters, digits and _ only, starting with a letter or _';
+    if (takenNames(kind).includes(to)) return `${to} is already used`;
+    const { report } = get();
+    if (kind === 'param') {
+      dispatch({
+        type: 'REPORT',
+        patch: {
+          parameters: report.parameters.map((p) => (p.name === from ? { ...p, name: to, label: p.label === from ? to : p.label } : { ...p, expression: renameParamIn(p.expression, from, to) })),
+          querySource: renameParamIn(report.querySource, from, to),
+          collection: renameToken(report.collection, 'P', from, to),
+        },
+      });
+      design$((d) => renameInElements(d, 'P', from, to));
+    } else if (kind === 'variable') {
+      design$((d) => ({ ...renameInElements(d, 'V', from, to), variables: d.variables.map((v) => (v.name === from ? { ...v, name: to } : v)) }));
+    } else if (kind === 'calc') {
+      design$((d) => renameCalculated(d, from, to));
+    } else if (kind === 'group') {
+      design$((d) => renameGroup(d, from, to));
+    }
+    select({ kind, name: to });
+    notify(`Renamed ${from} → ${to}; expressions that used it were updated`, 'ok');
+    return '';
+  };
+
+  /* ---------- placing things in bands ---------- */
+  const presentBands = () => bandKeys(get().design).filter((key) => bandPresent(getBand(get().design, key)));
+  /** Run an operation that returns { design, id } on the current design, then select the new element. */
+  const withNewElement = (operation) => {
+    const result = operation(get().design);
+    if (!result.id) return;
+    design$(() => result.design);
+    select({ kind: 'element', id: result.id });
+  };
+  const addElement = (key, type, extra) => withNewElement((d) => addElementToBand(d, key, type, extra));
+  const placeExpression = (key, expression) => addElement(key, 'textField', { expression, width: 140, height: 16 });
+  const placeInMenu = (expression) => ({
+    label: 'Place in band', icon: '⤵',
+    items: presentBands().map((key) => ({ label: bandLabel(key), onClick: () => placeExpression(key, expression) })),
+  });
+  const addElementMenu = (key) => ({
+    label: 'Add element', icon: '＋',
+    items: PALETTE_GROUPS.flatMap((group, index) => [
+      ...(index ? ['-'] : []),
+      { header: group.title },
+      ...group.items
+        .filter(([type]) => type !== 'percentage') // needs a field: use the Palette
+        .map(([type, icon, label]) => ({ label, icon, onClick: () => addElement(key, type) })),
+    ]),
+  });
+
+  /* ---------- menus ---------- */
+  const createBandMenu = () => {
+    const { design } = get();
+    const absent = bandKeys(design).filter((key) => !bandPresent(getBand(design, key)));
+    return { label: 'Create Band', icon: '▭', disabled: !absent.length, items: absent.map((key) => ({ label: bandLabel(key), onClick: () => createBandAt(key) })) };
+  };
+
+  const reportMenu = () => [
+    { header: get().report.title || 'Report' },
+    { label: 'Properties', icon: '⚙', onClick: () => select({ kind: 'report' }) },
+    '-',
+    { label: 'Create Parameter', icon: '$P', onClick: createParameter },
+    { label: 'Create Variable', icon: '$V', onClick: () => createVariable() },
+    { label: 'Create Calculated Field', icon: 'ƒ', onClick: createCalc },
+    { label: 'Create Group', icon: '⊞', disabled: !fieldNames().length, items: fieldNames().map((f) => ({ label: `Group by ${f}`, onClick: () => createGroup(f) })) },
+    createBandMenu(),
+  ];
+
+  const bandMenu = (key) => {
+    const { design } = get();
+    const band = getBand(design, key);
+    const present = bandPresent(band);
+    const group = groupOfBand(key);
+    const items = [{ header: bandLabel(key) }];
+    if (!present) {
+      items.push({ label: 'Create Band', icon: '＋', onClick: () => createBandAt(key) });
+    } else {
+      items.push(
+        addElementMenu(key),
+        { label: 'Paste here', icon: '📋', shortcut: 'Ctrl+V', disabled: !readClipboard()?.items?.length, onClick: () => paste(key) },
+        { label: 'Select all elements', icon: '⬚', disabled: !band.elements.length, onClick: () => select(selectionOf(band.elements.map((el) => el.id))) },
+        { label: 'Fit band to content', icon: '↕', disabled: !band.elements.length, onClick: () => design$((d) => setBand(d, key, { ...getBand(d, key), height: contentBottom(getBand(d, key)) })) },
+        { label: 'Properties', icon: '⚙', onClick: () => select({ kind: 'band', key }) },
+        '-',
+        { label: 'Delete Band', icon: '✕', danger: true, shortcut: 'Del', onClick: () => deleteBandAt(key) },
+      );
+    }
+    if (group) {
+      items.push('-', { label: `Group ${group} properties`, icon: '⊞', onClick: () => select({ kind: 'group', name: group }) }, { label: `Delete group ${group}`, icon: '✕', danger: true, onClick: () => deleteGroup(group) });
+    }
+    return items;
+  };
+
+  const elementMenu = (id) => {
+    const found = findElement(get().design, id);
+    if (!found) return [];
+    const { bandKey } = found;
+    const chosen = ids();
+    const locked = selectedElements(get().design, chosen.includes(id) ? chosen : [id]).every(({ element }) => element.locked);
+    const lockItem = { label: locked ? 'Unlock' : 'Lock', icon: locked ? '🔓' : '🔒', shortcut: 'Ctrl+L', onClick: toggleLock };
+    const clipboardItems = [
+      { label: 'Copy', icon: '⧉', shortcut: 'Ctrl+C', onClick: copy },
+      { label: 'Cut', icon: '✂', shortcut: 'Ctrl+X', onClick: cut },
+      { label: 'Paste', icon: '📋', shortcut: 'Ctrl+V', disabled: !readClipboard()?.items?.length, onClick: () => paste() },
+      { label: 'Duplicate', icon: '⧉', shortcut: 'Ctrl+D', onClick: duplicateSelected },
+    ];
+    if (chosen.length > 1 && chosen.includes(id)) {
+      return [
+        { header: `${chosen.length} elements selected` },
+        ...clipboardItems,
+        '-',
+        arrangeMenu(chosen.length),
+        { label: 'Distribute', icon: '⇹', disabled: chosen.length < 3, items: [{ label: 'Horizontally', onClick: () => distribute('h') }, { label: 'Vertically', onClick: () => distribute('v') }] },
+        { label: 'Same size', icon: '▣', items: [{ label: 'Width', onClick: () => matchSize('width') }, { label: 'Height', onClick: () => matchSize('height') }, { label: 'Width and height', onClick: () => matchSize('both') }] },
+        { label: 'Bring to Front', icon: '⬆', onClick: () => order(true) },
+        { label: 'Send to Back', icon: '⬇', onClick: () => order(false) },
+        lockItem,
+        '-',
+        { label: `Delete ${chosen.length} elements`, icon: '✕', danger: true, shortcut: 'Del', onClick: removeSelected },
+      ];
+    }
+    const others = presentBands().filter((key) => key !== bandKey);
+    return [
+      { header: `${found.element.type} in ${bandLabel(bandKey)}` },
+      { label: 'Properties', icon: '⚙', onClick: () => select({ kind: 'element', id }) },
+      ...clipboardItems,
+      '-',
+      arrangeMenu(1),
+      { label: 'Bring to Front', icon: '⬆', onClick: () => design$((d) => reorderElement(d, bandKey, id, true)) },
+      { label: 'Send to Back', icon: '⬇', onClick: () => design$((d) => reorderElement(d, bandKey, id, false)) },
+      { label: 'Move to band', icon: '⇅', disabled: !others.length, items: others.map((key) => ({ label: bandLabel(key), onClick: () => { design$((d) => moveElementToBand(d, bandKey, key, id)); select({ kind: 'element', id }); } })) },
+      lockItem,
+      '-',
+      { label: 'Delete', icon: '✕', danger: true, shortcut: 'Del', onClick: () => deleteElementById(id) },
+    ];
+  };
+
+  const parametersMenu = () => [{ label: 'Create Parameter', icon: '＋', onClick: createParameter }];
+  const parameterMenu = (name, onRename) => [
+    { header: `$P{${name}}` },
+    { label: 'Properties', icon: '⚙', onClick: () => select({ kind: 'param', name }) },
+    { label: 'Rename', icon: '✎', shortcut: 'F2', onClick: onRename },
+    placeInMenu(`$P{${name}}`),
+    '-',
+    { label: 'Create Parameter', icon: '＋', onClick: createParameter },
+    { label: 'Delete', icon: '✕', danger: true, shortcut: 'Del', onClick: () => deleteParameter(name) },
+  ];
+
+  const fieldsMenu = (onDetect) => [{ label: 'Detect fields from the query…', icon: '⟳', onClick: onDetect }];
+  const fieldMenu = (name) => [
+    { header: `$F{${name}}` },
+    { label: 'Place in Detail (with label)', icon: '⤵', onClick: () => withNewElement((d) => placeField(d, name)) },
+    placeInMenu(`$F{${name}}`),
+    { label: `Group by ${name}`, icon: '⊞', onClick: () => createGroup(name) },
+    { label: `Create Variable (Sum of ${name})`, icon: '$V', onClick: () => createVariable(name) },
+  ];
+
+  const variablesMenu = () => [{ label: 'Create Variable', icon: '＋', onClick: () => createVariable() }];
+  const variableMenu = (name, onRename) => [
+    { header: `$V{${name}}` },
+    { label: 'Properties', icon: '⚙', onClick: () => select({ kind: 'variable', name }) },
+    { label: 'Rename', icon: '✎', shortcut: 'F2', onClick: onRename },
+    placeInMenu(`$V{${name}}`),
+    '-',
+    { label: 'Create Variable', icon: '＋', onClick: () => createVariable() },
+    { label: 'Delete', icon: '✕', danger: true, shortcut: 'Del', onClick: () => deleteVariable(name) },
+  ];
+  const builtinMenu = (name) => [{ header: `$V{${name}} (built-in)` }, placeInMenu(name === 'PAGE_COUNT' ? 'Page $V{PAGE_NUMBER} of $V{PAGE_COUNT}' : `$V{${name}}`)];
+
+  const calcsMenu = () => [{ label: 'Create Calculated Field', icon: '＋', onClick: createCalc }];
+  const calcMenu = (name, onRename) => [
+    { header: `ƒ $F{${name}}` },
+    { label: 'Properties', icon: '⚙', onClick: () => select({ kind: 'calc', name }) },
+    { label: 'Rename', icon: '✎', shortcut: 'F2', onClick: onRename },
+    placeInMenu(`$F{${name}}`),
+    '-',
+    { label: 'Create Calculated Field', icon: '＋', onClick: createCalc },
+    { label: 'Delete', icon: '✕', danger: true, shortcut: 'Del', onClick: () => deleteCalc(name) },
+  ];
+
+  const canvasMenu = () => [{ header: 'Page' }, { label: 'Report properties', icon: '⚙', onClick: () => select({ kind: 'report' }) }, createBandMenu()];
+
+  return {
+    rename, deleteSelection, createBandAt, createGroup,
+    align, distribute, matchSize, nudge, order, toggleLock, copy, cut, paste, duplicateSelected, selectAll, removeSelected,
+    reportMenu, bandMenu, elementMenu, parametersMenu, parameterMenu, fieldsMenu, fieldMenu,
+    variablesMenu, variableMenu, builtinMenu, calcsMenu, calcMenu, canvasMenu, createBandMenu,
+  };
+}

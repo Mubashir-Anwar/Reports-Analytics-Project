@@ -127,7 +127,7 @@ def translate_expression(expression: str, aliases: dict[str, tuple[str, str]], w
     if jexpr.check_syntax(java_text):
         return "=" + java_text, ""
     tokens = TOKEN.findall(source)
-    warnings.append(f"{where}: Java expression translate nahi hui, designer mein dobara likhein: {source[:90]}")
+    warnings.append(f"{where}: the Java expression could not be translated; write it again in the designer: {source[:90]}")
     if tokens:
         kind, name = tokens[0]
         return clean(f"${kind}{{{name}}}"), ""
@@ -153,7 +153,9 @@ def _collect_styles(root: ET.Element) -> dict[str, dict[str, Any]]:
         styles[style.get("name", "")] = {
             "mode": style.get("mode", ""), "backColor": style.get("backcolor"), "color": style.get("forecolor"),
             "borderWidth": width, "borderColor": color, "fontSize": style.get("fontSize"),
-            "bold": style.get("isBold"), "hAlign": style.get("hTextAlign") or style.get("textAlignment"),
+            "bold": style.get("isBold"), "italic": style.get("isItalic"), "underline": style.get("isUnderline"),
+            "fontName": style.get("fontName"), "markup": style.get("markup"),
+            "hAlign": style.get("hTextAlign") or style.get("textAlignment"),
             "vAlign": style.get("vTextAlign") or style.get("verticalAlignment"),
         }
     return styles
@@ -168,7 +170,23 @@ class _Ctx:
         return f"imp-{self.counter}"
 
 
-_ALIGN = {"Left": "left", "Center": "center", "Right": "right", "Justified": "left"}
+_ALIGN = {"Left": "left", "Center": "center", "Right": "right", "Justified": "justified"}
+_MARKUP = {"html": "html", "styled": "styled", "none": "none", "": "none"}
+# Jasper font names that the designer offers directly; anything else falls back to SansSerif with a warning.
+_FONT_ALIASES = {"DejaVu Sans": "SansSerif", "DejaVu Serif": "Serif", "DejaVu Sans Mono": "Monospaced", "Times-Roman": "Times New Roman",
+                 "Courier": "Courier New", "Liberation Sans": "Arial", "Liberation Serif": "Times New Roman"}
+_FONT_NAMES = {"SansSerif", "Arial", "Helvetica", "Verdana", "Tahoma", "Calibri", "Segoe UI", "Serif", "Times New Roman", "Georgia",
+               "Monospaced", "Courier New"}
+
+
+def _font_name(value: str | None, ctx: "_Ctx", band_name: str) -> str:
+    if not value:
+        return "SansSerif"
+    name = _FONT_ALIASES.get(value, value)
+    if name not in _FONT_NAMES:
+        ctx.warnings.append(f"{band_name}: font '{value}' is not available; SansSerif is used instead")
+        return "SansSerif"
+    return name
 _VALIGN = {"Top": "top", "Middle": "middle", "Bottom": "bottom"}
 
 
@@ -176,7 +194,7 @@ def _convert_element(node: ET.Element, ctx: _Ctx, band_name: str, dx: float = 0,
     kind = _local(node.tag)
     if kind not in ("staticText", "textField", "line", "rectangle", "image"):
         if kind not in ("reportElement", "box", "textElement", "graphicElement", "property"):
-            ctx.warnings.append(f"{band_name}: '{kind}' element abhi supported nahi (chhod diya)")
+            ctx.warnings.append(f"{band_name}: the '{kind}' element is not supported yet (skipped)")
         return None
     rep = _kid(node, "reportElement")
     if rep is None:
@@ -196,7 +214,10 @@ def _convert_element(node: ET.Element, ctx: _Ctx, band_name: str, dx: float = 0,
         "width": max(_num(rep.get("width"), 50), 1), "height": max(_num(rep.get("height"), 16), 1),
         "fontSize": _num((font.get("size") if font is not None else None) or style.get("fontSize") or 10, 10),
         "bold": _is_true((font.get("isBold") if font is not None else None) or style.get("bold") or "false"),
-        "italic": _is_true((font.get("isItalic") if font is not None else None) or "false"),
+        "italic": _is_true((font.get("isItalic") if font is not None else None) or style.get("italic") or "false"),
+        "underline": _is_true((font.get("isUnderline") if font is not None else None) or style.get("underline") or "false"),
+        "fontName": _font_name((font.get("fontName") if font is not None else None) or style.get("fontName"), ctx, band_name),
+        "markup": _MARKUP.get(((text_el.get("markup") if text_el is not None else None) or node.get("markup") or style.get("markup") or "").lower(), "none"),
         "align": _ALIGN.get((text_el.get("textAlignment") or text_el.get("hTextAlign")) if text_el is not None else "", _ALIGN.get(style.get("hAlign") or "", "left")),
         "vAlign": _VALIGN.get((text_el.get("verticalAlignment") or text_el.get("vTextAlign")) if text_el is not None else "", _VALIGN.get(style.get("vAlign") or "", "top")),
         "color": rep.get("forecolor") or style.get("color") or "#000000",
@@ -209,12 +230,12 @@ def _convert_element(node: ET.Element, ctx: _Ctx, band_name: str, dx: float = 0,
         expr, pattern = translate_expression(_text(_kid(node, "textFieldExpression")), ctx.aliases, ctx.warnings, band_name)
         element.update({"expression": expr, "pattern": node.get("pattern") or pattern, "blankWhenNull": _is_true(node.get("isBlankWhenNull", "false"))})
         if node.get("textAdjust") == "StretchHeight":
-            ctx.warnings.append(f"{band_name}: textAdjust=StretchHeight abhi nahi; fixed height rahegi (lamba text clip ho sakta hai)")
+            ctx.warnings.append(f"{band_name}: textAdjust=StretchHeight is not supported yet; the height stays fixed (long text may be cut off)")
     elif kind == "line":
         element.update({"borderColor": element["borderColor"] or element["color"], "borderWidth": width or 1, "height": max(_num(rep.get("height"), 0), 0.01)})
     elif kind == "image":
         element["src"] = ""
-        ctx.warnings.append(f"{band_name}: image resource import nahi hui; designer mein image dobara upload karein")
+        ctx.warnings.append(f"{band_name}: the image resource was not imported; upload the image again in the designer")
     return element
 
 
@@ -228,15 +249,15 @@ def _convert_band(band: ET.Element | None, name: str, ctx: _Ctx, table_out: dict
             table = next((c for c in child.iter() if _local(c.tag) == "table"), None)
             rep = _kid(child, "reportElement")
             if table is None or rep is None:
-                ctx.warnings.append(f"{name}: componentElement table nahi hai (chhod diya)")
+                ctx.warnings.append(f"{name}: the componentElement is not a table (skipped)")
                 continue
             if table_out:
-                ctx.warnings.append(f"{name}: ek se zyada tables; sirf pehla table import hua")
+                ctx.warnings.append(f"{name}: more than one table; only the first table was imported")
                 continue
             table_out.update({"table": table, "x": _num(rep.get("x")), "y": _num(rep.get("y")), "band": name})
             result["height"] = max(0.0, _num(rep.get("y")))  # rows after the table are generated from columnHeader/detail bands
             if _num(band.get("height")) > _num(rep.get("y")) + _num(rep.get("height")) + 1:
-                ctx.warnings.append(f"{name}: table ke neeche ka hissa import nahi hua")
+                ctx.warnings.append(f"{name}: the part below the table was not imported")
             continue
         element = _convert_element(child, ctx, name)
         if element is not None:
@@ -253,10 +274,10 @@ def _convert_table(info: dict[str, Any], ctx: _Ctx) -> dict[str, dict[str, Any]]
     for column in table:
         tag = _local(column.tag)
         if tag in ("tableHeader", "tableFooter"):
-            ctx.warnings.append(f"table: {tag} import nahi hua")
+            ctx.warnings.append(f"table: {tag} was not imported")
             continue
         if tag == "columnGroup":
-            ctx.warnings.append("table: columnGroup (merged header) import nahi hua")
+            ctx.warnings.append("table: columnGroup (merged header) was not imported")
             continue
         if tag != "column":
             continue
@@ -272,7 +293,7 @@ def _convert_table(info: dict[str, Any], ctx: _Ctx) -> dict[str, dict[str, Any]]
                     target["elements"].append(element)
         for extra in ("columnFooter", "groupHeader", "groupFooter", "tableHeader", "tableFooter"):
             if _kid(column, extra) is not None:
-                ctx.warnings.append(f"table column: {extra} import nahi hua")
+                ctx.warnings.append(f"table column: {extra} was not imported")
         offset += width
     return {"columnHeader": header, "detail": detail}
 
@@ -346,7 +367,7 @@ def _extract_query(query_text: str) -> tuple[str, str]:
             if body:
                 stages.append("{ " + stage + ": " + body + " }")
         if not stages:
-            raise ValueError("findQuery/collectionName mili lekin query body nahi mili")
+            raise ValueError("findQuery/collectionName was found but the query body is missing")
         return collection, "[" + ", ".join(stages) + "]"
     else:
         shell = re.search(r'db\.getCollection\(\s*["\']([^"\']+)["\']\s*\)|db\.([A-Za-z_]\w*)\.aggregate', text)
@@ -354,7 +375,7 @@ def _extract_query(query_text: str) -> tuple[str, str]:
             collection = shell.group(1) or shell.group(2)
         start = text.find("[")
         if start < 0:
-            raise ValueError("Query mein aggregation pipeline ([...]) nahi mili. Abhi sirf aggregate pipeline wali MongoDbQuery supported hai")
+            raise ValueError("The query has no aggregation pipeline ([...]). Only MongoDbQuery with an aggregate pipeline is supported for now")
     literal, _end = core._extract_literal_array(text, start)
     return collection, literal
 
@@ -363,15 +384,15 @@ def import_jrxml(xml_text: str) -> dict[str, Any]:
     import reporting_core as core
 
     if len(xml_text.encode("utf-8")) > MAX_JRXML_BYTES:
-        raise ValueError("JRXML 3 MB se bari hai")
+        raise ValueError("The JRXML is larger than 3 MB")
     if re.search(r"<!DOCTYPE|<!ENTITY", xml_text, re.IGNORECASE):
-        raise ValueError("JRXML mein DOCTYPE/ENTITY allowed nahi (security)")
+        raise ValueError("DOCTYPE/ENTITY is not allowed in a JRXML (security)")
     try:
         root = ET.fromstring(xml_text.encode("utf-8"))
     except ET.ParseError as exc:
-        raise ValueError(f"JRXML XML sahi nahi hai: {exc}") from None
+        raise ValueError(f"The JRXML is not valid XML: {exc}") from None
     if _local(root.tag) != "jasperReport":
-        raise ValueError("Yeh JasperReports .jrxml file nahi lagti (root <jasperReport> chahiye)")
+        raise ValueError("This does not look like a JasperReports .jrxml file (the root must be <jasperReport>)")
 
     warnings: list[str] = []
     styles = _collect_styles(root)
@@ -396,8 +417,12 @@ def import_jrxml(xml_text: str) -> dict[str, Any]:
                 aliases[name] = ("in", member.group(1))
             elif _collection_template(expr):
                 collection_templates[name] = _collection_template(expr)
+            elif expr and jexpr.check_syntax(expr) and all(kind == "P" for kind, _ in TOKEN.findall(expr)):
+                # Keep it as a computed parameter: the service evaluates the same Java-style expression.
+                user_params.append({"name": name, "type": JAVA_TYPES.get(param.get("class", ""), "string"), "label": name,
+                                    "required": False, "prompt": False, "expression": expr})
             else:
-                warnings.append(f"Parameter {name}: default expression translate nahi hui (query mein istemal ho to khali rahega)")
+                warnings.append(f"Parameter {name}: the default expression could not be translated (it stays empty if the query uses it)")
             continue
         user_params.append({"name": name, "type": JAVA_TYPES.get(param.get("class", ""), "string"), "label": name, "required": False})
     date_bases = {base for kind, base in aliases.values() if kind in ("start", "end")}
@@ -407,7 +432,7 @@ def import_jrxml(xml_text: str) -> dict[str, Any]:
             item["required"] = True
         if item["name"] in filter_bases:
             item["maxLength"] = 2000
-            item["description"] = "Comma se alag values (khali = sab)"
+            item["description"] = "Comma-separated values (empty = all)"
 
     # --- dataset: the table's subDataset query if present, else the main query
     table_node = next((c for c in root.iter() if _local(c.tag) == "table"), None)
@@ -431,15 +456,15 @@ def import_jrxml(xml_text: str) -> dict[str, Any]:
                         aliases[name] = ("in", member.group(1))
     query_node = _kid(dataset, "queryString")
     if query_node is None:
-        raise ValueError("JRXML mein <queryString> nahi mili; abhi sirf MongoDB aggregation wali reports import hoti hain")
+        raise ValueError("The JRXML has no <queryString>; only MongoDB aggregation reports can be imported for now")
     if query_node.get("language", "MongoDbQuery") not in ("MongoDbQuery", "mongodb", ""):
-        warnings.append(f"Query language '{query_node.get('language')}' MongoDB nahi; import fail ho sakta hai")
+        warnings.append(f"The query language '{query_node.get('language')}' is not MongoDB; the import may fail")
     collection, literal = _extract_query(_text(query_node))
     placeholder = re.fullmatch(r"\$P\{(\w+)\}", collection)
     if placeholder:
         collection = collection_templates.get(placeholder.group(1), "")
         if not collection:
-            warnings.append("Collection naam parameter se aata hai jo translate nahi hua; Setup tab mein bharein")
+            warnings.append("The collection name comes from a parameter that could not be translated; fill it in on the Setup tab")
     literal = re.sub(
         r"\$P!?\{([A-Za-z_]\w*)\}",
         lambda m: ("$P{" + aliases[m.group(1)][1] + "}" if aliases[m.group(1)][0] in ("start", "end")
@@ -453,13 +478,16 @@ def import_jrxml(xml_text: str) -> dict[str, Any]:
     columns = core._infer_pipeline_columns(pipeline)
     columns_from_design = not columns
     if not collection:
-        warnings.append("Collection ka naam query se nahi mila; Setup tab mein bharein")
+        warnings.append("The collection name was not found in the query; fill it in on the Setup tab")
+    for name in re.findall(r"\$P\{([A-Za-z_]\w*)\}", collection):
+        warnings.append(f"The collection name is built from the parameter {name}; give {name} its allowedValues (a list of allowed values) before saving")
 
     # --- design
     ctx = _Ctx(styles, aliases, warnings)
     table_info: dict[str, Any] = {}
     bands: dict[str, Any] = {}
-    for key in ("title", "pageHeader", "columnHeader", "detail", "columnFooter", "pageFooter", "summary"):
+    for key in ("title", "pageHeader", "columnHeader", "detail", "columnFooter", "pageFooter", "lastPageFooter",
+                "summary", "noData", "background"):
         holder = _kid(root, key)
         band = _kid(holder, "band") if holder is not None else None
         bands[key] = _convert_band(band, key, ctx, table_info)
@@ -467,13 +495,11 @@ def import_jrxml(xml_text: str) -> dict[str, Any]:
         generated = _convert_table(table_info, ctx)
         for key in ("columnHeader", "detail"):
             if bands[key]["elements"]:
-                warnings.append(f"{key} band mein pehle se elements the; table ke elements unke saath jore gaye")
+                warnings.append(f"The {key} band already had elements; the table elements were added to them")
             bands[key]["elements"].extend(generated[key]["elements"])
             bands[key]["height"] = max(bands[key]["height"], generated[key]["height"])
-    for key in ("lastPageFooter", "noData", "background"):
-        holder = _kid(root, key)
-        if holder is not None and _kid(holder, "band") is not None and (_kid(_kid(holder, "band"), "staticText") is not None or _kid(_kid(holder, "band"), "textField") is not None):
-            warnings.append(f"{key} band import nahi hua")
+    if (bands["noData"]["height"] or bands["noData"]["elements"]) and root.get("whenNoDataType") not in (None, "NoDataSection"):
+        warnings.append("The No Data band is printed whenever the report has no rows (whenNoDataType is treated as NoDataSection)")
 
     groups: list[dict[str, str]] = []
     group_headers: dict[str, Any] = {}
@@ -483,7 +509,7 @@ def import_jrxml(xml_text: str) -> dict[str, Any]:
         expr, _pattern = translate_expression(_text(_kid(group, "groupExpression")), aliases, warnings, f"group {gname}")
         token = TOKEN.fullmatch(expr)
         if not token or token.group(1) != "F":
-            warnings.append(f"Group {gname}: sirf $F{{field}} group expression supported; group chhod diya")
+            warnings.append(f"Group {gname}: only a $F{{field}} group expression is supported; the group was skipped")
             continue
         groups.append({"name": gname, "field": token.group(2)})
         for holder_name, out in (("groupHeader", group_headers), ("groupFooter", group_footers)):
@@ -498,7 +524,7 @@ def import_jrxml(xml_text: str) -> dict[str, Any]:
         expr, _p = translate_expression(_text(_kid(var, "variableExpression")), aliases, warnings, f"variable {vname}")
         token = TOKEN.fullmatch(expr) if expr else None
         if not calc or (calc != "Count" and not token):
-            warnings.append(f"Variable {vname}: calculation/expression supported nahi (chhod diya)")
+            warnings.append(f"Variable {vname}: the calculation/expression is not supported (skipped)")
             continue
         reset = var.get("resetType", "Report")
         reset_group = var.get("resetGroup", "")
@@ -534,10 +560,10 @@ def import_jrxml(xml_text: str) -> dict[str, Any]:
         columns.append(name)
         if columns_from_design:
             continue
-        warnings.append(f"Field '{name}' query ke output mein nahi hai; report mein khali aayegi")
+        warnings.append(f"Field '{name}' is not in the query output; it will be empty in the report")
     design["sort"] = [s for s in sort if s["field"] in columns] if sort else []
     if len(design["sort"]) != len(sort):
-        warnings.append("sortField ke kuch fields query output mein nahi; sort chhod diya")
+        warnings.append("Some sortField fields are not in the query output; the sort was skipped")
     design["groups"] = [g for g in design["groups"] if g["field"] in columns]
     design = designer_render.validate_design(design, columns, param_names)
 

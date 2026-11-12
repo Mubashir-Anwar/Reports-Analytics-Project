@@ -6,6 +6,26 @@ let selectedReport = null;
 let searchTerm = '';
 
 const formatLabels = { csv: 'CSV', xlsx: 'Excel (.xlsx)', pdf: 'PDF' };
+const ACCESS_MESSAGE = 'You do not have report access yet. Connect with the admin token on the Manage (/admin) page, then refresh this page.';
+
+// /reports and /generate need credentials; the runner reuses the token the admin page stored for this tab.
+let adminToken = '';
+try { adminToken = sessionStorage.getItem('mongoReportingAdminToken') || ''; } catch { /* storage unavailable */ }
+
+function accessHeaders(extra = {}) {
+  return adminToken ? { ...extra, 'X-Admin-Token': adminToken } : extra;
+}
+
+// On the user's own computer (REPORTING_LOCAL_BOOTSTRAP=true) the token can be picked up automatically.
+async function ensureLocalToken() {
+  if (adminToken) return;
+  try {
+    const response = await fetch('/api/admin/bootstrap', { cache: 'no-store' });
+    if (!response.ok) return;
+    adminToken = (await response.json()).token || '';
+    if (adminToken) sessionStorage.setItem('mongoReportingAdminToken', adminToken);
+  } catch { /* not available: the user connects on the admin page instead */ }
+}
 
 function showServiceState(text, kind = 'pending') {
   const pill = $('#service-state');
@@ -136,13 +156,15 @@ function setParameterControl(parameter) {
 }
 
 function selectReport(report) {
+  const previousReport = selectedReport;
   selectedReport = report;
   $('#selection-empty').hidden = true;
   $('#report-workspace').hidden = false;
   $('#report-title').textContent = report.title || report.id;
   $('#report-location').textContent = (report.folder || 'General').replaceAll('/', '  /  ');
   $('#report-description').textContent = report.description || 'Enter the report questions below, then choose a file format.';
-  $('#connection-tag').textContent = report.connectionId || 'MongoDB';
+  $('#connection-tag').textContent = `Data adapter: ${report.connectionId || 'default'}`;
+  if (selectedReport !== previousReport || !previousReport) showAdapterState(report);
   $('#run-message').hidden = true;
   $('#run-message').textContent = '';
 
@@ -167,7 +189,8 @@ async function loadReports() {
   reportList.innerHTML = '<p class="muted">Loading reports…</p>';
   showPageMessage('');
   try {
-    const response = await fetch('/reports', { headers: { Accept: 'application/json' } });
+    const response = await fetch('/reports', { headers: accessHeaders({ Accept: 'application/json' }) });
+    if (response.status === 401) throw new Error(ACCESS_MESSAGE);
     if (!response.ok) throw new Error(`Could not load reports (${response.status}).`);
     const data = await response.json();
     reports = data.reports || [];
@@ -234,7 +257,8 @@ runForm.addEventListener('submit', async (event) => {
   setRunMessage('Running the report and preparing your download…', 'pending');
   try {
     const url = `/generate/${encodeURIComponent(selectedReport.id)}.${format}?${query.toString()}`;
-    const response = await fetch(url, { headers: { Accept: 'application/octet-stream, application/json' } });
+    const response = await fetch(url, { headers: accessHeaders({ Accept: 'application/octet-stream, application/json' }) });
+    if (response.status === 401) throw new Error(ACCESS_MESSAGE);
     if (!response.ok) throw new Error(await readError(response));
     const blob = await response.blob();
     const objectUrl = URL.createObjectURL(blob);
@@ -261,12 +285,30 @@ $('#report-search').addEventListener('input', (event) => {
 });
 $('#refresh-reports').addEventListener('click', loadReports);
 
-fetch('/health', { headers: { Accept: 'application/json' } })
-  .then(async (response) => ({ response, data: await response.json() }))
-  .then(({ response, data }) => {
-    if (response.ok && data.status === 'ok') showServiceState(`Service ready · ${data.database}`, 'ready');
-    else showServiceState(`Service ${data.status || 'unavailable'}`, 'error');
-  })
+// The status pill shows the data adapter of the selected report (the one /generate will use).
+let statusRequest = 0;
+async function showAdapterState(report) {
+  const requestId = ++statusRequest;
+  const adapter = report.connectionId || 'default';
+  showServiceState(`Checking data adapter · ${adapter}`, 'pending');
+  try {
+    const response = await fetch(`/reports/connections/${encodeURIComponent(adapter)}/status`, { headers: accessHeaders({ Accept: 'application/json' }), cache: 'no-store' });
+    const data = await response.json().catch(() => ({}));
+    if (requestId !== statusRequest) return; // another report was selected meanwhile
+    if (response.ok && data.status === 'ok') {
+      showServiceState(`Connected · ${data.name || adapter}${data.database ? ` (${data.database})` : ''}`, 'ready');
+      $('#service-state').title = '';
+    } else {
+      showServiceState(`Not connected · ${data.name || adapter}`, 'error');
+      $('#service-state').title = data.detail || `Status check failed (${response.status})`;
+    }
+  } catch {
+    if (requestId === statusRequest) showServiceState(`Not connected · ${adapter}`, 'error');
+  }
+}
+
+fetch('/health', { headers: { Accept: 'application/json' }, cache: 'no-store' })
+  .then(() => { if (!selectedReport) showServiceState('Service running', 'ready'); })
   .catch(() => showServiceState('Service unavailable', 'error'));
 
-loadReports();
+ensureLocalToken().then(loadReports);

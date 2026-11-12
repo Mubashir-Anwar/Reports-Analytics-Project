@@ -31,7 +31,7 @@ COLLECTION = os.getenv("SBP_COLLECTION", "report_rows_demo")
 
 # Refuse to seed a collection that does not clearly identify itself as a demo.
 if not COLLECTION.lower().endswith("_demo"):
-    raise SystemExit("Safety stop: SBP_COLLECTION ka naam _demo par khatam hona chahiye.")
+    raise SystemExit("Safety stop: the SBP_COLLECTION name must end with _demo.")
 
 SAMPLE_ROWS = [
     {
@@ -71,7 +71,7 @@ def main() -> None:
         collection = client[DATABASE][COLLECTION]
         for row in SAMPLE_ROWS:
             collection.update_one({"_id": row["_id"]}, {"$set": row}, upsert=True)
-        print(f"{len(SAMPLE_ROWS)} synthetic rows upsert ho gayin: {DATABASE}.{COLLECTION}")
+        print(f"{len(SAMPLE_ROWS)} synthetic rows upserted into {DATABASE}.{COLLECTION}")
     finally:
         client.close()
 

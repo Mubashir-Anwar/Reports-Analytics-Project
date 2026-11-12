@@ -83,7 +83,7 @@ def _tokenize(text: str) -> list[tuple[str, Any]]:
 
 # --------------------------------------------------------------------- parser
 _STATIC_CLASSES = {"Double", "Integer", "Long", "String", "Math", "Boolean", "BigDecimal", "Float", "Short"}
-_NEW_CLASSES = {"Date", "DecimalFormat", "SimpleDateFormat", "Double", "Integer", "Long", "String", "BigDecimal", "Float"}
+_NEW_CLASSES = {"Date", "DecimalFormat", "SimpleDateFormat", "Double", "Integer", "Long", "String", "BigDecimal", "Float", "GregorianCalendar"}
 _PACKAGE_PREFIXES = ("java", "lang", "util", "text", "math", "sql")
 
 
@@ -122,7 +122,7 @@ class _Parser:
     def _enter(self):
         self.depth += 1
         if self.depth > MAX_DEPTH:
-            raise JExprError("Expression bohat gehri hai")
+            raise JExprError("The expression is nested too deeply")
 
     def ternary(self):
         self._enter()
@@ -203,9 +203,9 @@ class _Parser:
         while self.accept("op", "."):
             kind, name = self.take()
             if kind != "name":
-                raise JExprError("Method naam expected")
+                raise JExprError("A method name is expected")
             if self.peek() != ("op", "("):
-                raise JExprError(f"Field access .{name} supported nahi")
+                raise JExprError(f"Field access .{name} is not supported")
             node = ("call", node, name, self.args())
         return node
 
@@ -230,7 +230,7 @@ class _Parser:
                 parts = self._dotted()
                 cls = parts[-1]
                 if cls not in _NEW_CLASSES:
-                    raise JExprError(f"new {cls} supported nahi")
+                    raise JExprError(f"new {cls} is not supported")
                 return ("new", cls, self.args())
             parts = [value]
             while self.peek() == ("op", ".") and self.peek(1)[0] == "name" and self.peek(2) == ("op", "."):
@@ -241,7 +241,7 @@ class _Parser:
                 method = self.take()[1]
                 cls = parts[-1]
                 if cls not in _STATIC_CLASSES:
-                    raise JExprError(f"{'.'.join(parts)}.{method}() supported nahi")
+                    raise JExprError(f"{'.'.join(parts)}.{method}() is not supported")
                 return ("static", cls, method, self.args())
             raise JExprError(f"Unknown name: {value}")
         raise JExprError(f"Unexpected token: {value!r}")
@@ -250,7 +250,7 @@ class _Parser:
         parts = []
         kind, value = self.take()
         if kind != "name":
-            raise JExprError("Class naam expected")
+            raise JExprError("A class name is expected")
         parts.append(value)
         while self.peek() == ("op", ".") and self.peek(1)[0] == "name":
             self.take()
@@ -261,7 +261,7 @@ class _Parser:
 @lru_cache(maxsize=2048)
 def compile_expression(text: str):
     if len(text) > MAX_EXPRESSION_CHARS:
-        raise JExprError("Expression bohat lambi hai")
+        raise JExprError("The expression is too long")
     return _Parser(_tokenize(text.strip())).parse()
 
 
@@ -289,7 +289,7 @@ def to_number(value: Any) -> int | float:
             pass
     if hasattr(value, "to_decimal"):
         return float(value.to_decimal())
-    raise JExprError(f"Number nahi: {value!r}")
+    raise JExprError(f"Not a number: {value!r}")
 
 
 def java_str(value: Any) -> str:
@@ -298,6 +298,11 @@ def java_str(value: Any) -> str:
     if isinstance(value, bool):
         return "true" if value else "false"
     if isinstance(value, float):
+        # Java's Double.toString spelling; int(inf/nan) would raise in Python.
+        if math.isnan(value):
+            return "NaN"
+        if math.isinf(value):
+            return "Infinity" if value > 0 else "-Infinity"
         if value == int(value) and abs(value) < 1e7:
             return f"{value:.1f}"
         return repr(value)
@@ -308,7 +313,7 @@ def java_str(value: Any) -> str:
 
 def _cap(text: str) -> str:
     if len(text) > MAX_STRING:
-        raise JExprError("Result bohat bara hai")
+        raise JExprError("The result is too large")
     return text
 
 
@@ -352,8 +357,13 @@ class DecimalFormatter:
         number = to_number(value)
         if self.percent:
             number = number * 100
+        # Java DecimalFormat prints NaN bare and infinity as the ∞ symbol inside prefix/suffix.
+        if isinstance(number, float) and math.isnan(number):
+            return "NaN"
         negative = number < 0
         number = abs(number)
+        if isinstance(number, float) and math.isinf(number):
+            return ("-" if negative else "") + self.prefix + "∞" + self.suffix
         from decimal import ROUND_HALF_EVEN, Decimal
         quantum = Decimal(1).scaleb(-self.max_frac)
         dec = Decimal(repr(float(number)) if isinstance(number, float) else number).quantize(quantum, rounding=ROUND_HALF_EVEN)
@@ -406,7 +416,7 @@ def _date_tokens(pattern: str) -> list[tuple[str, str]]:
             while j < len(pattern) and pattern[j] == char:
                 j += 1
             if char not in "yMdHhmsSaEzZk":
-                raise JExprError(f"Date pattern letter '{char}' supported nahi")
+                raise JExprError(f"The date pattern letter '{char}' is not supported")
             tokens.append((char, pattern[i:j]))
             i = j
         else:
@@ -457,7 +467,7 @@ class DateFormatter:
 
     def parse(self, value: Any) -> datetime:
         if not isinstance(value, str):
-            raise JExprError("parse() ko text chahiye")
+            raise JExprError("parse() needs text")
         regex, order = "", []
         for kind, text in self.tokens:
             n = len(text)
@@ -477,7 +487,7 @@ class DateFormatter:
                 order.append((kind, n))
         match = re.fullmatch(regex, value.strip())
         if not match:
-            raise JExprError(f"Date parse nahi hui: {value[:40]!r}")
+            raise JExprError(f"The date could not be parsed: {value[:40]!r}")
         parts = {"y": 1970, "M": 1, "d": 1, "H": 0, "m": 0, "s": 0, "S": 0}
         pm = None
         for (kind, n), raw in zip(order, match.groups()):
@@ -518,7 +528,7 @@ def to_datetime(value: Any) -> datetime:
                 pass
     if _is_num(value):
         return datetime(1970, 1, 1) + timedelta(milliseconds=value)
-    raise JExprError(f"Date nahi: {value!r}")
+    raise JExprError(f"Not a date: {value!r}")
 
 
 # ------------------------------------------------------------------ evaluator
@@ -527,7 +537,7 @@ def _truthy(value: Any) -> bool:
         return value
     if value is None:
         raise JExprError("null condition")
-    raise JExprError("Condition boolean honi chahiye")
+    raise JExprError("A condition must be a boolean")
 
 
 def _equal(left: Any, right: Any) -> bool:
@@ -575,6 +585,56 @@ _STRING_METHODS: dict[str, Callable[..., Any]] = {
 }
 
 
+class Calendar:
+    """java.util.GregorianCalendar subset: built from fields, .getTime() gives the Date (a datetime)."""
+
+    def __init__(self, moment: datetime):
+        self.moment = moment
+
+
+def _gregorian(args: list) -> Calendar:
+    if not args:
+        return Calendar(datetime.now(timezone.utc).replace(tzinfo=None))
+    if len(args) not in (3, 5, 6):
+        raise JExprError("GregorianCalendar(year, month, day[, hour, minute[, second]]) expected")
+    numbers = [int(to_number(a)) for a in args] + [0] * (6 - len(args))
+    year, month, day, hour, minute, second = numbers
+    # Java is lenient (month 12 = next January, day 0 = last day of previous month): normalise the same way.
+    year += month // 12
+    month %= 12
+    try:
+        moment = datetime(year, month + 1, 1) + timedelta(days=day - 1, hours=hour, minutes=minute, seconds=second)
+    except (ValueError, OverflowError) as error:
+        raise JExprError(f"Invalid GregorianCalendar date: {error}") from None
+    return Calendar(moment)
+
+
+_EPOCH = datetime(1970, 1, 1)
+# java.util.Date getters (deprecated in Java but common in Jasper reports): getYear() is year - 1900,
+# getMonth() is 0-11, getDay() is 0 = Sunday.
+_DATE_METHODS: dict[str, Callable[[datetime], Any]] = {
+    "getYear": lambda d: d.year - 1900,
+    "getMonth": lambda d: d.month - 1,
+    "getDate": lambda d: d.day,
+    "getDay": lambda d: (d.weekday() + 1) % 7,
+    "getHours": lambda d: d.hour,
+    "getMinutes": lambda d: d.minute,
+    "getSeconds": lambda d: d.second,
+    "getTime": lambda d: int((d - _EPOCH).total_seconds() * 1000),
+}
+
+
+def _java_pow(x: float, y: float) -> float:
+    """Math.pow with Java results instead of Python exceptions: overflow -> ±Infinity, domain error -> NaN."""
+    try:
+        return math.pow(x, y)
+    except OverflowError:
+        odd_power_of_negative = x < 0 and float(y).is_integer() and int(y) % 2 == 1
+        return -math.inf if odd_power_of_negative else math.inf
+    except ValueError:
+        return math.nan
+
+
 def _substring(s: str, start: int, end: int | None = None) -> str:
     end = len(s) if end is None else end
     if not (isinstance(start, int) and isinstance(end, int)) or start < 0 or end > len(s) or start > end:
@@ -590,7 +650,7 @@ class Evaluator:
     def run(self, node) -> Any:
         self.steps += 1
         if self.steps > 20000:
-            raise JExprError("Expression bohat bhaari hai")
+            raise JExprError("The expression is too expensive to evaluate")
         kind = node[0]
         if kind == "lit":
             return node[1]
@@ -627,6 +687,8 @@ class Evaluator:
     def construct(self, cls: str, args: list) -> Any:
         if cls == "Date":
             return datetime.now(timezone.utc).replace(tzinfo=None) if not args else to_datetime(args[0])
+        if cls == "GregorianCalendar":
+            return _gregorian(args)
         if cls == "DecimalFormat":
             return DecimalFormatter(str(args[0]))
         if cls == "SimpleDateFormat":
@@ -637,7 +699,7 @@ class Evaluator:
             return int(to_number(args[0]))
         if cls == "String":
             return java_str(args[0]) if args else ""
-        raise JExprError(f"new {cls} supported nahi")
+        raise JExprError(f"new {cls} is not supported")
 
     def static(self, cls: str, method: str, args: list) -> Any:
         if cls in ("Double", "Float", "BigDecimal") and method in ("parseDouble", "valueOf", "parseFloat"):
@@ -655,12 +717,12 @@ class Evaluator:
             numbers = [to_number(a) for a in args]
             table = {
                 "abs": lambda x: abs(x), "floor": lambda x: float(math.floor(x)), "ceil": lambda x: float(math.ceil(x)),
-                "round": lambda x: int(math.floor(x + 0.5)), "sqrt": lambda x: math.sqrt(x),
-                "max": lambda x, y: max(x, y), "min": lambda x, y: min(x, y), "pow": lambda x, y: math.pow(x, y),
+                "round": lambda x: int(math.floor(x + 0.5)), "sqrt": lambda x: math.sqrt(x) if x >= 0 else math.nan,
+                "max": lambda x, y: max(x, y), "min": lambda x, y: min(x, y), "pow": _java_pow,
             }
             if method in table:
                 return table[method](*numbers)
-        raise JExprError(f"{cls}.{method}() supported nahi")
+        raise JExprError(f"{cls}.{method}() is not supported")
 
     def call(self, target: Any, method: str, args: list) -> Any:
         if isinstance(target, DecimalFormatter) and method == "format":
@@ -668,7 +730,18 @@ class Evaluator:
         if isinstance(target, DateFormatter) and method in ("format", "parse"):
             return getattr(target, method)(args[0])
         if target is None:
-            raise JExprError(f"null par .{method}()")
+            raise JExprError(f".{method}() called on null")
+        if isinstance(target, Calendar):
+            if method == "getTime":
+                return target.moment
+            raise JExprError(f"GregorianCalendar.{method}() is not supported")
+        if isinstance(target, (date, datetime)):
+            moment = to_datetime(target)
+            if method in _DATE_METHODS and not args:
+                return _DATE_METHODS[method](moment)
+            if method in ("before", "after") and len(args) == 1:
+                other = to_datetime(args[0])
+                return moment < other if method == "before" else moment > other
         if isinstance(target, str):
             if method == "substring":
                 return _substring(target, *args)
@@ -682,12 +755,18 @@ class Evaluator:
             return java_str(target)
         if method == "equals":
             return _equal(target, args[0])
-        raise JExprError(f".{method}() supported nahi")
+        raise JExprError(f".{method}() is not supported")
 
 
 def evaluate(text: str, resolve: Callable[[str, str], Any]) -> Any:
     """Compile (cached) and evaluate. Raises JExprError on any failure."""
     try:
         return Evaluator(resolve).run(compile_expression(text))
+    except JExprError:
+        raise
     except RecursionError as error:
-        raise JExprError("Expression bohat gehri hai") from error
+        raise JExprError("The expression is nested too deeply") from error
+    except (ArithmeticError, ValueError, TypeError, IndexError, KeyError) as error:
+        # Row data must never crash the whole report: a Python runtime error becomes a blank cell,
+        # like a Jasper expression exception would only affect that expression.
+        raise JExprError(f"Expression runtime error: {type(error).__name__}") from error
