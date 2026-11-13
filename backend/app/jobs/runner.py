@@ -9,7 +9,7 @@ import os
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from types import SimpleNamespace
 from typing import Any
 from zoneinfo import ZoneInfo
@@ -63,11 +63,26 @@ class JobRunner:
                                 "finishedAt": _iso(_now())})
 
     def _loop(self) -> None:
+        last_cleanup = 0.0
         while not self._stop.wait(self.poll):
             try:
                 self.tick()
+                if time.monotonic() - last_cleanup > 3600:
+                    last_cleanup = time.monotonic()
+                    self.remove_old_outputs()
             except Exception:  # noqa: BLE001 - the scheduler must keep running
                 LOG.exception("Scheduler tick failed")
+
+    @staticmethod
+    def remove_old_outputs(now: datetime | None = None) -> int:
+        """Report files hold business data: runs older than REPORTING_OUTPUT_DAYS (default 30) are deleted with
+        their files, so outputs do not pile up on the server."""
+        days = max(1, int(os.getenv("REPORTING_OUTPUT_DAYS", "30") or 30))
+        cutoff = _iso((now or _now()) - timedelta(days=days))
+        removed = store.delete_runs(lambda run: (run.get("finishedAt") or run.get("queuedAt") or "") < cutoff)
+        if removed:
+            LOG.info("Removed %d report runs older than %d days (with their files)", removed, days)
+        return removed
 
     # ------------------------------------------------------------- scheduling
     def tick(self, now: datetime | None = None) -> list[dict[str, Any]]:

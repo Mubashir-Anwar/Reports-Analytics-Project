@@ -41,7 +41,7 @@ def register(app: FastAPI, ctx: SimpleNamespace) -> None:
             return JSONResponse({"status": "not_ready", "storage": "unavailable", "detail": type(exc).__name__}, status_code=503)
         runner = ctx.job_runner
         return JSONResponse({"status": "ready", "version": SERVICE_VERSION, "storage": store.backend,
-                             "scheduler": "on" if runner.scheduler_on else "off", "reports": len(ctx.reports_by_id)})
+                             "scheduler": "on" if runner.scheduler_on else "off"})
 
     @app.get("/reports/connections/{connection_id}/status")
     def report_connection_status(connection_id: str, request: Request) -> dict[str, Any]:

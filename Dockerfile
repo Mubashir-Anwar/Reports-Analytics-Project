@@ -17,7 +17,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     REPORTING_DATA_DIR=/data \
     REPORTING_LOCAL_BOOTSTRAP=false \
-    REPORTING_ACCESS_MODE=required
+    REPORTING_ACCESS_MODE=required     REPORTING_ENABLED_AREAS=runner,admin,designer,server
 
 WORKDIR /app
 COPY requirements.txt .
@@ -29,6 +29,7 @@ COPY reports ./reports
 COPY ui/index.html ui/runner.css ui/runner.js ui/styles.css ./ui/
 COPY --from=frontend /src/ui/app ./ui/app
 
+# API docs (/docs, /openapi.json) are off in the image; add "docs" to REPORTING_ENABLED_AREAS to show them.
 # Nothing from data/ is baked in: reports, adapters, users and secrets live on the /data volume.
 # The "default" data adapter comes from MONGODB_URI / MONGODB_DATABASE.
 RUN useradd --system --uid 10001 reporting && mkdir -p /data && chown -R reporting /data

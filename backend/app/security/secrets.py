@@ -1,6 +1,9 @@
 """private_secrets.json (admin token, adapter secrets) and the optional local .env file."""
 from __future__ import annotations
 
+import base64
+import hashlib
+import json
 import os
 import secrets
 from typing import Any
@@ -9,6 +12,24 @@ from backend.app.constants import PROJECT_ROOT
 from backend.app.logs import LOG
 from backend.app.storage.store import get_store
 
+ENCRYPTED_FORMAT = "fernet-v1"
+
+
+def _cipher():
+    """Fernet (AES + HMAC) from REPORTING_SECRETS_KEY, or None when no key is set.
+    The key may be a Fernet key (python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())")
+    or any passphrase of at least 32 characters."""
+    raw = os.getenv("REPORTING_SECRETS_KEY", "").strip()
+    if not raw:
+        return None
+    from cryptography.fernet import Fernet
+    try:
+        return Fernet(raw.encode("ascii"))
+    except (ValueError, UnicodeEncodeError):
+        if len(raw) < 32:
+            raise RuntimeError("REPORTING_SECRETS_KEY must be a Fernet key or a passphrase of at least 32 characters") from None
+        return Fernet(base64.urlsafe_b64encode(hashlib.sha256(raw.encode("utf-8")).digest()))
+
 
 def _load_private_secrets() -> dict[str, Any]:
     raw = get_store().read_json("private_secrets.json")
@@ -16,6 +37,18 @@ def _load_private_secrets() -> dict[str, Any]:
         return {"admin_token": "", "mongo_connections": {}}
     if not isinstance(raw, dict):
         raise ValueError("The root of private_secrets.json must be a JSON object")
+    if raw.get("format") == ENCRYPTED_FORMAT:
+        cipher = _cipher()
+        if cipher is None:
+            raise RuntimeError("The private secrets are encrypted: set REPORTING_SECRETS_KEY (the same key as when they were saved)")
+        from cryptography.fernet import InvalidToken
+        try:
+            raw = json.loads(cipher.decrypt(str(raw.get("data", "")).encode("ascii")))
+        except InvalidToken:
+            raise RuntimeError("REPORTING_SECRETS_KEY does not open the private secrets (wrong key?)") from None
+    elif _cipher() is not None:
+        _save_private_secrets(raw)  # first start with a key: encrypt what was stored in plain text
+        LOG.info("The private secrets are now encrypted with REPORTING_SECRETS_KEY")
     connections = raw.get("mongo_connections", {})
     if not isinstance(connections, dict):
         raise ValueError("mongo_connections in private_secrets.json must be a JSON object")
@@ -26,7 +59,13 @@ def _load_private_secrets() -> dict[str, Any]:
 
 
 def _save_private_secrets(payload: dict[str, Any]) -> None:
-    # files backend: mode 0600 on Unix (Windows inherits the current user's ACL); PostgreSQL: a private row
+    """Admin token and adapter URLs/passwords. Encrypted when REPORTING_SECRETS_KEY is set (recommended: then a
+    copy of the data folder or of the storage database alone does not reveal any database password).
+    files backend: mode 0600 on Unix (Windows inherits the current user's ACL); PostgreSQL: a private row."""
+    cipher = _cipher()
+    if cipher is not None:
+        token = cipher.encrypt(json.dumps(payload, ensure_ascii=False).encode("utf-8")).decode("ascii")
+        payload = {"format": ENCRYPTED_FORMAT, "data": token}
     get_store().write_json("private_secrets.json", payload, private=True)
 
 

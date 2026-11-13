@@ -450,6 +450,26 @@ def _validate_pipeline_parameter_names(pipeline: Any, allowed_names: set[str]) -
             _validate_pipeline_parameter_names(value, allowed_names)
 
 
+# Stages that show server internals (other users' operations, sessions, plans, index use) or follow changes:
+# never needed for a report, so refused like writes.
+SERVER_INFO_STAGES = {
+    "$currentOp", "$listSessions", "$listLocalSessions", "$planCacheStats", "$indexStats", "$collStats",
+    "$changeStream", "$changeStreamSplitLargeEvent", "$listSearchIndexes", "$listSampledQueries", "$querySettings",
+    "$shardedDataDistribution", "$listClusterCatalog", "$listCachedAndActiveUsers",
+}
+COLLECTION_STAGES = {"$lookup": "from", "$graphLookup": "from", "$unionWith": "coll"}
+
+
+def _check_other_collection(stage: str, value: Any) -> None:
+    """$lookup / $graphLookup / $unionWith may read another collection of the same database, but not system.*
+    collections and not another database."""
+    target = value if isinstance(value, str) else value.get(COLLECTION_STAGES[stage]) if isinstance(value, dict) else None
+    if isinstance(target, dict) or (isinstance(value, dict) and "db" in value):
+        raise ValueError(f"{stage} may only read a collection of the same database")
+    if isinstance(target, str) and target.lower().startswith("system."):
+        raise ValueError(f"{stage} may not read system collections")
+
+
 def _validate_read_only_pipeline(node: Any) -> None:
     if isinstance(node, dict):
         for key, value in node.items():
@@ -457,6 +477,10 @@ def _validate_read_only_pipeline(node: Any) -> None:
                 raise ValueError("A reporting pipeline must be read-only; $out and $merge are not allowed")
             if key in {"$function", "$accumulator", "$where"}:
                 raise ValueError("$function, $accumulator and $where (which run JavaScript) are not allowed in a pipeline")
+            if key in SERVER_INFO_STAGES:
+                raise ValueError(f"{key} shows server information and is not allowed in a report pipeline")
+            if key in COLLECTION_STAGES:
+                _check_other_collection(key, value)
             _validate_read_only_pipeline(value)
     elif isinstance(node, list):
         for value in node:

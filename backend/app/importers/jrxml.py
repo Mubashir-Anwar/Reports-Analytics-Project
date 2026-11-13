@@ -10,6 +10,8 @@ import re
 import xml.etree.ElementTree as ET
 from typing import Any
 
+from defusedxml import ElementTree as SafeET
+
 from backend.app.expressions import jexpr
 from backend.app.rendering import engine as designer_render
 
@@ -396,7 +398,7 @@ def import_jrxml(xml_text: str) -> dict[str, Any]:
     if re.search(r"<!DOCTYPE|<!ENTITY", xml_text, re.IGNORECASE):
         raise ValueError("DOCTYPE/ENTITY is not allowed in a JRXML (security)")
     try:
-        root = ET.fromstring(xml_text.encode("utf-8"))
+        root = SafeET.fromstring(xml_text.encode("utf-8"), forbid_dtd=True)
     except ET.ParseError as exc:
         raise ValueError(f"The JRXML is not valid XML: {exc}") from None
     if _local(root.tag) != "jasperReport":

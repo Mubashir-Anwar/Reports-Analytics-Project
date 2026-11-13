@@ -8,7 +8,7 @@ from fastapi import FastAPI, HTTPException, Request
 
 from backend.app.constants import USER_ROLES, USERNAME_PATTERN
 from backend.app.logs import LOG
-from backend.app.security.users import _hash_password, bootstrap_login_active, load_users, save_users
+from backend.app.security.users import bootstrap_login_active, load_users, save_users, set_user_password
 
 
 def register(app: FastAPI, ctx: SimpleNamespace) -> None:
@@ -35,12 +35,12 @@ def register(app: FastAPI, ctx: SimpleNamespace) -> None:
         if not USERNAME_PATTERN.fullmatch(username):
             raise HTTPException(status_code=422, detail="Username: 2-64 letters, numbers, dot, @, _ or -")
         role = valid_role(payload.get("role", "viewer"))
-        salt, digest = _hash_password(valid_password(payload.get("password")))
+        new_user: dict[str, Any] = {"username": username, "role": role, "sessionVersion": 0, "createdAt": now_iso()}
+        set_user_password(new_user, valid_password(payload.get("password")))
         users = load_users()
         if any(str(item["username"]).casefold() == username.casefold() for item in users):
             raise HTTPException(status_code=409, detail="A user with this name already exists")
-        users.append({"username": username, "role": role, "salt": salt, "hash": digest, "sessionVersion": 0,
-                      "createdAt": now_iso()})
+        users.append(new_user)
         save_users(users)
         LOG.info("Server user %s created (%s)", username, role)
         return {"user": user_view(users[-1])}
@@ -59,7 +59,7 @@ def register(app: FastAPI, ctx: SimpleNamespace) -> None:
         if "disabled" in payload:
             user["disabled"] = bool(payload["disabled"])
         if payload.get("password"):
-            user["salt"], user["hash"] = _hash_password(valid_password(payload["password"]))
+            set_user_password(user, valid_password(payload["password"]))
         if before and not admins_left(users):
             raise HTTPException(status_code=409, detail="Keep at least one active admin user")
         user["sessionVersion"] = int(user.get("sessionVersion", 0)) + 1  # signs this user out everywhere

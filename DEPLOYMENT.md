@@ -263,3 +263,22 @@ images; blob frames for the PDF preview), `X-Frame-Options: SAMEORIGIN`, `X-Cont
 **Data adapters for SQL databases.** Give each adapter a database user that can only `SELECT`. PostgreSQL, MySQL and
 Oracle queries run in a read-only transaction; SQL Server has no such mode, so every query is rolled back after it
 is read — a SELECT-only login is the real protection there.
+
+## Keeping the data safe (security checklist)
+
+Checked in the security review (tests: `tests/test_security.py`, `tests/test_storage.py`):
+
+| Area | What the service does | What you do |
+|---|---|---|
+| Sign-in and roles | Every data API needs a token or a `/server` session (a test calls every route without credentials); constant-time token checks; PBKDF2-SHA256 with 600 000 iterations (older hashes are upgraded at the next sign-in); 10 failed sign-ins per address in 10 minutes, on all instances | Create named users in Admin → Users; give designer/admin roles only to people who build reports |
+| Secrets at rest | Adapter URLs/passwords and the admin token are in `private_secrets.json` (mode 0600). With **`REPORTING_SECRETS_KEY`** they are encrypted (Fernet: AES + HMAC); an existing plain file is encrypted at the next start | **Set `REPORTING_SECRETS_KEY`** (a Fernet key or a passphrase of 32+ characters) and keep it outside the data folder / database backups. Losing it means re-entering the adapter passwords |
+| Report databases | MongoDB pipelines: no writes (`$out`, `$merge`), no JavaScript, no server internals (`$currentOp`, `$indexStats`, …), no `system.*` collections or other databases. SQL: one read-only statement, bound values, read-only transaction (SQL Server: rolled back) | Give every adapter a **read-only database user** that can see only the reporting collections / tables |
+| Uploads | `.mrd` / `.jrxml` are parsed with defusedxml (no DTD, entities or external references); 12 MB file and 25 MB request limits | — |
+| Browser | CSP, `X-Frame-Options`, `nosniff`, HttpOnly + SameSite=Strict session cookie, JSON-only writes (no cross-site forms), HSTS when enabled | HTTPS in front (`deploy/nginx.conf`), `REPORTING_SECURE_COOKIES=true`, `REPORTING_HSTS=true` |
+| Report files | Background/scheduled outputs are visible only to their owner (and admins) and are deleted after **`REPORTING_OUTPUT_DAYS`** (default 30) | Lower it if the reports hold sensitive data |
+| API docs | `/docs` and `/openapi.json` are off in the Docker image | Keep them off in production |
+| Exports | Excel/CSV cells that start with `=`, `+`, `-`, `@` are neutralised (no formula injection) | — |
+| Backups | — | Back up the storage database (or the data folder) and keep `REPORTING_SECRETS_KEY`, `REPORTING_SESSION_SECRET` and the admin token in a password manager, separately |
+
+Known limits: every signed-in `/server` user can see and run every published report (no per-folder permissions
+yet); designers can query any registered data adapter, so adapter users must be limited in the database itself.

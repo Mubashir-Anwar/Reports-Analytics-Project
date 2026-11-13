@@ -38,15 +38,17 @@ class Dialect:
     describe_sql: Callable[[str], str]
 
 
+# The Read Fields wrappers below put the report's own SQL (already checked by prepare_sql: one read-only statement,
+# values bound as parameters) inside a query that returns no rows; nothing from a request is pasted in.
 DIALECTS: dict[str, Dialect] = {
     "postgresql": Dialect("postgresql", "PostgreSQL", ("postgresql://", "postgres://"), 5432, "psycopg", 'psycopg[binary]',
-                          "pyformat", "any", lambda sql: f"SELECT * FROM ({sql}) AS report_query LIMIT 0"),
+                          "pyformat", "any", lambda sql: f"SELECT * FROM ({sql}) AS report_query LIMIT 0"),  # nosec B608
     "mysql": Dialect("mysql", "MySQL / MariaDB", ("mysql://", "mariadb://"), 3306, "pymysql", "PyMySQL",
-                     "pyformat", "expand", lambda sql: f"SELECT * FROM ({sql}) AS report_query LIMIT 0"),
+                     "pyformat", "expand", lambda sql: f"SELECT * FROM ({sql}) AS report_query LIMIT 0"),  # nosec B608
     "sqlserver": Dialect("sqlserver", "SQL Server", ("sqlserver://", "mssql://"), 1433, "pymssql", "pymssql",
-                         "pyformat", "expand", lambda sql: f"SELECT TOP 0 * FROM ({sql}) AS report_query"),
+                         "pyformat", "expand", lambda sql: f"SELECT TOP 0 * FROM ({sql}) AS report_query"),  # nosec B608
     "oracle": Dialect("oracle", "Oracle", ("oracle://",), 1521, "oracledb", "oracledb",
-                      "named", "expand", lambda sql: f"SELECT * FROM ({sql}) report_query WHERE 1 = 0"),
+                      "named", "expand", lambda sql: f"SELECT * FROM ({sql}) report_query WHERE 1 = 0"),  # nosec B608
 }
 SQL_TYPES = set(DIALECTS)
 URL_PREFIXES = {kind: d.prefixes for kind, d in DIALECTS.items()}

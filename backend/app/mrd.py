@@ -5,6 +5,8 @@ import json
 import xml.etree.ElementTree as ET
 from typing import Any
 
+from defusedxml import ElementTree as SafeET  # parsing uploads: no DTDs, entities or external references
+
 
 def render_report_definition_xml(definition: dict[str, Any]) -> bytes:
     """Package the complete saved definition as an importable XML template."""
@@ -22,7 +24,7 @@ def render_report_definition_xml(definition: dict[str, Any]) -> bytes:
 def parse_report_definition_xml(raw_xml: str) -> dict[str, Any]:
     if len(raw_xml.encode("utf-8")) > 5_000_000:
         raise ValueError("The report definition XML is larger than 5 MB")
-    root = ET.fromstring(raw_xml)
+    root = SafeET.fromstring(raw_xml, forbid_dtd=True)
     if root.tag != "mongoReportDefinition" or root.attrib.get("version") != "1":
         raise ValueError("This is not a supported Mongo report definition XML file")
     payload = root.find("definition")

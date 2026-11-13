@@ -253,3 +253,13 @@ Jasper wali Java expressions ab safe tareeqe se chalti hain (Java ya eval ke bag
 - Importer ab `findQuery`/`collectionName` wali queries, `"aggregate": $P{CollectionName}` (jahan CollectionName = `"Edith-"+$P{ProductCode}+"-PaymentPlans"`) aur 14400px tak ke pages sambhalta hai.
 - Collection template (`Edith-$P{ProductCode}-X`): parameter ki value sirf letters/numbers/`_`/`-` ho sakti hai.
 - Dotted fields (`Fields.HBLIPF194`) nested documents se padhi jati hain.
+
+## Data ki hifazat (security)
+
+- **`REPORTING_SECRETS_KEY`** zaroor set karein (32+ characters ka passphrase ya Fernet key): adapters ke passwords aur admin token encrypt ho kar save hote hain. Key ko data folder / database backup se alag, password manager mein rakhein.
+- Har data adapter ke liye database mein **sirf-parhne wala (read-only) user** banayein, jo sirf reporting wali tables/collections dekh sake.
+- MongoDB query mein `$out`/`$merge`, JavaScript, `$currentOp` jaisi server info aur `system.*` collections mana hain; SQL mein sirf ek SELECT.
+- Background/scheduled report files `REPORTING_OUTPUT_DAYS` (default 30 din) baad khud mit jati hain.
+- Production mein HTTPS, `REPORTING_SECURE_COOKIES=true`, `REPORTING_HSTS=true`; Docker image mein `/docs` band hai.
+- Abhi har signed-in `/server` user har published report dekh sakta hai (folder-wise permissions abhi nahi).
+- Poori checklist: DEPLOYMENT.md → "Keeping the data safe".

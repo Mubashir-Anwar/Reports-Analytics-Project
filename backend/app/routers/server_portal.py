@@ -9,6 +9,7 @@ import xml.etree.ElementTree as ET
 from types import SimpleNamespace
 from typing import Any
 
+from defusedxml import ElementTree as SafeET
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse, Response
 
@@ -24,8 +25,10 @@ from backend.app.security.users import (
     find_user,
     load_users,
     make_session_cookie,
+    password_needs_upgrade,
     save_users,
     session_lifetime_seconds,
+    set_user_password,
 )
 from backend.app.storage.files import add_saved_folder, list_saved_folders, normalize_folder_path
 
@@ -80,6 +83,8 @@ def register(app: FastAPI, ctx: SimpleNamespace) -> None:
             for item in users:
                 if item["username"] == user["username"]:
                     item["lastLoginAt"] = now_iso()
+                    if password_needs_upgrade(item):  # older, weaker hash: replace it now that we know the password
+                        set_user_password(item, password)
             save_users(users)
         role = "admin" if bootstrap else str(user.get("role", "viewer"))
         LOG.info("User %s signed in to /server (%s)", session_user, role)
@@ -270,7 +275,7 @@ def register(app: FastAPI, ctx: SimpleNamespace) -> None:
             raise HTTPException(status_code=413, detail="The file is larger than 12 MB")
         warnings: list[str] = []
         try:
-            root_tag = ET.fromstring(content).tag.split("}")[-1]
+            root_tag = SafeET.fromstring(content, forbid_dtd=True).tag.split("}")[-1]
             if root_tag == "jasperReport":
                 from backend.app.importers import jrxml as jrxml_import
                 imported = jrxml_import.import_jrxml(content)
