@@ -1,0 +1,183 @@
+"""Designer tools: query parsing, JRXML import, design validate/render, draft preview and run, local bootstrap."""
+from __future__ import annotations
+
+import ipaddress
+import os
+from types import SimpleNamespace
+from typing import Any
+
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.responses import JSONResponse, Response
+
+from backend.app.constants import BOOTSTRAP_PROXY_HEADERS, OUTPUT_FORMATS, REPORT_ID_PATTERN
+from backend.app.queries.mongo_query import (
+    _validate_pipeline_parameter_names,
+    _validate_read_only_pipeline,
+    parse_query_source,
+    pipeline_parameter_names,
+    split_jasper_query,
+)
+from backend.app.rendering import engine as designer_render
+
+
+def register(app: FastAPI, ctx: SimpleNamespace) -> None:
+    """Add the designer endpoints to the app."""
+    draft_definition = ctx.draft_definition
+    json_body = ctx.json_body
+    preview_definition = ctx.preview_definition
+    require_admin = ctx.require_admin
+    run_definition_file = ctx.run_definition_file
+    subreport_loader = ctx.subreport_loader
+
+    @app.get("/api/admin/bootstrap", include_in_schema=False)
+    def local_admin_bootstrap(request: Request) -> JSONResponse:
+        """Allow the local browser UI to pick up its token without exposing it remotely.
+
+        Off unless REPORTING_LOCAL_BOOTSTRAP=true. The loopback + Host checks alone are not enough:
+        behind a reverse proxy on the same machine every request arrives from 127.0.0.1, and the
+        Host header is either the proxy's upstream (e.g. 127.0.0.1:8000) or set by the caller.
+        """
+        unavailable = HTTPException(status_code=404, detail="Local admin bootstrap is available only on this computer")
+        if os.getenv("REPORTING_LOCAL_BOOTSTRAP", "false").strip().lower() != "true":
+            raise unavailable
+        if any(request.headers.get(name) for name in BOOTSTRAP_PROXY_HEADERS):
+            raise unavailable
+        allowed_hosts = {"localhost", "127.0.0.1", "::1"}
+        host = (request.url.hostname or "").lower()
+        client_host = request.client.host if request.client else ""
+        try:
+            local_client = ipaddress.ip_address(client_host).is_loopback
+        except ValueError:
+            local_client = False
+        if host not in allowed_hosts or not local_client:
+            raise unavailable
+        token = os.getenv("REPORTING_ADMIN_TOKEN", "").strip()
+        if not token:
+            raise HTTPException(status_code=503, detail="The local admin token could not be initialised")
+        return JSONResponse({"token": token}, headers={"Cache-Control": "no-store"})
+
+    @app.post("/api/admin/query/parse")
+    async def admin_parse_query(request: Request) -> dict[str, Any]:
+        require_admin(request, "designer")
+        try:
+            payload = await request.json()
+        except Exception:
+            raise HTTPException(status_code=400, detail="Send the query parse request as JSON") from None
+        if not isinstance(payload, dict):
+            raise HTTPException(status_code=400, detail="The query parse request must be a JSON object")
+        try:
+            pipeline = parse_query_source(payload.get("language", "aggregation-json"), payload.get("source", ""))
+            if "parameters" in payload:
+                raw_parameters = payload["parameters"]
+                if not isinstance(raw_parameters, list) or any(not isinstance(item, dict) for item in raw_parameters):
+                    raise ValueError("Query parameters must be a list of JSON objects")
+                parameter_names = {str(item.get("name", "")) for item in raw_parameters}
+                _validate_pipeline_parameter_names(pipeline, parameter_names)
+            _validate_read_only_pipeline(pipeline)
+            jasper = None if payload.get("language") == "python" else split_jasper_query(payload.get("source", ""))
+        except (TypeError, ValueError) as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from None
+        return {"pipeline": pipeline, "stageCount": len(pipeline), "parameterNames": pipeline_parameter_names(pipeline),
+                "collection": jasper[0] if jasper else ""}
+
+    @app.post("/api/admin/drafts/preview")
+    async def admin_preview_draft(request: Request) -> dict[str, Any]:
+        """Live preview of a workspace draft without publishing it to the server."""
+        require_admin(request, "designer")
+        try:
+            payload = await request.json()
+        except Exception:
+            raise HTTPException(status_code=400, detail="Send a valid JSON body") from None
+        return preview_definition(draft_definition(payload), payload)
+
+    @app.post("/api/admin/drafts/run")
+    async def admin_run_draft(request: Request) -> Response:
+        require_admin(request, "designer")
+        try:
+            payload = await request.json()
+        except Exception:
+            raise HTTPException(status_code=400, detail="Send a valid JSON body") from None
+        return run_definition_file(draft_definition(payload), payload, request.url.path, "designer-draft")
+
+    @app.post("/api/admin/jrxml/import")
+    async def admin_import_jrxml(request: Request) -> dict[str, Any]:
+        """Convert a Jaspersoft Studio .jrxml into a draft report + design. Nothing is saved or executed."""
+        require_admin(request, "designer")
+        try:
+            payload = await request.json()
+            xml_text = payload.get("xml") if isinstance(payload, dict) else None
+            if not isinstance(xml_text, str) or not xml_text.strip():
+                raise ValueError("Send the jrxml text as 'xml' in the JSON body")
+            from backend.app.importers import jrxml as jrxml_import
+            return jrxml_import.import_jrxml(xml_text)
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from None
+
+    @app.post("/api/admin/designer/validate")
+    async def admin_designer_validate(request: Request) -> dict[str, Any]:
+        """Check a report definition (Source tab → Apply) like the server will when it saves or runs it.
+        Answers {"ok": true, "design": ...} or 422 with the first problem found."""
+        require_admin(request, "designer")
+        payload = await json_body(request)
+        definition = payload.get("definition")
+        if not isinstance(definition, dict):
+            raise HTTPException(status_code=422, detail="The source must be one JSON object (the report definition)")
+        if not REPORT_ID_PATTERN.fullmatch(str(definition.get("id", ""))):
+            raise HTTPException(status_code=422, detail="id: use only letters, numbers, _ and - (starting with a letter or number)")
+        columns = definition.get("columns", [])
+        parameters = definition.get("parameters", [])
+        if not isinstance(columns, list) or not all(isinstance(c, str) for c in columns):
+            raise HTTPException(status_code=422, detail="columns must be a list of field names")
+        if not isinstance(parameters, list) or not all(isinstance(p, dict) and p.get("name") for p in parameters):
+            raise HTTPException(status_code=422, detail="parameters must be a list of objects with a name")
+        try:
+            design = designer_render.validate_design(definition.get("design") or {"bands": {}}, columns, {str(p["name"]) for p in parameters})
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=f"design: {exc}") from None
+        return {"ok": True, "design": design}
+
+    @app.post("/api/admin/designer/render")
+    async def admin_designer_render(request: Request) -> Response:
+        """Render a design for live preview as PDF, Excel or CSV. Uses supplied rows, else synthetic sample rows."""
+        require_admin(request, "designer")
+        try:
+            payload = await request.json()
+            if not isinstance(payload, dict):
+                raise ValueError("The request must be a JSON object")
+            output_format = str(payload.get("format", "pdf")).lower()
+            if output_format not in OUTPUT_FORMATS:
+                raise ValueError("format must be pdf, xlsx or csv")
+            columns = payload.get("columns", [])
+            if not isinstance(columns, list) or not all(isinstance(item, str) for item in columns):
+                raise ValueError("columns must be a list of strings")
+            raw_parameters = payload.get("parameters", {})
+            if not isinstance(raw_parameters, dict):
+                raise ValueError("parameters must be a JSON object")
+            design = designer_render.validate_design(payload.get("design"), columns, {str(k) for k in raw_parameters})
+            rows = payload.get("rows")
+            if rows is None:
+                rows = designer_render.sample_rows(columns)
+            if not isinstance(rows, list) or not all(isinstance(item, dict) for item in rows):
+                raise ValueError("rows must be a list of objects")
+            title = str(payload.get("title", "Report"))
+            rows = rows[:2000]
+            token = designer_render.SUBREPORT_LOADER.set(subreport_loader())  # Subreports run their published report
+            try:
+                if output_format == "pdf":
+                    body = designer_render.render_design_pdf(design, title, columns, rows, raw_parameters, str(payload.get("reportId", "")))
+                    media_type = "application/pdf"
+                else:
+                    if not designer_render.has_tabular_layout(design):
+                        raise ValueError("Excel/CSV output needs a Text Field or Static Text in the Detail band, "
+                                         "or the Excel / CSV layout 'Page layout' (Report properties)")
+                    renderer = designer_render.render_design_xlsx if output_format == "xlsx" else designer_render.render_design_csv
+                    body = renderer(design, title, columns, rows, raw_parameters)
+                    media_type = {"xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                                  "csv": "text/csv; charset=utf-8"}[output_format]
+            finally:
+                designer_render.SUBREPORT_LOADER.reset(token)
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from None
+        except RuntimeError as exc:
+            raise HTTPException(status_code=501, detail=str(exc)) from None
+        return Response(body, media_type=media_type, headers={"Content-Disposition": f'inline; filename="preview.{output_format}"'})

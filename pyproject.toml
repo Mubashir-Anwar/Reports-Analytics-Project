@@ -1,0 +1,29 @@
+[project]
+name = "mongo-reporting-service"
+version = "0.3.0"
+description = "Jaspersoft-style report designer and report server on FastAPI + React"
+requires-python = ">=3.11"
+
+[tool.ruff]
+line-length = 160
+target-version = "py311"
+extend-exclude = ["frontend", "ui", "data", ".pip-tmp"]
+
+[tool.ruff.lint]
+# F = real errors (undefined / unused names), I = import order. Style rules can be added step by step.
+select = ["F", "I"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["backend"]
+force-sort-within-sections = false
+combine-as-imports = true
+
+[tool.ruff.lint.per-file-ignores]
+# compatibility modules re-export names on purpose
+"reporting_core.py" = ["F401", "E402", "I001"]
+"app.py" = ["F401"]
+# tests import shared pytest fixtures by name (F811) and set sys.path before importing (I001)
+"tests/*" = ["F811", "I001"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

@@ -147,16 +147,16 @@ def service(tmp_path, monkeypatch):
     (tmp_path / "reports" / "General").mkdir(parents=True)
     (tmp_path / "reports" / "General" / "DERIVED.json").write_text(json.dumps(REPORT), encoding="utf-8")
     FakeMongoClient.instances = []
-    monkeypatch.setattr(core, "MongoClient", FakeMongoClient)
+    monkeypatch.setattr(core.mongodb, "MongoClient", FakeMongoClient)
     seen = {}
 
     def fake_execute(collection, pipeline, **_kwargs):
         seen["pipeline"] = pipeline
         return [{"Name": f"row{i}"} for i in range(30)]
 
-    monkeypatch.setattr(core, "_execute_report_pipeline", fake_execute)
+    monkeypatch.setattr(core.mongodb, "_execute_report_pipeline", fake_execute)
     audits = []
-    monkeypatch.setattr(core, "_append_report_audit", audits.append)
+    monkeypatch.setattr(core.audit, "_append_report_audit", audits.append)
     client = TestClient(core.make_app())
     client.seen, client.audits = seen, audits
     return client

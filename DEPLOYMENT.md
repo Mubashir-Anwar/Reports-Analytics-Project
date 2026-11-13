@@ -87,7 +87,8 @@ server {
    Generate each with `python -c "import secrets; print(secrets.token_urlsafe(48))"`.
 6. **Must be false on a server**: `REPORTING_LOCAL_BOOTSTRAP=false`.
 7. **Start with one worker**:
-   `python -m uvicorn app:app --host 127.0.0.1 --port 8000 --workers 1`
+   `python -m uvicorn backend.app.main:app --host 127.0.0.1 --port 8000 --workers 1`
+   (`app:app` still works: the root `app.py` imports the same app.)
    Saved reports and data adapters are cached inside the process; several workers would not see each
    other's changes. Put nginx/IIS in front for HTTPS.
 8. **Check**: `GET /health` → `{"status": "ok", ...}`; open `/admin` with the admin token; check the Logs tab.
@@ -202,3 +203,18 @@ can reach (for example `127.0.0.1:8000`), and keep `/admin` and `/designer` on a
 If your pages are on the same domain behind nginx, you can also link to `/ui` or show it in an `<iframe>`.
 
 These Java snippets are examples for your Grizzly code and were not compiled here (no JDK on this machine).
+
+## Docker
+
+The image is built from a clean checkout; it builds the React pages itself and contains **no** `data/`
+(reports, adapters, users and secrets live on the `/data` volume).
+
+```bash
+docker build -t mongo-reporting .
+docker run -d --name reporting -p 8000:8000 -v reporting-data:/data --env-file .env mongo-reporting
+```
+
+* The `default` data adapter comes from `MONGODB_URI` / `MONGODB_DATABASE`; add more on `/admin → Data sources`.
+* The container's health check only tests that the process answers (`backend/app/healthcheck.py`). Use the JSON of
+  `GET /health` (status `ok` / `unavailable`) for readiness and alerting about MongoDB.
+* Keep `--workers 1` (the image default) until the storage moves to a database (ARCHITECTURE.md §9).

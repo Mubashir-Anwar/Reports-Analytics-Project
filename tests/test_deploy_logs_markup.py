@@ -65,8 +65,8 @@ def make_client(tmp_path, monkeypatch):
         }}), encoding="utf-8")
         (tmp_path / "reports" / "General").mkdir(parents=True, exist_ok=True)
         (tmp_path / "reports" / "General" / "R1.json").write_text(json.dumps(REPORT), encoding="utf-8")
-        monkeypatch.setattr(core, "MongoClient", FakeMongoClient)
-        monkeypatch.setattr(core, "_execute_report_pipeline", lambda *_a, **_k: [{"Name": "a"}])
+        monkeypatch.setattr(core.mongodb, "MongoClient", FakeMongoClient)
+        monkeypatch.setattr(core.mongodb, "_execute_report_pipeline", lambda *_a, **_k: [{"Name": "a"}])
         return TestClient(core.make_app())
     return build
 

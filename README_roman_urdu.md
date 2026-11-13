@@ -2,6 +2,8 @@
 
 Yeh FastAPI service MongoDB aggregation se CSV, Excel (XLSX) aur PDF report results banati hai. `/admin` se report definition XML file export/import ki ja sakti hai; is file mein query, parameters, folder, layout aur format settings hoti hain. MongoDB connection ka password portable report file mein nahi hota.
 
+**Code ka structure:** backend `backend/app/` package mein hai (routers, security, storage, connectors, queries, rendering), frontend `frontend/` mein. Har hissa kya karta hai aur kyun — [ARCHITECTURE.md](ARCHITECTURE.md). Chalane ka command wahi hai: `uvicorn app:app` (ya `uvicorn backend.app.main:app`).
+
 ## Teen hisse: Designer → Server, aur Admin
 
 | Path | Kis ke liye | Login |
@@ -191,7 +193,7 @@ Designer ke toolbar mein **Import JRXML** button se `.jrxml` file chunein. Impor
 - Abhi support nahi: StretchHeight, subreports, crosstab, JRXML export wapas.
 - Test: `python -m pytest tests` (19 tests) — fixture `tests/fixtures/abpl_accounts_opened.jrxml`.
 
-## Java Expressions (jexpr.py)
+## Java Expressions (backend/app/expressions/jexpr.py)
 Jasper wali Java expressions ab safe tareeqe se chalti hain (Java ya eval ke baghair): ternary `? :`, `==`, `&&`, `||`, `!`, `+ - * / %`, string methods (`equals`, `trim`, `isEmpty`, `length`, `substring`, `contains`...), `new DecimalFormat(p).format(x)`, `new SimpleDateFormat(p).format/parse`, `new Date()`, `Double.parseDouble`, `Integer.parseInt`, `new Double(x)`, `Math.*`, `String.valueOf`. Designer mein expression `=` se shuru karein, misal: `=$F{Status} == 0 ? "InProgress" : "Other"`. Koi bhi masla ho to us cell ka text khali rehta hai (poori report fail nahi hoti).
 - JRXML import ab expressions ko seedha `=...` mein rakhta hai.
 - Importer ab `findQuery`/`collectionName` wali queries, `"aggregate": $P{CollectionName}` (jahan CollectionName = `"Edith-"+$P{ProductCode}+"-PaymentPlans"`) aur 14400px tak ke pages sambhalta hai.

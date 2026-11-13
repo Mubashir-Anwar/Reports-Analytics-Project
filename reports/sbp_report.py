@@ -6,8 +6,7 @@ from datetime import datetime, time, timezone
 from pathlib import Path
 from typing import Any
 
-from reporting_core import ParameterSpec, ReportDefinition
-
+from backend.app.definitions import ParameterSpec, ReportDefinition
 
 PIPELINE_PATH = Path(__file__).with_name("sbp_pipeline.json")
 with PIPELINE_PATH.open("r", encoding="utf-8-sig") as pipeline_file:

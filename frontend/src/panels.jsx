@@ -38,7 +38,7 @@ function readCollapsed() {
 
 /* ---------------------------------------------------------------- Server (repository) */
 /** Like Jaspersoft Studio's Repository Explorer: Data Adapters on top, then folders inside folders,
-    each holding its data adapters (🍃) and reports (▤). */
+    each holding its data adapters and reports (▤). */
 export function ServerPanel({ report, onOpenFromServer, notify, refreshKey, onChanged, openMenu }) {
   const [folders, setFolders] = useState([]);
   const [reports, setReports] = useState([]);
@@ -136,7 +136,7 @@ export function ServerPanel({ report, onOpenFromServer, notify, refreshKey, onCh
     const s = status[a.id];
     return (
       <li key={`a:${a.id}`} className="tree-row adapter-node" style={{ paddingLeft: 6 + depth * 14 }} title={`${a.name} · ${a.database || 'no database'} — click to test the connection`} onClick={() => test(a.id)}>
-        <span className="node-label">🍃 {a.name}</span>
+        <span className="node-label"><DbLogo type={a.type} /> {a.name}</span>
         <span className={`dot ${s ? s.state : a.configured ? '' : 'err'}`} title={s ? s.text : a.configured ? 'Not tested yet' : 'No MongoDB URL saved'} />
       </li>
     );
@@ -209,7 +209,7 @@ export function ServerPanel({ report, onOpenFromServer, notify, refreshKey, onCh
           )}
         </li>
       </ul>
-      <p className="hint">This is the report server: only published reports are here. Click a 🌐 report to open it in your workspace; publish changes with “Publish to server”. Click a 🍃 data adapter to test it.</p>
+      <p className="hint">This is the report server: only published reports are here. Click a 🌐 report to open it in your workspace; publish changes with “Publish to server”. Click a data adapter to test it.</p>
     </div>
   );
 }
@@ -310,8 +310,38 @@ export function WorkspacePanel({ report, onOpen, onNew, notify, refreshKey, onCh
 }
 
 /* ---------------------------------------------------------------- Data adapters */
+/** Database logos for the data adapters (simple drawings in each database's colours). */
+const DB_STYLE = {
+  mongodb: { label: 'MongoDB', color: '#00684A' },
+  postgresql: { label: 'PostgreSQL', color: '#336791', text: 'PG' },
+  mysql: { label: 'MySQL / MariaDB', color: '#00758F', text: 'My' },
+  sqlserver: { label: 'Microsoft SQL Server', color: '#A91D22', text: 'MS' },
+  oracle: { label: 'Oracle', color: '#C74634', text: 'Or' },
+};
+export function DbLogo({ type = 'mongodb', size = 14 }) {
+  const style = DB_STYLE[type] || DB_STYLE.mongodb;
+  if ((type || 'mongodb') === 'mongodb') {
+    return (
+      <svg className="db-logo" width={size} height={size} viewBox="0 0 16 16" role="img" aria-label={style.label}>
+        <path d="M8 .6c.5 1.4 1.9 2.4 3 3.9 1.9 2.5 1.6 6.4-.6 8.4-.7.6-1.4 1-2 1.3l-.3 1.2h-.3l-.3-1.2c-.6-.3-1.3-.7-2-1.3C3.2 10.9 3 7 4.9 4.5 6.1 3 7.5 2 8 .6Z" fill={style.color} />
+        <path d="M8 2.6v12.8" stroke="#E3FCF7" strokeWidth=".7" />
+      </svg>
+    );
+  }
+  return (
+    <svg className="db-logo" width={size} height={size} viewBox="0 0 16 16" role="img" aria-label={style.label}>
+      <rect width="16" height="16" rx="3.5" fill={style.color} />
+      <text x="8" y="11.2" textAnchor="middle" fontSize="7.5" fontWeight="700" fill="#fff" fontFamily="system-ui, sans-serif">{style.text}</text>
+    </svg>
+  );
+}
+
 const ADAPTER_TYPES = [
-  { id: 'mongodb', icon: '🍃', name: 'MongoDB Connection', text: 'A MongoDB server (mongodb:// or mongodb+srv:// URL). Reports run their aggregation query on it.' },
+  { id: 'mongodb', name: 'MongoDB Connection', text: 'A MongoDB server (mongodb:// or mongodb+srv:// URL). Reports run their aggregation query on it.' },
+  { id: 'postgresql', name: 'PostgreSQL', text: 'SQL SELECT queries on PostgreSQL.', soon: true },
+  { id: 'mysql', name: 'MySQL / MariaDB', text: 'SQL SELECT queries on MySQL or MariaDB.', soon: true },
+  { id: 'sqlserver', name: 'Microsoft SQL Server', text: 'SQL SELECT queries on SQL Server.', soon: true },
+  { id: 'oracle', name: 'Oracle', text: 'SQL SELECT queries on Oracle Database.', soon: true },
 ];
 
 const adapterId = (name) => name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 39);
@@ -351,7 +381,9 @@ function AdapterWizard({ initial, folders, existingIds, onClose, onSaved, notify
         {step === 1 && (
           <ul className="wizard-types">
             {ADAPTER_TYPES.map((t) => (
-              <li key={t.id} className="on" onDoubleClick={() => setStep(2)}><span className="t-icon">{t.icon}</span><span><b>{t.name}</b><small>{t.text}</small></span></li>
+              <li key={t.id} className={t.soon ? 'soon' : 'on'} aria-disabled={t.soon || undefined} title={t.soon ? 'Planned: SQL data adapters are the next phase (see ARCHITECTURE.md)' : ''} onDoubleClick={() => !t.soon && setStep(2)}>
+                <span className="t-icon"><DbLogo type={t.id} size={26} /></span><span><b>{t.name}{t.soon ? <em className="soon-tag">coming next</em> : null}</b><small>{t.text}</small></span>
+              </li>
             ))}
           </ul>
         )}
@@ -448,7 +480,7 @@ export function AdaptersPanel({ notify, refreshKey, onChanged, openMenu }) {
         onContextMenu={(e) => { setSelected(item.id); menu(() => adapterMenu(item))(e); }}
         title={`${item.name} · ${item.database || 'database from the URL'} · ${item.configured ? 'configured' : 'no URL saved'}${s ? ` · ${s.text}` : ''} — double-click to edit, right-click for more`}
       >
-        <span className="node-label"><span className="caret" />🍃 {item.name} <small>{item.database || ''}</small></span>
+        <span className="node-label"><span className="caret" /><DbLogo type={item.type} /> {item.name} <small>{item.database || ''}</small></span>
         <span className={`dot ${s ? s.state : item.configured ? '' : 'err'}`} />
       </li>
     );
@@ -486,7 +518,7 @@ export function AdaptersPanel({ notify, refreshKey, onChanged, openMenu }) {
       </ul>
       {chosen && (
         <div className="adapter-detail">
-          <b>🍃 {chosen.name}</b>
+          <b><DbLogo type={chosen.type} /> {chosen.name}</b>
           <small>ID {chosen.id} · {chosen.database || 'database from the URL'} · {chosen.configured ? 'URL saved' : 'no URL saved'}</small>
           {status[chosen.id] && <small className={`adapter-status ${status[chosen.id].state}`}>{status[chosen.id].text}</small>}
           <div className="row"><button className="btn sm" onClick={() => test(chosen)}>Test</button><button className="btn sm" onClick={() => setWizard({ id: chosen.id, name: chosen.name, database: chosen.database || '', folder: chosen.folder || '', uri: '' })}>Edit…</button></div>

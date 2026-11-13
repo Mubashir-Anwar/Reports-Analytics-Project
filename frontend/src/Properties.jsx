@@ -35,7 +35,7 @@ const PATTERNS = [
   ['dd/MM/yyyy HH:mm', 'Date and time'], ['HH:mm', 'Time 14:05'], ['hh:mm a', 'Time 02:05 PM'],
 ];
 
-export default function Properties({ state, dispatch, notify, actions, onEditExpression }) {
+export default function Properties({ state, dispatch, notify, actions, onEditExpression, onOpenQuery }) {
   const { design, report, selection } = state;
   const [shiftColumns, setShiftColumns] = useState(true);
   const [elementTab, setElementTab] = useState('');
@@ -381,10 +381,50 @@ export default function Properties({ state, dispatch, notify, actions, onEditExp
   const { page } = design;
   const setPage = (values) => design$((d) => ({ ...d, page: { ...d.page, ...values } }), 'page');
   const setMargin = (side, value) => design$((d) => ({ ...d, page: { ...d.page, margins: { ...d.page.margins, [side]: value } } }), `margin-${side}`);
+  const reportTab = ['report', 'dataset', 'page', 'export'].includes(elementTab) ? elementTab : 'report';
   return (
     <div className="panel-body props">
-      <div className="prop-title">Report · page</div>
-      <Row label="Name"><input value={report.title} onChange={(e) => dispatch({ type: 'REPORT', patch: { title: e.target.value } })} /></Row>
+      <div className="prop-title">Report: {report.title || 'Untitled'}</div>
+      <div className="prop-tabs" role="tablist">
+        {[['report', 'Report'], ['dataset', 'Dataset'], ['page', 'Page Format'], ['export', 'Excel / CSV']].map(([id, label]) => <button key={id} role="tab" className={reportTab === id ? 'on' : ''} onClick={() => setElementTab(id)}>{label}</button>)}
+      </div>
+
+      {reportTab === 'report' && (
+        <>
+          <Row label="Report name"><input value={report.title} onChange={(e) => dispatch({ type: 'REPORT', patch: { title: e.target.value } })} /></Row>
+          <Row label="Report ID"><input value={report.id} disabled title={report.isNew ? 'Set it in Setup (made from the name)' : 'Fixed once saved: /generate/ID.pdf'} /></Row>
+          <Row label="Description"><textarea rows={2} value={report.description} onChange={(e) => dispatch({ type: 'REPORT', patch: { description: e.target.value } })} /></Row>
+          <Row label="Expression language"><input value="Java-like (safe subset)" disabled title="Expressions use $F, $P, $V and a safe Java subset; nothing is executed on the server as code" /></Row>
+          <Row label="When no data">
+            <select value={page.whenNoDataType || 'Auto'} onChange={(e) => setPage({ whenNoDataType: e.target.value })}>
+              <option value="Auto">Auto (No Data band if there is one, else all sections)</option>
+              <option value="NoDataSection">No Data Section</option>
+              <option value="AllSectionsNoDetail">All Sections, No Detail</option>
+              <option value="BlankPage">Blank Page</option>
+              <option value="NoPages">No Pages</option>
+            </select>
+          </Row>
+          <label className="check-row"><input type="checkbox" checked={Boolean(page.titleNewPage)} onChange={(e) => setPage({ titleNewPage: e.target.checked })} /> Title on a new page (alone, without page header/footer)</label>
+          <label className="check-row"><input type="checkbox" checked={Boolean(page.summaryNewPage)} onChange={(e) => setPage({ summaryNewPage: e.target.checked })} /> Summary on a new page</label>
+          <label className="check-row"><input type="checkbox" checked={Boolean(page.floatColumnFooter)} onChange={(e) => setPage({ floatColumnFooter: e.target.checked })} /> Float column footer (right under the last row)</label>
+          <label className="check-row"><input type="checkbox" checked={Boolean(page.ignorePagination)} onChange={(e) => setPage({ ignorePagination: e.target.checked })} /> Ignore pagination (one long page)</label>
+        </>
+      )}
+
+      {reportTab === 'dataset' && (
+        <>
+          <Row label="Data adapter"><input value={report.connectionId || '—'} disabled /></Row>
+          <Row label="Collection"><input value={report.collection || '—'} disabled /></Row>
+          <Row label="Fields"><input value={`${report.columns.length} field(s)`} disabled /></Row>
+          <Row label="Parameters"><input value={`${report.parameters.length} parameter(s)`} disabled /></Row>
+          <Row label="Filter expression"><input value={design.filterExpression || ''} disabled placeholder="none" /></Row>
+          <Row label="Sort fields"><input value={(design.sort || []).map((s) => `${s.field} ${s.order === 'Descending' ? '↓' : '↑'}`).join(', ')} disabled placeholder="none" /></Row>
+          <button className="btn sm primary" onClick={() => onOpenQuery?.('query')}>Edit query, filter and sort options…</button>
+        </>
+      )}
+
+      {reportTab === 'page' && (
+      <>
       <Row label="Page size">
         <select
           value={pagePreset(page)}
@@ -407,7 +447,14 @@ export default function Properties({ state, dispatch, notify, actions, onEditExp
         onClick={() => setPage({ width: clampPage(contentRight(design) + page.margins.left + page.margins.right) })}
       >Fit width to content</button>
       <p className="hint">You can also drag the page's right edge on the canvas to change its width.</p>
-      <Row label="Ignore pagination (one long page, like Excel/CSV)"><input type="checkbox" checked={Boolean(page.ignorePagination)} onChange={(e) => setPage({ ignorePagination: e.target.checked })} /></Row>
+      <div className="prop-grid">
+        {['top', 'right', 'bottom', 'left'].map((side) => <Row key={side} label={`Margin ${side}`}><Num value={page.margins[side]} min={0} max={300} onChange={(v) => setMargin(side, v)} /></Row>)}
+      </div>
+      </>
+      )}
+
+      {reportTab === 'export' && (
+      <>
       <Row label="Excel / CSV layout">
         <select value={page.sheetLayout || 'table'} onChange={(e) => setPage({ sheetLayout: e.target.value })}>
           <option value="grid">Pixel-perfect like the PDF (Jasper style)</option>
@@ -417,9 +464,8 @@ export default function Properties({ state, dispatch, notify, actions, onEditExp
       <p className="hint">{page.sheetLayout === 'grid'
         ? 'Excel and CSV get every band in its place: headings, page header, images, lines, details and totals.'
         : 'Excel gets the Title and Page Header texts on top, then one header row and one row per record. CSV gets only the table.'}</p>
-      <div className="prop-grid">
-        {['top', 'right', 'bottom', 'left'].map((side) => <Row key={side} label={`Margin ${side}`}><Num value={page.margins[side]} min={0} max={300} onChange={(v) => setMargin(side, v)} /></Row>)}
-      </div>
+      </>
+      )}
       <p className="hint">Select an element or band to see its properties here. Zoom: Ctrl +, Ctrl −, Ctrl 0, or Ctrl + mouse wheel.</p>
     </div>
   );

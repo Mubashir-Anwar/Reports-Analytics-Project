@@ -56,10 +56,10 @@ def service(tmp_path, monkeypatch):
     report_dir = tmp_path / "reports" / "General"
     report_dir.mkdir(parents=True)
     (report_dir / "SALES.json").write_text(json.dumps(REPORT), encoding="utf-8")
-    monkeypatch.setattr(core, "MongoClient", FakeMongoClient)
-    monkeypatch.setattr(core, "_execute_report_pipeline", lambda *_a, **_k: [{"Name": "=1+1"}, {"Name": "Ali"}])
+    monkeypatch.setattr(core.mongodb, "MongoClient", FakeMongoClient)
+    monkeypatch.setattr(core.mongodb, "_execute_report_pipeline", lambda *_a, **_k: [{"Name": "=1+1"}, {"Name": "Ali"}])
     audits = []
-    monkeypatch.setattr(core, "_append_report_audit", audits.append)
+    monkeypatch.setattr(core.audit, "_append_report_audit", audits.append)
     client = TestClient(core.make_app())
     client.audits = audits
     return client

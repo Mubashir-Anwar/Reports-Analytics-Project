@@ -7,6 +7,9 @@ import { makeActions } from './outlineActions.js';
 import Preview from './Preview.jsx';
 import Properties from './Properties.jsx';
 import SetupForm from './SetupForm.jsx';
+import DatasetQueryDialog from './DatasetQueryDialog.jsx';
+import SourceView from './SourceView.jsx';
+import TemplateGallery from './TemplateGallery.jsx';
 import { AdaptersPanel, Outline, Palette, ServerPanel, WorkspacePanel, publishState } from './panels.jsx';
 import { ZOOM_LIMITS, bandWidth, clampZoom, emptyDesign, findElement, getBand, setBand } from './designModel.js';
 import ComponentWizard from './ComponentWizard.jsx';
@@ -53,7 +56,11 @@ export default function App() {
   // Right-click menus (Outline and canvas) read the newest state through this ref.
   const stateRef = useRef(state);
   stateRef.current = state;
-  const actions = useMemo(() => makeActions({ get: () => stateRef.current, dispatch, notify }), [notify]);
+  // dialogs and tabs the Outline / canvas menus can open (read through a ref, so the menus always call the newest ones)
+  const uiRef = useRef({});
+  const actions = useMemo(() => makeActions({ get: () => stateRef.current, dispatch, notify, ui: uiRef }), [notify]);
+  const [queryTab, setQueryTab] = useState(null); // Dataset and Query dialog: null = closed, else its tab
+  const [templates, setTemplates] = useState(false);
   const [menu, setMenu] = useState(null);
   const openMenu = useCallback((event, items) => setMenu({ x: event.clientX, y: event.clientY, items }), []);
   const closeMenu = useCallback(() => setMenu(null), []);
@@ -104,6 +111,13 @@ export default function App() {
 
   // Expression Editor (double-click a Text Field / Static Text on the canvas or in the Outline)
   const [exprId, setExprId] = useState(null);
+  const applyLayout = (next, name) => {
+    dispatch({ type: 'DESIGN', update: () => next });
+    dispatch({ type: 'SELECT', selection: { kind: 'report' } });
+    setTemplates(false);
+    setTab('design');
+    notify(`Layout “${name}” applied — change anything on the canvas (Ctrl+Z undoes it)`, 'ok');
+  };
   const editExpression = useCallback((id) => { dispatch({ type: 'SELECT', selection: { kind: 'element', id } }); setExprId(id); }, []);
   const saveExpression = (values) => {
     const found = findElement(state.design, exprId);
@@ -331,6 +345,14 @@ export default function App() {
     return () => window.removeEventListener('keydown', onKey);
   });
 
+  uiRef.current = {
+    openQuery: (which) => setQueryTab(which || 'query'),
+    openTemplates: () => setTemplates(true),
+    showSource: () => setTab('source'),
+    preview: () => setTab('preview'),
+    saveFile,
+  };
+
   if (needToken) return <Login hint="On your own computer the token is picked up automatically. On a deployed server enter REPORTING_ADMIN_TOKEN or REPORTING_DESIGNER_TOKEN." onDone={connect} />;
   if (!ready) return <div className="login"><p>Connecting to the server…</p></div>;
 
@@ -366,7 +388,7 @@ export default function App() {
               <button className={leftTab === 'server' ? 'on' : ''} onClick={() => setLeftTab('server')} title="Published reports on the report server">Server</button>
               <button className={leftTab === 'adapters' ? 'on' : ''} onClick={() => setLeftTab('adapters')}>Data Adapters</button>
             </div>
-            {leftTab === 'workspace' && <WorkspacePanel report={report} onOpen={open} onNew={(folder) => { if (state.dirty && !window.confirm('You have unsaved changes. Discard them?')) return; dispatch({ type: 'NEW', folder }); setTab('setup'); }} notify={notify} refreshKey={refreshKey} onChanged={() => setRefreshKey((n) => n + 1)} />}
+            {leftTab === 'workspace' && <WorkspacePanel report={report} onOpen={open} onNew={(folder) => { if (state.dirty && !window.confirm('You have unsaved changes. Discard them?')) return; dispatch({ type: 'NEW', folder }); setTab('setup'); setTemplates(true); }} notify={notify} refreshKey={refreshKey} onChanged={() => setRefreshKey((n) => n + 1)} />}
             {leftTab === 'server' && <ServerPanel report={report} onOpenFromServer={openFromServer} openMenu={openMenu} notify={notify} refreshKey={refreshKey} onChanged={() => setRefreshKey((n) => n + 1)} />}
             {leftTab === 'adapters' && <AdaptersPanel notify={notify} openMenu={openMenu} refreshKey={refreshKey} onChanged={() => setRefreshKey((n) => n + 1)} />}
           </div>
@@ -378,20 +400,21 @@ export default function App() {
 
         <main className="center">
           <div className="tabs">
-            {[['setup', 'Setup'], ['design', 'Design'], ['preview', 'Preview']].map(([id, label]) => (
+            {[['setup', 'Setup'], ['design', 'Design'], ['source', 'Source'], ['preview', 'Preview']].map(([id, label]) => (
               <button key={id} className={tab === id ? 'on' : ''} onClick={() => setTab(id)}>{label}</button>
             ))}
           </div>
           <div className="stage">
-            {tab === 'setup' && <SetupForm state={state} dispatch={dispatch} notify={notify} onAutoLayout={() => setTab('design')} />}
-            {tab === 'design' && <Canvas design={design} selection={selection} tool={tool} zoom={zoom} setZoom={setZoom} dispatch={dispatch} actions={actions} openMenu={openMenu} onEditExpression={editExpression} onPercentage={onPercentage} onWizard={onWizard} prefs={canvasPrefs} setPrefs={setCanvasPrefs} hasClipboard={Boolean(readClipboard()?.items?.length)} />}
+            {tab === 'setup' && <SetupForm state={state} dispatch={dispatch} notify={notify} onTemplates={() => setTemplates(true)} />}
+            {tab === 'design' && <Canvas design={design} selection={selection} tool={tool} zoom={zoom} setZoom={setZoom} dispatch={dispatch} actions={actions} openMenu={openMenu} onEditExpression={editExpression} onPercentage={onPercentage} onWizard={onWizard} prefs={canvasPrefs} setPrefs={setCanvasPrefs} hasClipboard={Boolean(readClipboard()?.items?.length)} onQuery={() => setQueryTab('query')} onTemplates={() => setTemplates(true)} />}
+            {tab === 'source' && <SourceView state={state} dispatch={dispatch} notify={notify} />}
             {tab === 'preview' && <Preview state={state} notify={notify} />}
           </div>
         </main>
 
         <aside className="right">
           <div className="dock"><div className="dock-tabs"><button className="on">Palette</button></div><Palette tool={tool} dispatch={dispatch} /></div>
-          <div className="dock grow"><div className="dock-tabs"><button className="on">Properties</button></div><Properties state={state} dispatch={dispatch} notify={notify} actions={actions} onEditExpression={editExpression} /></div>
+          <div className="dock grow"><div className="dock-tabs"><button className="on">Properties</button></div><Properties state={state} dispatch={dispatch} notify={notify} actions={actions} onEditExpression={editExpression} onOpenQuery={(t) => setQueryTab(t || 'query')} /></div>
         </aside>
       </div>
       <footer className={`status ${message.kind}`}>{message.text}</footer>
@@ -414,6 +437,8 @@ export default function App() {
           </div>
         </div>
       )}
+      {queryTab && <DatasetQueryDialog state={state} dispatch={dispatch} notify={notify} initialTab={queryTab} onClose={() => setQueryTab(null)} />}
+      {templates && <TemplateGallery report={report} design={design} onApply={applyLayout} onClose={() => setTemplates(false)} />}
       {wizard && <ComponentWizard wizard={wizard} report={report} design={design} bandWidth={bandWidth(design)} onCancel={() => setWizard(null)} onDone={finishWizard} />}
       {exprId && findElement(design, exprId) && (
         <ExpressionEditor element={findElement(design, exprId).element} report={report} design={design} onSave={saveExpression} onClose={() => setExprId(null)} />

@@ -46,8 +46,8 @@ def client(tmp_path, monkeypatch):
         "default": {"uri": "mongodb://main/a", "database": "a"}}}), encoding="utf-8")
     (tmp_path / "reports" / "General").mkdir(parents=True)
     (tmp_path / "reports" / "General" / "R1.json").write_text(json.dumps(PUBLISHED), encoding="utf-8")
-    monkeypatch.setattr(core, "MongoClient", FakeMongoClient)
-    monkeypatch.setattr(core, "_execute_report_pipeline", lambda *_a, **_k: [{"Name": "a"}, {"Name": "b"}])
+    monkeypatch.setattr(core.mongodb, "MongoClient", FakeMongoClient)
+    monkeypatch.setattr(core.mongodb, "_execute_report_pipeline", lambda *_a, **_k: [{"Name": "a"}, {"Name": "b"}])
     return TestClient(core.make_app())
 
 

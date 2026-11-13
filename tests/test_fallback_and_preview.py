@@ -1,7 +1,6 @@
 """Read fallback: no silent wrong data, $unionWith/$replaceRoot, clear access errors.
 Designer preview: PDF, Excel and CSV formats; Excel stays on one sheet."""
 import io
-import json
 import sys
 from pathlib import Path
 

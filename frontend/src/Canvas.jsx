@@ -200,12 +200,16 @@ const ICON_BTN = (label, title, onClick, disabled, on) => (
 );
 
 /** Arrange / view toolbar above the canvas (Jaspersoft Studio's alignment toolbar + Photoshop-like view toggles). */
-function CanvasToolbar({ count, lockedAll, actions, prefs, setPrefs, hasClipboard }) {
+function CanvasToolbar({ count, lockedAll, actions, prefs, setPrefs, hasClipboard, onQuery, onTemplates }) {
   const set = (patch) => setPrefs((p) => ({ ...p, ...patch }));
   const none = count === 0;
   const few = count < 2;
   return (
     <div className="canvas-toolbar" role="toolbar" aria-label="Arrange">
+      <span className="tb-group">
+        {ICON_BTN(<span className="tb-text">🛢 Dataset &amp; Query</span>, 'Dataset and Query: data adapter, query, fields, parameters, filter and sort (like Jaspersoft Studio’s toolbar button)', onQuery, !onQuery)}
+        {ICON_BTN(<span className="tb-text">▦ Layouts</span>, 'Apply a layout template (blank page, letter, table, form, certificate)', onTemplates, !onTemplates)}
+      </span>
       <span className="tb-group" title={count > 1 ? 'Align the selected elements to each other' : 'Align the selected element inside its band'}>
         {ICON_BTN(<span className="ic ic-al" />, 'Align left', () => actions.align('left'), none)}
         {ICON_BTN(<span className="ic ic-ac" />, 'Align horizontal centers', () => actions.align('hcenter'), none)}
@@ -248,7 +252,7 @@ function CanvasToolbar({ count, lockedAll, actions, prefs, setPrefs, hasClipboar
   );
 }
 
-export default function Canvas({ design, selection, tool, zoom, setZoom, dispatch, actions, openMenu, onEditExpression, onPercentage, onWizard, prefs, setPrefs, hasClipboard }) {
+export default function Canvas({ design, selection, tool, zoom, setZoom, dispatch, actions, openMenu, onEditExpression, onPercentage, onWizard, prefs, setPrefs, hasClipboard, onQuery, onTemplates }) {
   const bandRefs = useRef({});
   const scrollRef = useRef(null);
   const pageRef = useRef(null);
@@ -643,7 +647,7 @@ export default function Canvas({ design, selection, tool, zoom, setZoom, dispatc
 
   return (
     <div className="canvas-wrap">
-      <CanvasToolbar count={selectedEls.length} lockedAll={lockedAll} actions={actions} prefs={prefs} setPrefs={setPrefs} hasClipboard={hasClipboard} />
+      <CanvasToolbar count={selectedEls.length} lockedAll={lockedAll} actions={actions} prefs={prefs} setPrefs={setPrefs} hasClipboard={hasClipboard} onQuery={onQuery} onTemplates={onTemplates} />
       <div
         ref={scrollRef}
         className={`canvas-scroll ${prefs.showRulers ? 'with-rulers' : ''}`}

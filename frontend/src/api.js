@@ -93,6 +93,7 @@ export const api = {
   logs: ({ lines, level, search }) => request(`/api/admin/logs?${new URLSearchParams({ lines, level, search })}`),
   audit: (limit) => request(`/api/admin/audit?limit=${encodeURIComponent(limit)}`),
   async logFile() { return (await request('/api/admin/logs/download', { raw: true })).blob(); },
+  validateDesign: (definition) => request('/api/admin/designer/validate', { method: 'POST', body: { definition } }),
   /** Render the design as 'pdf' | 'xlsx' | 'csv' (body.format) and return the file as a Blob. */
   async renderFile(body) {
     const response = await request('/api/admin/designer/render', { method: 'POST', body, raw: true });

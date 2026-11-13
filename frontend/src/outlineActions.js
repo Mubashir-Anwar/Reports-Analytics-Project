@@ -35,7 +35,9 @@ function freeName(base, taken) {
 }
 
 /** `get()` returns the current { report, design }; menus read it when they are opened. */
-export function makeActions({ get, dispatch, notify }) {
+export function makeActions({ get, dispatch, notify, ui = { current: {} } }) {
+  // ui.current: App callbacks for dialogs and tabs (openQuery(tab), openTemplates(), showSource(), preview(), saveFile())
+  const callUi = (name, ...args) => () => ui.current[name]?.(...args);
   const design$ = (update) => dispatch({ type: 'DESIGN', update });
   const select = (selection) => dispatch({ type: 'SELECT', selection });
   const fieldNames = () => { const { report, design } = get(); return [...report.columns, ...design.calculatedFields.map((c) => c.name)]; };
@@ -255,13 +257,24 @@ export function makeActions({ get, dispatch, notify }) {
 
   const reportMenu = () => [
     { header: get().report.title || 'Report' },
-    { label: 'Properties', icon: '⚙', onClick: () => select({ kind: 'report' }) },
+    { label: 'Undo', icon: '↶', shortcut: 'Ctrl+Z', disabled: !get().past.length, onClick: () => dispatch({ type: 'UNDO' }) },
+    { label: 'Redo', icon: '↷', shortcut: 'Ctrl+Y', disabled: !get().future.length, onClick: () => dispatch({ type: 'REDO' }) },
+    '-',
+    { label: 'Show Properties', icon: '⚙', onClick: () => select({ kind: 'report' }) },
+    { label: 'Dataset and Query…', icon: '🛢', onClick: callUi('openQuery', 'query') },
+    { label: 'Sort Fields…', icon: '⇅', onClick: callUi('openQuery', 'sort') },
+    { label: 'Filter Expression…', icon: '⏚', onClick: callUi('openQuery', 'filter') },
     '-',
     { label: 'Create Parameter', icon: '$P', onClick: createParameter },
     { label: 'Create Variable', icon: '$V', onClick: () => createVariable() },
     { label: 'Create Calculated Field', icon: 'ƒ', onClick: createCalc },
     { label: 'Create Group', icon: '⊞', disabled: !fieldNames().length, items: fieldNames().map((f) => ({ label: `Group by ${f}`, onClick: () => createGroup(f) })) },
     createBandMenu(),
+    '-',
+    { label: 'Apply a layout template…', icon: '▦', onClick: callUi('openTemplates') },
+    { label: 'Show Source', icon: '</>', onClick: callUi('showSource') },
+    { label: 'Preview', icon: '▶', onClick: callUi('preview') },
+    { label: 'Save as file (.mrd)', icon: '💾', onClick: callUi('saveFile') },
   ];
 
   const bandMenu = (key) => {
@@ -376,7 +389,15 @@ export function makeActions({ get, dispatch, notify }) {
     { label: 'Delete', icon: '✕', danger: true, shortcut: 'Del', onClick: () => deleteCalc(name) },
   ];
 
-  const canvasMenu = () => [{ header: 'Page' }, { label: 'Report properties', icon: '⚙', onClick: () => select({ kind: 'report' }) }, createBandMenu()];
+  const canvasMenu = () => [
+    { header: 'Page' },
+    { label: 'Report properties', icon: '⚙', onClick: () => select({ kind: 'report' }) },
+    { label: 'Dataset and Query…', icon: '🛢', onClick: callUi('openQuery', 'query') },
+    createBandMenu(),
+    { label: 'Paste here', icon: '📋', shortcut: 'Ctrl+V', disabled: !readClipboard()?.items?.length, onClick: () => paste() },
+    '-',
+    { label: 'Apply a layout template…', icon: '▦', onClick: callUi('openTemplates') },
+  ];
 
   return {
     rename, deleteSelection, createBandAt, createGroup,

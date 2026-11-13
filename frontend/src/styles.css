@@ -429,3 +429,28 @@ label.btn { display: inline-block; }
 .publish-summary dt { color: #64748b; }
 .publish-summary dd { margin: 0; overflow-wrap: anywhere; }
 .warn-box { margin-top: 10px; padding: 6px 8px; border-radius: 6px; background: #fef3c7; color: #78350f; }
+
+/* ---------- Dataset and Query dialog, templates, Source tab, database logos */
+.dataset-modal { width: min(980px, 96vw); max-height: 92vh; display: flex; flex-direction: column; gap: 8px; }
+.dataset-head { display: flex; align-items: center; justify-content: space-between; }
+.dataset-head h3 { margin: 0; }
+.dataset-body { overflow: auto; flex: 1; min-height: 0; padding: 4px 2px; }
+.dataset-body textarea.code { width: 100%; }
+.template-modal { width: min(900px, 96vw); }
+.template-grid { list-style: none; margin: 8px 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 10px; }
+.template-grid button { width: 100%; height: 100%; display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); color: inherit; cursor: pointer; text-align: center; }
+.template-grid button:hover { border-color: var(--accent); }
+.template-grid button.on { border-color: var(--accent); box-shadow: 0 0 0 2px rgba(37,99,235,.25); background: rgba(37,99,235,.06); }
+.template-grid small { color: #64748b; font-size: 11px; line-height: 1.35; }
+.tpl-thumb { height: 92px; width: auto; filter: drop-shadow(0 2px 4px rgba(0,0,0,.15)); }
+.source-view { display: flex; flex-direction: column; height: 100%; min-height: 0; }
+.source-toolbar { display: flex; align-items: center; gap: 8px; padding: 6px 10px; border-bottom: 1px solid var(--line); flex-wrap: wrap; }
+.source-toolbar .tb-spacer { flex: 1; }
+.source-text { flex: 1; min-height: 0; width: 100%; border: 0; resize: none; padding: 10px 14px; font: 12px/1.55 ui-monospace, Consolas, monospace; background: #0f172a; color: #e2e8f0; tab-size: 2; outline: 0; }
+.source-problem { padding: 6px 12px; background: #fee2e2; color: #991b1b; font-size: 12px; }
+.source-status { padding: 3px 10px; font-size: 11px; color: #64748b; border-top: 1px solid var(--line); }
+.chip-warn { font-size: 11px; padding: 1px 8px; border-radius: 999px; background: #fef3c7; color: #92400e; }
+.db-logo { vertical-align: -2px; flex: none; }
+.wizard-types li.soon { opacity: .55; cursor: not-allowed; }
+.soon-tag { margin-left: 6px; font-style: normal; font-size: 10px; padding: 0 6px; border-radius: 999px; background: #e0e7ff; color: #3730a3; font-weight: 600; }
+.tb-text { font-size: 11.5px; white-space: nowrap; padding: 0 2px; }

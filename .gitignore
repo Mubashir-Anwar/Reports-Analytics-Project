@@ -5,6 +5,7 @@ __pycache__/
 *.pyc
 frontend/node_modules/
 .pytest_cache/
+.ruff_cache/
 .claude/
 
 # secrets and user data (bank/internal names, password hashes) - keep out of the public repo
