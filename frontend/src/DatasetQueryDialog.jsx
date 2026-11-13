@@ -42,7 +42,7 @@ function FilterEditor({ state, dispatch }) {
   );
 }
 
-export default function DatasetQueryDialog({ state, dispatch, notify, onClose, initialTab = 'query' }) {
+export default function DatasetQueryDialog({ state, dispatch, notify, onClose, initialTab = 'query', refreshKey }) {
   const [tab, setTab] = useState(initialTab);
   return (
     <div className="modal-back" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
@@ -53,7 +53,7 @@ export default function DatasetQueryDialog({ state, dispatch, notify, onClose, i
         </div>
         <div className="prop-tabs">{TABS.map(([id, label]) => <button key={id} className={tab === id ? 'on' : ''} onClick={() => setTab(id)}>{label}</button>)}</div>
         <div className="dataset-body setup">
-          {tab === 'query' && <QueryEditor state={state} dispatch={dispatch} notify={notify} />}
+          {tab === 'query' && <QueryEditor state={state} dispatch={dispatch} notify={notify} refreshKey={refreshKey} />}
           {tab === 'parameters' && <ParametersEditor state={state} dispatch={dispatch} />}
           {tab === 'filter' && <FilterEditor state={state} dispatch={dispatch} />}
           {tab === 'sort' && <SortEditor state={state} dispatch={dispatch} />}

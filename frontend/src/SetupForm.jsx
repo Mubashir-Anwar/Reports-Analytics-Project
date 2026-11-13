@@ -17,24 +17,46 @@ export function cleanCollection(value) {
   return (found ? found[1] : text).replace(/^["'`]|["'`]$/g, '').trim();
 }
 
-const useAdapters = (notify) => {
+const useAdapters = (notify, refreshKey) => {
   const [adapters, setAdapters] = useState(null); // null = loading
   const load = () => api.connections().then((r) => setAdapters(r.connections)).catch((error) => {
     setAdapters([]);
     notify(`Could not load data adapters: ${error.message}`, 'error');
   });
-  useEffect(() => { load(); }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { load(); }, [refreshKey]); // eslint-disable-line react-hooks/exhaustive-deps -- reload after adapters change
   return [adapters, load];
 };
 
 /** Data adapter, collection, query and fields (Jasper: Dataset and Query → Query). */
-export function QueryEditor({ state, dispatch, notify }) {
+export function QueryEditor({ state, dispatch, notify, refreshKey }) {
   const { report } = state;
   const [busy, setBusy] = useState(false);
-  const [adapters, loadAdapters] = useAdapters(notify);
+  const [adapters, loadAdapters] = useAdapters(notify, refreshKey);
   const set = (patch) => dispatch({ type: 'REPORT', patch });
   const known = (adapters || []).some((a) => a.id === report.connectionId);
   const selected = (adapters || []).find((a) => a.id === report.connectionId);
+  const isSql = report.queryLanguage === 'sql';
+  /** Choosing an adapter of another kind switches the query language (SQL for PostgreSQL, Mongo shell for MongoDB). */
+  const chooseAdapter = (connectionId) => {
+    const adapter = (adapters || []).find((a) => a.id === connectionId);
+    const sql = Boolean(adapter && adapter.type && adapter.type !== 'mongodb');
+    const patch = { connectionId };
+    if (sql && !isSql) Object.assign(patch, { queryLanguage: 'sql', collection: '' });
+    if (adapter && !sql && isSql) patch.queryLanguage = 'mongosh';
+    set(patch);
+    if (adapter && sql !== isSql) notify(sql ? 'This adapter is a SQL database: write the query in SQL (SELECT …)' : 'This adapter is MongoDB: write an aggregation query', 'ok');
+  };
+
+  const readSqlFields = async () => {
+    setBusy(true);
+    try {
+      const result = await api.queryFields(report.connectionId, report.querySource);
+      const knownParams = new Set(report.parameters.map((p) => p.name));
+      const added = result.parameterNames.filter((name) => !knownParams.has(name));
+      set({ columns: result.columns, ...(added.length ? { parameters: [...report.parameters, ...added.map((name) => ({ name, type: 'string', label: name, required: true }))] } : {}) });
+      notify(`${result.columns.length} fields read from the database${added.length ? ` · new parameter(s) ${added.join(', ')} (type string — change it in Parameters if needed)` : ''}`, 'ok');
+    } catch (error) { notify(`The fields could not be read: ${error.message}`, 'error'); } finally { setBusy(false); }
+  };
 
   const detect = async () => {
     setBusy(true);
@@ -67,7 +89,7 @@ export function QueryEditor({ state, dispatch, notify }) {
         <label>Data adapter <small>(the database connection this report reads from)</small>
           <span className="inline">
             {selected && <DbLogo type={selected.type || 'mongodb'} />}
-            <select value={report.connectionId} onChange={(e) => set({ connectionId: e.target.value })} disabled={adapters === null}>
+            <select value={report.connectionId} onChange={(e) => chooseAdapter(e.target.value)} disabled={adapters === null}>
               {adapters === null && <option value={report.connectionId}>Loading…</option>}
               {adapters !== null && <option value="">Choose a data adapter…</option>}
               {adapters !== null && report.connectionId && !known && <option value={report.connectionId}>{report.connectionId} (not registered)</option>}
@@ -78,22 +100,34 @@ export function QueryEditor({ state, dispatch, notify }) {
           {selected && !selected.configured && <small className="err">This adapter has no saved connection URL yet. Add it in the Data Adapters tab or on /admin → Data sources.</small>}
           {adapters !== null && report.connectionId && !known && <small className="err">This adapter ID is not registered on this server. Choose one from the list.</small>}
         </label>
-        <label>Collection name <small>(only the name, e.g. Orders; filled in from a Jasper runCommand query)</small>
-          <input value={report.collection} onChange={(e) => set({ collection: e.target.value })} onBlur={(e) => { const clean = cleanCollection(e.target.value); if (clean !== e.target.value) set({ collection: clean }); }} placeholder="Collection name" />
-        </label>
-        <label>Query language
-          <select value={report.queryLanguage} onChange={(e) => set({ queryLanguage: e.target.value })}>
-            <option value="mongosh">Mongo Shell</option><option value="aggregation-json">Aggregation JSON</option>
-            <option value="javascript">JavaScript pipeline</option><option value="python">Python pipeline</option>
-          </select>
-        </label>
+        {isSql ? (
+          <label>Query language<input value="SQL (read-only SELECT)" disabled /></label>
+        ) : (
+          <>
+            <label>Collection name <small>(only the name, e.g. Orders; filled in from a Jasper runCommand query)</small>
+              <input value={report.collection} onChange={(e) => set({ collection: e.target.value })} onBlur={(e) => { const clean = cleanCollection(e.target.value); if (clean !== e.target.value) set({ collection: clean }); }} placeholder="Collection name" />
+            </label>
+            <label>Query language
+              <select value={report.queryLanguage} onChange={(e) => set({ queryLanguage: e.target.value })}>
+                <option value="mongosh">Mongo Shell</option><option value="aggregation-json">Aggregation JSON</option>
+                <option value="javascript">JavaScript pipeline</option><option value="python">Python pipeline</option>
+              </select>
+            </label>
+          </>
+        )}
       </div>
-      <label className="block">Query <small>(parameters: $P&#123;StartDate&#125;; db.collection.aggregate([...]) or a Jaspersoft Studio &#123;"runCommand": &#123;"aggregate": …, "pipeline": [...]&#125;&#125; query)</small>
-        <textarea className="code" rows={12} spellCheck={false} value={report.querySource} onChange={(e) => set({ querySource: e.target.value })} placeholder={'db.getCollection("Orders").aggregate([\n  {"$match": {"Date": {"$gte": $P{StartDate}, "$lte": $P{EndDate}}}},\n  {"$project": {"Identifier": 1, "Branch": 1, "Amount": 1}}\n])'} />
-      </label>
+      {isSql ? (
+        <label className="block">SQL query <small>(one SELECT; parameters: $P&#123;StartDate&#125;; a list filter: $X&#123;IN, branch, Branches&#125; — an empty list = no filter)</small>
+          <textarea className="code" rows={12} spellCheck={false} value={report.querySource} onChange={(e) => set({ querySource: e.target.value })} placeholder={'SELECT o.id, o.branch, o.amount, o.placed_on\nFROM orders o\nWHERE o.placed_on BETWEEN $P{StartDate} AND $P{EndDate}\n  AND $X{IN, o.branch, Branches}\nORDER BY o.placed_on'} />
+        </label>
+      ) : (
+        <label className="block">Query <small>(parameters: $P&#123;StartDate&#125;; db.collection.aggregate([...]) or a Jaspersoft Studio &#123;"runCommand": &#123;"aggregate": …, "pipeline": [...]&#125;&#125; query)</small>
+          <textarea className="code" rows={12} spellCheck={false} value={report.querySource} onChange={(e) => set({ querySource: e.target.value })} placeholder={'db.getCollection("Orders").aggregate([\n  {"$match": {"Date": {"$gte": $P{StartDate}, "$lte": $P{EndDate}}}},\n  {"$project": {"Identifier": 1, "Branch": 1, "Amount": 1}}\n])'} />
+        </label>
+      )}
       <div className="row">
-        <button className="btn primary" onClick={detect} disabled={busy || !report.querySource.trim()}>Read fields</button>
-        <span className="muted">The query is only parsed here, not executed.</span>
+        <button className="btn primary" onClick={isSql ? readSqlFields : detect} disabled={busy || !report.querySource.trim() || (isSql && !report.connectionId)}>Read fields</button>
+        <span className="muted">{isSql ? 'Asks the database for the columns (LIMIT 0): no rows are read, nothing is changed.' : 'The query is only parsed here, not executed.'}</span>
       </div>
       <label className="block">Fields <small>— if reading fails, type them separated by commas</small>
         <input value={report.columns.join(', ')} onChange={(e) => set({ columns: e.target.value.split(',').map((s) => s.trim()).filter(Boolean) })} />
@@ -133,7 +167,7 @@ export function ParametersEditor({ state, dispatch }) {
   );
 }
 
-export default function SetupForm({ state, dispatch, notify, onTemplates }) {
+export default function SetupForm({ state, dispatch, notify, onTemplates, refreshKey }) {
   const { report } = state;
   const set = (patch) => dispatch({ type: 'REPORT', patch });
   const [folders, setFolders] = useState([]);
@@ -163,7 +197,7 @@ export default function SetupForm({ state, dispatch, notify, onTemplates }) {
 
       <section className="card">
         <h3><span className="step">2</span> Data adapter and query</h3>
-        <QueryEditor state={state} dispatch={dispatch} notify={notify} />
+        <QueryEditor state={state} dispatch={dispatch} notify={notify} refreshKey={refreshKey} />
       </section>
 
       <section className="card">

@@ -38,6 +38,7 @@ from backend.app.queries.mongo_query import (
     parse_query_source,
     split_jasper_query,
 )
+from backend.app.queries.sql_query import prepare_sql
 from backend.app.rendering import engine as designer_render
 from backend.app.storage.files import normalize_folder_path, report_definitions_directory
 
@@ -67,6 +68,8 @@ class ReportDefinition:
     pipeline_builder: Callable[[dict[str, Any]], list[dict[str, Any]]]
     connection_id: str = "default"
     editor_config: dict[str, Any] | None = None
+    query_language: str = "mongosh"  # "sql" = a SQL data adapter runs `sql` instead of the pipeline
+    sql: Any = None  # queries.sql_query.PreparedSql for SQL reports
 
 
 def _normalize_canvas_position(raw: Any, default: dict[str, float]) -> dict[str, float]:
@@ -95,12 +98,15 @@ def _dynamic_report(payload: dict[str, Any], source_path: Path | None = None) ->
     collection = str(payload.get("collection", "")).strip()
     connection_id = str(payload.get("connectionId", "default")).strip()
     folder = normalize_folder_path(payload.get("folder", "General"))
-    if not collection and str(payload.get("queryLanguage", "")).lower() != "python":
+    is_sql = str(payload.get("queryLanguage", "")).lower() == "sql"
+    if is_sql:
+        collection = ""  # a SQL query names its own tables
+    elif not collection and str(payload.get("queryLanguage", "")).lower() != "python":
         jasper = split_jasper_query(payload.get("querySource"))  # a Jasper runCommand names its collection
         collection = jasper[0].strip() if jasper else ""
-    if not collection:
+    if not collection and not is_sql:
         raise ValueError("The MongoDB collection name is required")
-    if not COLLECTION_TEMPLATE.fullmatch(collection) or collection.lower().startswith("system."):
+    if not is_sql and (not COLLECTION_TEMPLATE.fullmatch(collection) or collection.lower().startswith("system.")):
         raise ValueError("A collection name may contain only letters, numbers, _ - . and $P{parameter}")
     if not CONNECTION_ID_PATTERN.fullmatch(connection_id):
         raise ValueError("Invalid connection ID format")
@@ -176,15 +182,25 @@ def _dynamic_report(payload: dict[str, Any], source_path: Path | None = None) ->
     query_language = str(payload.get("queryLanguage", "aggregation-json")).lower()
     query_source = payload.get("querySource")
     if query_language not in QUERY_LANGUAGES:
-        raise ValueError("queryLanguage must be aggregation-json, mongosh, javascript or python")
+        raise ValueError("queryLanguage must be aggregation-json, mongosh, javascript, python or sql")
     if "querySource" in payload and not isinstance(query_source, str):
         raise ValueError("querySource must be a string")
-    pipeline = parse_query_source(query_language, query_source) if isinstance(query_source, str) else payload.get("pipeline")
-    if not isinstance(pipeline, list) or not pipeline or not all(isinstance(stage, dict) for stage in pipeline):
-        raise ValueError("pipeline must be a non-empty JSON array of stage objects")
-    _validate_pipeline_parameter_names(pipeline, seen_names)
-    _validate_read_only_pipeline(pipeline)
+    prepared_sql = None
+    if is_sql:
+        prepared_sql = prepare_sql(query_source)
+        unknown = [name for name in prepared_sql.parameter_names if name not in seen_names]
+        if unknown:
+            raise ValueError(f"Define the parameter(s) used in the SQL query: {', '.join(unknown)}")
+        pipeline: list[dict[str, Any]] = []
+    else:
+        pipeline = parse_query_source(query_language, query_source) if isinstance(query_source, str) else payload.get("pipeline")
+        if not isinstance(pipeline, list) or not pipeline or not all(isinstance(stage, dict) for stage in pipeline):
+            raise ValueError("pipeline must be a non-empty JSON array of stage objects")
+        _validate_pipeline_parameter_names(pipeline, seen_names)
+        _validate_read_only_pipeline(pipeline)
     date_range = payload.get("dateRange")
+    if date_range is not None and is_sql:
+        raise ValueError("dateRange is for MongoDB reports; in SQL write the dates into the WHERE clause with $P{…}")
     if date_range is not None:
         if not isinstance(date_range, dict):
             raise ValueError("dateRange must be a JSON object")
@@ -197,7 +213,9 @@ def _dynamic_report(payload: dict[str, Any], source_path: Path | None = None) ->
         if names.get(date_range["endParameter"], ParameterSpec("_missing")).kind != "date":
             raise ValueError("The endParameter of dateRange must be of type date")
 
-    columns = payload.get("columns") or _infer_pipeline_columns(pipeline)
+    columns = payload.get("columns") or ([] if is_sql else _infer_pipeline_columns(pipeline))
+    if is_sql and not columns:
+        raise ValueError("Read the fields of the SQL query first (Setup → Read fields), or type the column names")
     if not isinstance(columns, list) or not columns or not all(isinstance(column, str) for column in columns):
         raise ValueError("No output columns found in a $project, $group or $count stage; list the fields under Output columns")
     formats = payload.get("formats", sorted(OUTPUT_FORMATS))
@@ -354,6 +372,8 @@ def _dynamic_report(payload: dict[str, Any], source_path: Path | None = None) ->
         pipeline_builder=build_pipeline,
         connection_id=connection_id,
         editor_config=normalized,
+        query_language=query_language,
+        sql=prepared_sql,
     )
 
 

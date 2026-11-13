@@ -132,6 +132,28 @@ Admin ke **Data sources** tab mein data source ka naam aur MongoDB connection UR
 
 Mongo user ko un collections par read permission chahiye jo report aur `$lookup` use karti hain. Report runs ka audit `REPORTING_DATA_DIR/audit/report-executions.jsonl` mein locally save hota hai, is liye reporting MongoDB user ko write permission ki zaroorat nahi. `AUDIT_TO_MONGODB=true` sirf tab set karein jab aap optional MongoDB audit copy bhi rakhna chahte hon; is write ka fail hona report download ko nahi rokta.
 
+## PostgreSQL data adapter (SQL reports)
+
+Designer → **Data Adapters** → **Create Data Adapter** → **PostgreSQL** (double-click) → Host, Port, Database, Username, Password, SSL → **Test** → **Finish**. Password server ki private file mein jata hai, wapas kabhi nahi dikhta. Database user ko sirf **SELECT** ki ijazat dein.
+
+Setup (ya Design toolbar → **Dataset & Query**) mein yeh adapter chunein: query khud **SQL** ho jati hai aur collection ka khaana chhup jata hai.
+
+```sql
+SELECT o.branch, o.customer, o.amount, o.placed_on
+FROM orders o
+WHERE o.placed_on BETWEEN $P{StartDate} AND $P{EndDate}
+  AND $X{IN, o.branch, Branches}
+ORDER BY o.branch, o.placed_on
+```
+
+- `$P{Name}` — parameter ki value (bound value; SQL mein text ki tarah nahi judti, is liye SQL injection nahi ho sakti).
+- `$X{IN, column, Param}` — comma se alag values ki list (`KHI, LHR`); khaali chhorein to filter nahi lagta (Jasper jaisa). `$X{NOTIN, …}` ulta.
+- `$P!{…}` allowed nahi (wo text ko seedha SQL mein jodta hai).
+- Sirf ek `SELECT` / `WITH … SELECT` statement. INSERT/UPDATE/DELETE/DROP, `SELECT … INTO`, `FOR UPDATE` mana hain; aur query hamesha **read-only transaction** mein chalti hai, time limit `REPORT_MAX_TIME_MS` ke saath.
+- **Read fields** database se columns poochta hai (`LIMIT 0`, koi row nahi padhi jati) aur query ke naye `$P{}` parameters khud jod deta hai — phir unka type (date waghera) Parameters mein theek karein.
+
+Baqi sab (templates, Table/Crosstab, Preview, Publish, `/server`, `/generate`) MongoDB reports jaisa hi chalta hai.
+
 ## Grizzly deployment tayyari
 
 Deployment ko ASGI app `app:app` chahiye. Start command yeh rakhein; platform ka port environment variable use karein:

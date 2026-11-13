@@ -137,7 +137,7 @@ export function ServerPanel({ report, onOpenFromServer, notify, refreshKey, onCh
     return (
       <li key={`a:${a.id}`} className="tree-row adapter-node" style={{ paddingLeft: 6 + depth * 14 }} title={`${a.name} · ${a.database || 'no database'} — click to test the connection`} onClick={() => test(a.id)}>
         <span className="node-label"><DbLogo type={a.type} /> {a.name}</span>
-        <span className={`dot ${s ? s.state : a.configured ? '' : 'err'}`} title={s ? s.text : a.configured ? 'Not tested yet' : 'No MongoDB URL saved'} />
+        <span className={`dot ${s ? s.state : a.configured ? '' : 'err'}`} title={s ? s.text : a.configured ? 'Not tested yet' : 'No connection URL saved'} />
       </li>
     );
   };
@@ -338,7 +338,7 @@ export function DbLogo({ type = 'mongodb', size = 14 }) {
 
 const ADAPTER_TYPES = [
   { id: 'mongodb', name: 'MongoDB Connection', text: 'A MongoDB server (mongodb:// or mongodb+srv:// URL). Reports run their aggregation query on it.' },
-  { id: 'postgresql', name: 'PostgreSQL', text: 'SQL SELECT queries on PostgreSQL.', soon: true },
+  { id: 'postgresql', name: 'PostgreSQL', text: 'SQL SELECT queries on PostgreSQL (read-only), with $P{…} parameters like Jaspersoft Studio.' },
   { id: 'mysql', name: 'MySQL / MariaDB', text: 'SQL SELECT queries on MySQL or MariaDB.', soon: true },
   { id: 'sqlserver', name: 'Microsoft SQL Server', text: 'SQL SELECT queries on SQL Server.', soon: true },
   { id: 'oracle', name: 'Oracle', text: 'SQL SELECT queries on Oracle Database.', soon: true },
@@ -346,26 +346,39 @@ const ADAPTER_TYPES = [
 
 const adapterId = (name) => name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 39);
 
+/** PostgreSQL connection fields → postgresql://user:password@host:port/database?sslmode=… */
+function postgresUrl({ host, port, database, user, password, sslmode }) {
+  if (!host.trim() || !database.trim()) return '';
+  const auth = user.trim() ? `${encodeURIComponent(user.trim())}${password ? `:${encodeURIComponent(password)}` : ''}@` : '';
+  return `postgresql://${auth}${host.trim()}:${(port || '5432').toString().trim()}/${encodeURIComponent(database.trim())}${sslmode && sslmode !== 'prefer' ? `?sslmode=${sslmode}` : ''}`;
+}
+
 /** Like Jaspersoft Studio's "Data Adapter Wizard": 1) pick the type, 2) fill in the connection, Test, Finish. */
 function AdapterWizard({ initial, folders, existingIds, onClose, onSaved, notify }) {
   const editing = Boolean(initial?.id);
   const [step, setStep] = useState(initial?.id || initial?.name ? 2 : 1); // edit / duplicate skip the type page
+  const [type, setType] = useState(initial?.type || 'mongodb');
   const [form, setForm] = useState({ name: '', uri: '', database: '', folder: '', ...initial, id: initial?.id || '' });
+  const [pg, setPg] = useState({ host: 'localhost', port: '5432', database: initial?.database || '', user: '', password: '', sslmode: 'prefer' });
   const [result, setResult] = useState(null); // { ok, text }
   const [busy, setBusy] = useState('');
   const id = editing ? form.id : adapterId(form.name);
   const duplicateId = !editing && id && existingIds.includes(id);
+  const typeInfo = ADAPTER_TYPES.find((t) => t.id === type) || ADAPTER_TYPES[0];
+  const isSql = type !== 'mongodb';
+  const uri = isSql ? postgresUrl(pg) : form.uri.trim();
+  const setPgField = (patch) => { setPg({ ...pg, ...patch }); setResult(null); };
 
   const test = async () => {
     setBusy('test'); setResult(null);
-    try { const r = await api.testConnectionValues({ id: id || 'test', uri: form.uri.trim(), database: form.database.trim() }); setResult({ ok: true, text: `Successful: ${r.message || 'connected'}` }); }
+    try { const r = await api.testConnectionValues({ type, id: id || 'test', uri, database: isSql ? pg.database.trim() : form.database.trim() }); setResult({ ok: true, text: `Successful: ${r.message || 'connected'}` }); }
     catch (error) { setResult({ ok: false, text: error.message }); }
     finally { setBusy(''); }
   };
   const finish = async () => {
     setBusy('save');
     try {
-      await api.saveConnection({ id, name: form.name.trim(), uri: form.uri.trim(), database: form.database.trim(), folder: form.folder });
+      await api.saveConnection({ type, id, name: form.name.trim(), uri, database: isSql ? pg.database.trim() : form.database.trim(), folder: form.folder });
       notify(`Data adapter “${form.name.trim()}” ${editing ? 'updated' : 'created'}`, 'ok');
       onSaved();
     } catch (error) { setResult({ ok: false, text: error.status === 403 ? 'Saving a data adapter needs the admin token' : error.message }); setBusy(''); }
@@ -376,12 +389,15 @@ function AdapterWizard({ initial, folders, existingIds, onClose, onSaved, notify
       <div className="modal wizard" role="dialog" aria-label="Data Adapter Wizard">
         <div className="wizard-head">
           <h3>{editing ? `Edit Data Adapter — ${initial.name}` : 'Data Adapter Wizard'}</h3>
-          <p className="muted">{step === 1 ? 'Create a new data adapter: choose its type.' : 'MongoDB Connection: enter the connection details, test them, then Finish.'}</p>
+          <p className="muted">{step === 1 ? 'Create a new data adapter: choose its type.' : `${typeInfo.name}: enter the connection details, test them, then Finish.`}</p>
         </div>
         {step === 1 && (
-          <ul className="wizard-types">
+          <ul className="wizard-types" role="listbox" aria-label="Data adapter type">
             {ADAPTER_TYPES.map((t) => (
-              <li key={t.id} className={t.soon ? 'soon' : 'on'} aria-disabled={t.soon || undefined} title={t.soon ? 'Planned: SQL data adapters are the next phase (see ARCHITECTURE.md)' : ''} onDoubleClick={() => !t.soon && setStep(2)}>
+              <li key={t.id} role="option" aria-selected={type === t.id} aria-disabled={t.soon || undefined}
+                className={t.soon ? 'soon' : type === t.id ? 'on' : ''}
+                title={t.soon ? 'Planned (see ARCHITECTURE.md §9.3)' : 'Double-click to continue'}
+                onClick={() => !t.soon && setType(t.id)} onDoubleClick={() => { if (!t.soon) { setType(t.id); setStep(2); } }}>
                 <span className="t-icon"><DbLogo type={t.id} size={26} /></span><span><b>{t.name}{t.soon ? <em className="soon-tag">coming next</em> : null}</b><small>{t.text}</small></span>
               </li>
             ))}
@@ -389,13 +405,33 @@ function AdapterWizard({ initial, folders, existingIds, onClose, onSaved, notify
         )}
         {step === 2 && (
           <div className="wizard-form">
-            <label className="modal-field">Name<input autoFocus value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="KMBL UAT MongoDB" /></label>
+            <label className="modal-field">Name<input autoFocus value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder={isSql ? 'Finance PostgreSQL' : 'KMBL UAT MongoDB'} /></label>
             {!editing && id && <small className={duplicateId ? 'err' : 'muted'}>ID: {id}{duplicateId ? ' — already used, choose another name' : ''}</small>}
-            <label className="modal-field">MongoDB URL
-              <input type="password" autoComplete="new-password" value={form.uri} onChange={(e) => { setForm({ ...form, uri: e.target.value }); setResult(null); }} placeholder="mongodb://user:password@host:27017/Database" />
-              <small className="muted">{editing ? 'The saved URL is never shown. Enter it again (it replaces the old one).' : 'Saved with its password in a private file on the server; never shown again. For a remote MongoDB connect the VPN first.'}</small>
-            </label>
-            <label className="modal-field">Database <small>(optional when the URL has one)</small><input value={form.database} onChange={(e) => setForm({ ...form, database: e.target.value })} /></label>
+            {isSql ? (
+              <>
+                <div className="pg-grid">
+                  <label className="modal-field">Host<input value={pg.host} onChange={(e) => setPgField({ host: e.target.value })} placeholder="db.example.com" /></label>
+                  <label className="modal-field">Port<input value={pg.port} inputMode="numeric" onChange={(e) => setPgField({ port: e.target.value.replace(/[^0-9]/g, '') })} /></label>
+                  <label className="modal-field">Database<input value={pg.database} onChange={(e) => setPgField({ database: e.target.value })} placeholder="reports" /></label>
+                  <label className="modal-field">SSL
+                    <select value={pg.sslmode} onChange={(e) => setPgField({ sslmode: e.target.value })}>
+                      <option value="prefer">prefer (default)</option><option value="require">require</option><option value="verify-full">verify-full</option><option value="disable">disable</option>
+                    </select>
+                  </label>
+                  <label className="modal-field">Username<input value={pg.user} autoComplete="off" onChange={(e) => setPgField({ user: e.target.value })} placeholder="report_reader" /></label>
+                  <label className="modal-field">Password<input type="password" autoComplete="new-password" value={pg.password} onChange={(e) => setPgField({ password: e.target.value })} /></label>
+                </div>
+                <small className="muted">{editing ? 'The saved password is never shown: enter the connection again (it replaces the old one).' : 'Saved with the password in a private file on the server; never shown again.'} Give the report user read-only rights — reports only read, and every query runs in a read-only transaction.</small>
+              </>
+            ) : (
+              <>
+                <label className="modal-field">MongoDB URL
+                  <input type="password" autoComplete="new-password" value={form.uri} onChange={(e) => { setForm({ ...form, uri: e.target.value }); setResult(null); }} placeholder="mongodb://user:password@host:27017/Database" />
+                  <small className="muted">{editing ? 'The saved URL is never shown. Enter it again (it replaces the old one).' : 'Saved with its password in a private file on the server; never shown again. For a remote MongoDB connect the VPN first.'}</small>
+                </label>
+                <label className="modal-field">Database <small>(optional when the URL has one)</small><input value={form.database} onChange={(e) => setForm({ ...form, database: e.target.value })} /></label>
+              </>
+            )}
             <label className="modal-field">Folder
               <select value={form.folder || ''} onChange={(e) => setForm({ ...form, folder: e.target.value })}>
                 <option value="">Data Adapters (top level)</option>
@@ -406,10 +442,10 @@ function AdapterWizard({ initial, folders, existingIds, onClose, onSaved, notify
           </div>
         )}
         <div className="row wizard-buttons">
-          {step === 2 && <button className="btn" style={{ marginRight: 'auto' }} disabled={Boolean(busy) || !form.uri.trim()} onClick={test}>{busy === 'test' ? 'Testing…' : 'Test'}</button>}
+          {step === 2 && <button className="btn" style={{ marginRight: 'auto' }} disabled={Boolean(busy) || !uri} onClick={test}>{busy === 'test' ? 'Testing…' : 'Test'}</button>}
           {step === 2 && !editing && <button className="btn" disabled={Boolean(busy)} onClick={() => setStep(1)}>‹ Back</button>}
           {step === 1 && <button className="btn" onClick={() => setStep(2)}>Next ›</button>}
-          {step === 2 && <button className="btn primary" disabled={Boolean(busy) || !form.name.trim() || !form.uri.trim() || duplicateId} onClick={finish}>{busy === 'save' ? 'Saving…' : 'Finish'}</button>}
+          {step === 2 && <button className="btn primary" disabled={Boolean(busy) || !form.name.trim() || !uri || duplicateId} onClick={finish}>{busy === 'save' ? 'Saving…' : 'Finish'}</button>}
           <button className="btn" disabled={Boolean(busy)} onClick={onClose}>Cancel</button>
         </div>
       </div>
@@ -417,7 +453,6 @@ function AdapterWizard({ initial, folders, existingIds, onClose, onSaved, notify
   );
 }
 
-/** Like Jaspersoft Studio's Repository Explorer → Data Adapters: a tree with right-click Create / Edit / Duplicate / Test / Delete. */
 export function AdaptersPanel({ notify, refreshKey, onChanged, openMenu }) {
   const [list, setList] = useState([]);
   const [folders, setFolders] = useState([]);
@@ -457,8 +492,8 @@ export function AdaptersPanel({ notify, refreshKey, onChanged, openMenu }) {
 
   const adapterMenu = (item) => [
     { header: `🍃 ${item.name}` },
-    { label: 'Edit Data Adapter…', icon: '✎', onClick: () => setWizard({ id: item.id, name: item.name, database: item.database || '', folder: item.folder || '', uri: '' }) },
-    { label: 'Duplicate…', icon: '⧉', onClick: () => setWizard({ name: `Copy of ${item.name}`, database: item.database || '', folder: item.folder || '', uri: '' }) },
+    { label: 'Edit Data Adapter…', icon: '✎', onClick: () => setWizard({ id: item.id, name: item.name, database: item.database || '', folder: item.folder || '', uri: '', type: item.type || 'mongodb' }) },
+    { label: 'Duplicate…', icon: '⧉', onClick: () => setWizard({ name: `Copy of ${item.name}`, database: item.database || '', folder: item.folder || '', uri: '', type: item.type || 'mongodb' }) },
     { label: 'Test connection', icon: '⚡', onClick: () => test(item) },
     { label: 'Move to folder', icon: '📁', items: [{ label: 'Data Adapters (top level)', disabled: !item.folder, onClick: () => move(item, '') }, ...folders.map((f) => ({ label: f.split('/').join(' / '), disabled: f === item.folder, onClick: () => move(item, f) }))] },
     '-',
@@ -476,7 +511,7 @@ export function AdaptersPanel({ notify, refreshKey, onChanged, openMenu }) {
         className={`tree-row adapter-node ${selected === item.id ? 'active' : ''}`}
         style={{ paddingLeft: 6 + depth * 14 }}
         onClick={() => setSelected(item.id)}
-        onDoubleClick={() => setWizard({ id: item.id, name: item.name, database: item.database || '', folder: item.folder || '', uri: '' })}
+        onDoubleClick={() => setWizard({ id: item.id, name: item.name, database: item.database || '', folder: item.folder || '', uri: '', type: item.type || 'mongodb' })}
         onContextMenu={(e) => { setSelected(item.id); menu(() => adapterMenu(item))(e); }}
         title={`${item.name} · ${item.database || 'database from the URL'} · ${item.configured ? 'configured' : 'no URL saved'}${s ? ` · ${s.text}` : ''} — double-click to edit, right-click for more`}
       >
@@ -521,7 +556,7 @@ export function AdaptersPanel({ notify, refreshKey, onChanged, openMenu }) {
           <b><DbLogo type={chosen.type} /> {chosen.name}</b>
           <small>ID {chosen.id} · {chosen.database || 'database from the URL'} · {chosen.configured ? 'URL saved' : 'no URL saved'}</small>
           {status[chosen.id] && <small className={`adapter-status ${status[chosen.id].state}`}>{status[chosen.id].text}</small>}
-          <div className="row"><button className="btn sm" onClick={() => test(chosen)}>Test</button><button className="btn sm" onClick={() => setWizard({ id: chosen.id, name: chosen.name, database: chosen.database || '', folder: chosen.folder || '', uri: '' })}>Edit…</button></div>
+          <div className="row"><button className="btn sm" onClick={() => test(chosen)}>Test</button><button className="btn sm" onClick={() => setWizard({ id: chosen.id, name: chosen.name, database: chosen.database || '', folder: chosen.folder || '', uri: '', type: chosen.type || 'mongodb' })}>Edit…</button></div>
         </div>
       )}
       <p className="hint">Right-click an adapter: Edit, Duplicate, Test, Move, Delete. Choose the adapter for a run on the Preview tab. Saving, moving and deleting adapters needs the admin token.</p>

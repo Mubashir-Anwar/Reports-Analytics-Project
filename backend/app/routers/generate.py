@@ -10,13 +10,11 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import Response
 from pymongo.errors import PyMongoError
 
-from backend.app.connectors import mongodb
-from backend.app.connectors.errors import MongoReadAccessError
+from backend.app.connectors.errors import ConnectorQueryError, MongoReadAccessError
 from backend.app.connectors.mongo_fallback import _row_value
 from backend.app.constants import METADATA_KEYS, OUTPUT_FORMATS, REPORT_PATH, SIGNED_LINK_KEYS
 from backend.app.definitions import ReportDefinition, validate_parameters
 from backend.app.logs import LOG
-from backend.app.queries.mongo_query import resolve_collection
 from backend.app.rendering.outputs import render_report_output
 from backend.app.storage import audit as audit_store
 
@@ -24,6 +22,7 @@ from backend.app.storage import audit as audit_store
 def register(app: FastAPI, ctx: SimpleNamespace) -> None:
     """Add the generate endpoints to the app."""
     get_connection = ctx.get_connection
+    run_report_rows = ctx.run_report_rows
     published_report_summaries = ctx.published_report_summaries
     reports_by_id = ctx.reports_by_id
     require_report_access = ctx.require_report_access
@@ -70,21 +69,8 @@ def register(app: FastAPI, ctx: SimpleNamespace) -> None:
             parameters, metadata = validate_parameters(definition, query_pairs)
             audit.update(metadata)
             audit["parameters"] = {key: value.isoformat() if isinstance(value, date) else value for key, value in parameters.items()}
-            pipeline = definition.pipeline_builder(parameters)
-            # aggregate() returns a CommandCursor, which has no limit() method.
-            # Cap the number of returned documents in MongoDB's pipeline instead.
-            pipeline = [*pipeline, {"$limit": settings.max_rows + 1}]
-            client, database = get_connection(definition.connection_id)
-            collection = client[database][resolve_collection(definition.collection, parameters)]
-            rows = mongodb._execute_report_pipeline(
-                collection,
-                pipeline,
-                max_time_ms=settings.max_time_ms,
-                allow_disk_use=settings.allow_disk_use,
-                max_rows=settings.max_rows,
-            )
-            if len(rows) > settings.max_rows:
-                raise HTTPException(status_code=413, detail=f"The report is larger than the row limit ({settings.max_rows})")
+            # MongoDB pipeline or SQL query, on the report's own data adapter (413 above the row limit)
+            rows = run_report_rows(definition, parameters, definition.connection_id, max_rows=settings.max_rows, limit_rows=False)
             rows = [{key: _row_value(row, key) for key in definition.columns} for row in rows]
             body, media_type = render_report_output(definition, parameters, rows, output_format, subreport_loader())
             audit.update({"status": "success", "rowCount": len(rows)})
@@ -120,6 +106,11 @@ def register(app: FastAPI, ctx: SimpleNamespace) -> None:
             audit["errorMessage"] = type(exc).__name__
             LOG.exception("MongoDB report execution failed")
             raise HTTPException(status_code=503, detail="The MongoDB report query failed") from None
+        except ConnectorQueryError as exc:
+            audit["errorCode"] = "sql_error"
+            audit["errorMessage"] = str(exc)[:300]
+            LOG.warning("SQL report %s failed: %s", report_id if definition else "?", exc)
+            raise HTTPException(status_code=503, detail="The report query failed; the service log has the details") from None
         except RuntimeError as exc:
             audit["errorCode"] = "export_dependency_missing"
             audit["errorMessage"] = str(exc)[:300]

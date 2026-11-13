@@ -20,7 +20,9 @@ WORKSPACE_META = "_workspace"  # designer-only bookkeeping inside a workspace dr
 
 SERVICE_VERSION = "0.3.0"
 OUTPUT_FORMATS = {"csv", "xlsx", "pdf"}
-QUERY_LANGUAGES = {"aggregation-json", "mongosh", "javascript", "python"}
+QUERY_LANGUAGES = {"aggregation-json", "mongosh", "javascript", "python", "sql"}
+# Data adapter kinds: MongoDB, and SQL databases through backend/app/connectors/sql.py
+ADAPTER_TYPES = {"mongodb", "postgresql"}
 METADATA_KEYS = {"GeneratedBy", "GeneratedByCode", "Folder", "Generate"}
 # Signed /generate links carry these two query parameters; they are never report parameters.
 SIGNED_LINK_KEYS = ("Expires", "Signature")

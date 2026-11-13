@@ -12,6 +12,18 @@ jobs:
   backend:
     name: Backend (lint + tests)
     runs-on: ubuntu-latest
+    services:
+      postgres:  # real PostgreSQL for tests/test_sql_reports.py (read-only, time limit, parameters)
+        image: postgres:16
+        env:
+          POSTGRES_USER: reporting_test
+          POSTGRES_PASSWORD: reporting_test
+          POSTGRES_DB: reporting_test
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U reporting_test" --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      PG_TEST_URL: postgresql://reporting_test:reporting_test@127.0.0.1:5432/reporting_test
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5

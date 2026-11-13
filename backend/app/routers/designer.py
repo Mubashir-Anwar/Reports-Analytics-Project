@@ -9,6 +9,8 @@ from typing import Any
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse, Response
 
+from backend.app.connectors import sql as sql_connector
+from backend.app.connectors.errors import ConnectorQueryError
 from backend.app.constants import BOOTSTRAP_PROXY_HEADERS, OUTPUT_FORMATS, REPORT_ID_PATTERN
 from backend.app.queries.mongo_query import (
     _validate_pipeline_parameter_names,
@@ -17,6 +19,7 @@ from backend.app.queries.mongo_query import (
     pipeline_parameter_names,
     split_jasper_query,
 )
+from backend.app.queries.sql_query import prepare_sql
 from backend.app.rendering import engine as designer_render
 
 
@@ -27,6 +30,7 @@ def register(app: FastAPI, ctx: SimpleNamespace) -> None:
     preview_definition = ctx.preview_definition
     require_admin = ctx.require_admin
     run_definition_file = ctx.run_definition_file
+    sql_adapter = ctx.sql_adapter
     subreport_loader = ctx.subreport_loader
 
     @app.get("/api/admin/bootstrap", include_in_schema=False)
@@ -55,6 +59,23 @@ def register(app: FastAPI, ctx: SimpleNamespace) -> None:
         if not token:
             raise HTTPException(status_code=503, detail="The local admin token could not be initialised")
         return JSONResponse({"token": token}, headers={"Cache-Control": "no-store"})
+
+    @app.post("/api/admin/query/fields")
+    async def admin_read_sql_fields(request: Request) -> dict[str, Any]:
+        """Jasper "Read Fields" for a SQL query: checks it (one read-only statement) and asks the database for the
+        result columns with LIMIT 0 — no data rows are read. Parameters are NULL, $X{IN} lists empty."""
+        require_admin(request, "designer")
+        payload = await json_body(request)
+        try:
+            prepared = prepare_sql(payload.get("querySource"))
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from None
+        kind, url = sql_adapter(str(payload.get("connectionId") or "").strip())
+        try:
+            columns = sql_connector.describe(kind, url, prepared)
+        except ConnectorQueryError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from None
+        return {"columns": columns, "parameterNames": list(prepared.parameter_names)}
 
     @app.post("/api/admin/query/parse")
     async def admin_parse_query(request: Request) -> dict[str, Any]:

@@ -1,0 +1,243 @@
+"""The server repository: saving, folders, deleting, summaries and the /server resource page.
+
+Every function takes the service context `ctx` first; create_context() binds them onto ctx."""
+from __future__ import annotations
+
+import copy
+import re
+import shutil
+from datetime import datetime, timezone
+from types import SimpleNamespace
+from typing import Any
+
+from fastapi import HTTPException
+
+from backend.app.connectors.profiles import load_connection_profiles
+from backend.app.constants import OUTPUT_FORMATS, REPORT_ID_PATTERN
+from backend.app.definitions import ReportDefinition, _dynamic_report, discover_reports
+from backend.app.logs import LOG
+from backend.app.security.users import role_at_least
+from backend.app.storage.files import (
+    _write_json_atomically,
+    folders_file,
+    list_saved_folders,
+    normalize_folder_path,
+    report_definition_path,
+    report_definitions_directory,
+)
+
+__all__ = ['admin_report_payload', 'save_report_payload', 'folder_contents', 'delete_repository_folder', 'delete_published_report', 'published_or_404', 'design_summary', 'resource_details', 'free_report_id', 'published_report_summaries']
+
+
+def admin_report_payload(ctx: SimpleNamespace, definition: ReportDefinition) -> dict[str, Any]:
+    if definition.editor_config is not None:
+        return copy.deepcopy(definition.editor_config)
+    return {
+        "id": definition.report_id,
+        "title": definition.title,
+        "folder": "General",
+        "connectionId": definition.connection_id,
+        "collection": definition.collection,
+        "parameters": [{
+            "name": spec.name,
+            "type": spec.kind,
+            "label": spec.label,
+            "description": spec.description,
+            "required": spec.required,
+            **({"default": spec.default} if spec.default is not None else {}),
+            **({"allowedValues": list(spec.allowed_values)} if spec.allowed_values else {}),
+        } for spec in definition.parameters],
+        "columns": list(definition.columns),
+        "pipeline": [],
+    }
+
+
+def save_report_payload(ctx: SimpleNamespace, payload: Any, expected_id: str | None = None) -> ReportDefinition:
+    if not isinstance(payload, dict):
+        raise HTTPException(status_code=400, detail="The report definition must be a JSON object")
+    try:
+        definition = _dynamic_report(payload)
+    except (TypeError, ValueError, KeyError) as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from None
+    if expected_id and definition.report_id != expected_id:
+        raise HTTPException(status_code=400, detail="The report ID in the URL and in the definition must match")
+    existing = ctx.reports_by_id.get(definition.report_id)
+    if existing is not None and expected_id is None:
+        raise HTTPException(status_code=409, detail="A report with this ID already exists")
+    profile_ids = {item["id"] for item in load_connection_profiles()}
+    if definition.connection_id not in profile_ids:
+        raise HTTPException(status_code=422, detail=f"Unknown connectionId: {definition.connection_id}")
+    path = report_definition_path(definition.report_id, definition.editor_config["folder"])
+    _write_json_atomically(path, definition.editor_config or payload)
+    if existing and existing.editor_config:
+        previous_path = report_definition_path(
+            existing.report_id,
+            normalize_folder_path(existing.editor_config.get("folder", "General")),
+        )
+        if previous_path != path and previous_path.exists():
+            previous_path.unlink()
+    ctx.reports_by_id[definition.report_id] = _dynamic_report(definition.editor_config or payload, path)
+    return ctx.reports_by_id[definition.report_id]
+
+
+def folder_contents(ctx: SimpleNamespace, folder: str) -> dict[str, list[str]]:
+    """Subfolders, published reports and data adapters inside a repository folder (at any depth)."""
+    def inside(path: str) -> bool:
+        return path == folder or path.startswith(f"{folder}/")
+    return {
+        "subfolders": [item for item in list_saved_folders() if item.startswith(f"{folder}/")],
+        "reports": sorted(item.report_id for item in ctx.reports_by_id.values()
+                          if item.editor_config and inside(str(item.editor_config.get("folder", "General")))),
+        "adapters": [item["name"] for item in load_connection_profiles() if inside(str(item.get("folder") or ""))],
+    }
+
+
+def delete_repository_folder(ctx: SimpleNamespace, folder: str, recursive: bool = False, user: str = "") -> dict[str, Any]:
+    """Delete a folder. recursive=True (after the user confirmed it) also deletes its subfolders and the
+    published reports in them, like JasperReports Server; data adapters must still be moved first."""
+    if folder == "General":
+        raise HTTPException(status_code=400, detail="The default General folder cannot be deleted")
+    saved_folders = list_saved_folders()
+    if folder not in saved_folders:
+        raise HTTPException(status_code=404, detail="Folder not found")
+    contents = ctx.folder_contents(folder)
+    if contents["adapters"]:
+        raise HTTPException(status_code=409, detail=f"Move or delete the data adapters in this folder first: {', '.join(contents['adapters'])}")
+    if not recursive and (contents["subfolders"] or contents["reports"]):
+        parts = []
+        if contents["subfolders"]:
+            parts.append(f"{len(contents['subfolders'])} subfolder(s)")
+        if contents["reports"]:
+            parts.append(f"{len(contents['reports'])} report(s): {', '.join(contents['reports'][:5])}")
+        raise HTTPException(status_code=409, detail=f"The folder is not empty ({' and '.join(parts)}); confirm to delete it with everything inside")
+    for report_id in contents["reports"]:
+        definition = ctx.reports_by_id[report_id]
+        path = report_definition_path(report_id, normalize_folder_path(definition.editor_config.get("folder", "General")))
+        if path.exists():
+            path.unlink()
+        ctx.record_history(report_id, "deleted", user or "admin", f"with the folder {folder}")
+    root = report_definitions_directory().resolve()
+    directory = report_definition_path(".folder", folder).parent.resolve()
+    if directory.exists() and directory != root and root in directory.parents:
+        leftovers = [p for p in directory.rglob("*") if p.is_file()]
+        if leftovers and not recursive:
+            raise HTTPException(status_code=409, detail="The folder still has files in it; confirm to delete it with everything inside")
+        shutil.rmtree(directory)
+    removed = {folder, *contents["subfolders"]}
+    _write_json_atomically(folders_file(), {"folders": [item for item in saved_folders if item not in removed]})
+    if contents["reports"]:
+        refreshed = discover_reports()
+        ctx.reports_by_id.clear()
+        ctx.reports_by_id.update(refreshed)
+    LOG.info("Repository folder %s deleted (%d subfolders, %d reports) by %s", folder, len(contents["subfolders"]), len(contents["reports"]), user or "admin")
+    return {"deleted": folder, "folders": list_saved_folders(), "subfoldersDeleted": len(contents["subfolders"]),
+            "reportsDeleted": contents["reports"]}
+
+
+def delete_published_report(ctx: SimpleNamespace, report_id: str) -> dict[str, str]:
+    if not REPORT_ID_PATTERN.fullmatch(report_id):
+        raise HTTPException(status_code=400, detail="Invalid report ID format")
+    definition = ctx.reports_by_id.get(report_id)
+    if definition is None or definition.editor_config is None:
+        raise HTTPException(status_code=404, detail="Saved report definition not found")
+    path = report_definition_path(
+        report_id,
+        normalize_folder_path(definition.editor_config.get("folder", "General")),
+    )
+    if not path.exists():
+        raise HTTPException(status_code=404, detail="Saved report definition not found")
+    path.unlink()
+    refreshed = discover_reports()
+    ctx.reports_by_id.clear()
+    ctx.reports_by_id.update(refreshed)
+    return {"status": "deleted", "reportId": report_id}
+
+
+def published_or_404(ctx: SimpleNamespace, report_id: str) -> ReportDefinition:
+    definition = ctx.reports_by_id.get(report_id)
+    if definition is None or definition.editor_config is None:
+        raise HTTPException(status_code=404, detail="This report is not published on the server")
+    return definition
+
+
+def design_summary(ctx: SimpleNamespace, design: Any) -> dict[str, Any]:
+    """Bands, element counts and the subreports a design uses (for the resource page)."""
+    if not isinstance(design, dict):
+        return {"bands": [], "elements": 0, "subreports": [], "components": {}}
+    bands = design.get("bands") or {}
+    found: list[tuple[str, dict[str, Any]]] = []
+    for key, band in bands.items():
+        if key in ("groupHeaders", "groupFooters") and isinstance(band, dict):
+            found += [(f"{key[:-1]} {name}", item) for name, item in band.items() if isinstance(item, dict)]
+        elif isinstance(band, dict):
+            found.append((key, band))
+    present = [(name, band) for name, band in found if band.get("height") or band.get("elements")]
+    elements = [el for _, band in present for el in band.get("elements") or [] if isinstance(el, dict)]
+    components: dict[str, int] = {}
+    for el in elements:
+        components[str(el.get("type"))] = components.get(str(el.get("type")), 0) + 1
+    return {"bands": [name for name, _ in present], "elements": len(elements), "components": components,
+            "subreports": sorted({str(el.get("reportId")) for el in elements if el.get("type") == "subreport" and el.get("reportId")}),
+            "page": design.get("page") or {}}
+
+
+def resource_details(ctx: SimpleNamespace, definition: ReportDefinition, session: dict[str, Any]) -> dict[str, Any]:
+    config = definition.editor_config or {}
+    designer = role_at_least(session["role"], "designer")
+    try:
+        path = report_definition_path(definition.report_id, normalize_folder_path(config.get("folder", "General")))
+        stat = path.stat() if path.exists() else None
+    except (ValueError, OSError):
+        stat = None
+    used_by = sorted(item.report_id for item in ctx.reports_by_id.values() if item.report_id != definition.report_id
+                     and definition.report_id in ctx.design_summary((item.editor_config or {}).get("design")).get("subreports", []))
+    return {
+        "id": definition.report_id, "title": definition.title, "description": config.get("description", ""),
+        "folder": config.get("folder", "General"), "formats": config.get("formats", sorted(OUTPUT_FORMATS)),
+        "defaultFormat": config.get("defaultFormat", "pdf"), "connection": ctx.connection_summary(definition.connection_id),
+        "collection": config.get("collection", definition.collection), "columns": list(definition.columns),
+        "parameters": [{"name": p.get("name"), "type": p.get("type", "string"), "label": p.get("label", p.get("name")),
+                        "description": p.get("description", ""), "required": bool(p.get("required")),
+                        "default": p.get("default"), "allowedValues": p.get("allowedValues") or [],
+                        "computed": p.get("prompt") is False, "expression": p.get("expression", "")}
+                       for p in config.get("parameters", []) if isinstance(p, dict)],
+        # the query can reveal data structure: only designers and admins see it
+        "queryLanguage": config.get("queryLanguage", "mongosh") if designer else None,
+        "querySource": config.get("querySource", "") if designer else None,
+        "design": ctx.design_summary(config.get("design")),
+        "file": {"name": f"{definition.report_id}.mrd", "size": stat.st_size if stat else None,
+                 "modifiedAt": datetime.fromtimestamp(stat.st_mtime, timezone.utc).isoformat() if stat else ""},
+        "usedBy": used_by,
+        "history": list(reversed(ctx.read_history(definition.report_id)))[:50],
+        "canEdit": designer, "canDelete": role_at_least(session["role"], "admin"),
+    }
+
+
+def free_report_id(ctx: SimpleNamespace, base: str) -> str:
+    base = re.sub(r"[^A-Za-z0-9_-]", "_", base)[:70] or "REPORT"
+    candidate, number = f"{base}_COPY", 2
+    while candidate in ctx.reports_by_id:
+        candidate, number = f"{base}_COPY{number}", number + 1
+    return candidate
+
+
+def published_report_summaries(ctx: SimpleNamespace) -> list[dict[str, Any]]:
+    return [{
+        "id": item.report_id,
+        "title": item.title,
+        "description": (item.editor_config or {}).get("description", ""),
+        "folder": (item.editor_config or {}).get("folder", "General"),
+        "connectionId": item.connection_id,
+        "collection": item.collection,
+        "formats": (item.editor_config or {}).get("formats", sorted(OUTPUT_FORMATS)),
+        "defaultFormat": (item.editor_config or {}).get("defaultFormat", "csv"),
+        "parameters": [{
+            "name": p.name,
+            "label": p.label or p.name,
+            "description": p.description,
+            "type": p.kind,
+            "required": p.required,
+            "default": p.default,
+            "allowedValues": list(p.allowed_values),
+        } for p in item.parameters if p.prompt],  # computed parameters are never asked
+    } for item in ctx.reports_by_id.values()]

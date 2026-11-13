@@ -4,7 +4,7 @@ from __future__ import annotations
 import json
 import os
 
-from backend.app.constants import CONNECTION_ID_PATTERN, ENV_KEY_PATTERN
+from backend.app.constants import ADAPTER_TYPES, CONNECTION_ID_PATTERN, ENV_KEY_PATTERN
 from backend.app.logs import LOG
 from backend.app.security.secrets import _load_private_secrets
 from backend.app.storage.files import connections_file, normalize_folder_path
@@ -33,8 +33,8 @@ def load_connection_profiles() -> list[dict[str, str]]:
             profile = {
                 "id": str(item.get("id", "")).strip(),
                 "name": str(item.get("name", "")).strip(),
-                # database kind (logo in the UI). Only MongoDB adapters can run queries today; SQL kinds are planned.
-                "type": "mongodb",
+                # database kind: mongodb, or a SQL database run by connectors/sql.py
+                "type": str(item.get("type", "mongodb")).strip().lower() if str(item.get("type", "mongodb")).strip().lower() in ADAPTER_TYPES else "mongodb",
             }
             storage = str(item.get("storage", "env")).strip().lower()
             if storage == "file":

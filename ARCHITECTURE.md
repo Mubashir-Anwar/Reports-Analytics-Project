@@ -77,8 +77,16 @@ DEPLOYMENT.md, README_roman_urdu.md, ARCHITECTURE.md   Documentation
 backend/app/
   main.py                  `app = make_app()` — the ASGI entry point
   factory.py               make_app(): builds the context, the FastAPI app, the access/log middleware, then each router
-  context.py               create_context(): start-up work + shared state (settings, repository cache, Mongo clients)
-                           and the helper functions endpoints share (require_admin, run_report_rows, record_history, …)
+  context.py               create_context(): start-up work and shared state (settings, repository cache, Mongo clients),
+                           then binds the service functions onto ctx
+  services/                the helpers the routers share; each function takes ctx first
+    guards.py              report access (signed links / token), admin/designer tokens, /server sessions, JSON bodies
+    connections.py         Mongo clients, adapter kind, SQL adapters, connection tests (all adapter types)
+    runs.py                run a report (MongoDB pipeline or SQL), subreports, drafts, previews, files
+    repository.py          save/delete/copy reports and folders, summaries, the /server resource page
+    workspace.py           designer drafts and their publish status
+    history.py             history of each server report
+    accounts.py            /admin user helpers
   routers/                 one module per area; each has register(app, ctx)
     pages.py               /, /ui, /admin, /designer, /server
     designer.py            query parse, JRXML import, design validate/render, draft preview/run, local bootstrap
@@ -95,9 +103,11 @@ backend/app/
   security/                access.py (areas, client IP, admin IP allow-list) · secrets.py (private_secrets.json, .env)
                            · users.py (accounts, password hashes, session cookies)
   storage/                 files.py (data directory, folders, atomic JSON writes) · audit.py (run history)
-  connectors/              mongodb.py (connection checks, run a pipeline) · profiles.py (data adapters and their
-                           secrets) · mongo_fallback.py (in-process pipeline stages) · errors.py
+  connectors/              mongodb.py (connection checks, run a pipeline) · sql.py (PostgreSQL: test, read-only run,
+                           Read Fields) · profiles.py (data adapters, their type and secrets) · mongo_fallback.py
+                           (in-process pipeline stages) · errors.py
   queries/mongo_query.py   Query parsing: Mongo shell / JSON / JS / Python, Jasper runCommand, $P{}, read-only checks
+  queries/sql_query.py     SQL report queries: one read-only statement, $P{} bound, $X{IN,…} lists, $P!{} refused
   definitions.py           ParameterSpec, ReportDefinition, saved JSON → definition, repository loader, parameter values
   mrd.py                   The .mrd file format
   rendering/
@@ -109,16 +119,16 @@ backend/app/
 ```
 
 **How a request is served.** `make_app()` calls `create_context()` once: it reads the settings, prepares the data
-folder, logging and the admin token, loads the repository into `reports_by_id`, and defines the shared helpers.
-They are returned together as one `ctx` object. Each router's `register(app, ctx)` takes the helpers it needs from
-`ctx` and adds its endpoints. Shared state (`reports_by_id`, `state`, `settings`) is changed in place, so every
+folder, logging and the admin token, and loads the repository into `reports_by_id`. `bind_services(ctx)` then puts
+every function of `services/` on `ctx` with `ctx` already filled in. Each router's `register(app, ctx)` takes the
+helpers it needs from `ctx` and adds its endpoints. Shared state (`reports_by_id`, `state`, `settings`) is changed in place, so every
 router sees the same objects. Lower layers (`storage`, `security`, `connectors`, `queries`, `definitions`,
 `rendering`) never import the routers or the context.
 
 **Rules**
 
-* A new endpoint goes into the router of its area; a helper used by several routers goes into `context.py`
-  (later: a service module that takes `ctx`).
+* A new endpoint goes into the router of its area; a helper used by several routers goes into a `services/`
+  module (first parameter `ctx`, listed in that module's `__all__`).
 * To replace a function in tests, patch it where it is defined, e.g. `monkeypatch.setattr(core.mongodb,
   "MongoClient", Fake)`. Call sites reach `MongoClient`, `_execute_report_pipeline` and `_append_report_audit`
   through their module for exactly this reason.
@@ -297,7 +307,7 @@ Writes go through `_write_json_atomically` (temp file + rename), so a crash neve
 | ~~`reporting_core.py` is 4 300 lines~~ | — | **Done:** split into `backend/app` (§3), behaviour unchanged, all tests green |
 | State in process memory (`reports_by_id`, Mongo clients) and JSON files | Only **one** worker can run; no horizontal scaling | Move repository, workspace, users, history to a database (PostgreSQL) with a cache layer |
 | ~~Dockerfile copied files that are not in git~~ | — | **Done:** multi-stage image from a clean checkout, no `data/` inside, liveness probe |
-| Only MongoDB adapters | Cannot report on SQL databases | Connector layer (§9.3) |
+| ~~Only MongoDB adapters~~ | — | **PostgreSQL done** (§9.3); MySQL, SQL Server, Oracle next |
 | One dataset per report | Tables/charts cannot have their own query like Jasper's `Dataset1` | Sub-datasets (§9.4) |
 | Large reports run inside the HTTP request | Timeouts, blocked workers | Background jobs with a queue, download when ready, scheduling |
 | No report versions (history records actions, not content) | Cannot roll back a bad publish | Store each published version; "Restore" on the History tab |
@@ -306,10 +316,9 @@ Writes go through `_write_json_atomically` (temp file + rename), so a crash neve
 
 ### 9.2 Target structure
 
-**Status:** the backend part is done (see §3: routers, security, storage, connectors, queries, rendering,
-expressions, importers). Still to do: `services/` (the helpers now in `context.py`), a database backend for
-`storage/`, the SQL connector, `frontend/apps` + `frontend/shared`, and moving deployment files into `deploy/` and
-the guides into `docs/`.
+**Status:** the backend part is done (see §3: routers, services, security, storage, connectors incl. PostgreSQL,
+queries, rendering, expressions, importers). Still to do: a database backend for `storage/`, more SQL connectors,
+`frontend/apps` + `frontend/shared`, and moving deployment files into `deploy/` and the guides into `docs/`.
 
 ```text
 backend/
@@ -345,19 +354,23 @@ public URLs and the JSON formats (report definition, design, `.mrd`) stay the sa
 
 ### 9.3 Database connectors (PostgreSQL, MySQL/MariaDB, SQL Server, Oracle)
 
-```python
-class Connector(Protocol):
-    kind: str                                    # "mongodb", "postgresql", …
-    def test(self) -> str: ...
-    def parse(self, source: str, language: str) -> ParsedQuery: ...   # fields, parameter names, read-only check
-    def run(self, query: ParsedQuery, params: dict, *, max_rows: int, timeout_ms: int) -> list[dict]: ...
-```
+**PostgreSQL is done** (driver: psycopg 3). How it works:
 
-* SQL adapters use SQLAlchemy with the official drivers (psycopg, PyMySQL, pyodbc / mssql, oracledb).
-* Only `SELECT` / `WITH … SELECT` are allowed; `$P{Name}` becomes a bound parameter (`:Name`), never text.
-* Fields come from the result description (`LIMIT 0` / `TOP 0`), like Jasper's "Read Fields".
-* Adapters get a `type`; the designer already shows each type's logo and the wizard lists the planned types.
-* The run path (`render_report_output`, subreports, preview) calls the connector registry instead of MongoDB directly.
+| Piece | Where | What it does |
+|---|---|---|
+| Adapter type | `connections.json` `type: "postgresql"`; URL in `private_secrets.json` | Wizard: host, port, database, user, password, SSL → `postgresql://…`; Test runs `SELECT version()` |
+| Query language `sql` | `queries/sql_query.py` | One statement starting with SELECT / WITH / VALUES / TABLE; data-changing words, `INTO` and row locks refused; `$P{x}` → bound value; `$X{IN, col, P}` / `$X{NOTIN, …}` → `col = ANY(list)` (empty list = no filter); `$P!{}` refused |
+| Running | `connectors/sql.py` `run_query` | `default_transaction_read_only=on`, `read_only=True`, `statement_timeout` = `REPORT_MAX_TIME_MS`, at most `REPORT_MAX_ROWS` (+1 to detect "too many"); Decimal/UUID/time values made plain |
+| Read Fields | `POST /api/admin/query/fields` → `describe` | `SELECT * FROM (<query>) LIMIT 0` with NULL parameters: column names, no rows |
+| Run path | `services/runs.run_report_rows` | SQL report → SQL adapter; Mongo report → Mongo adapter; a mismatch is a clear 422. `/generate`, `/server`, preview, subreports all use it |
+| Errors | `ConnectorQueryError` | Designers see the database message (password removed); `/generate` callers see a generic 503 and the log has the details |
+
+Safety is two layers: the query check, and the read-only transaction in the database (a write that slips past the
+check — e.g. `nextval()` — is still refused; the tests prove it on a real PostgreSQL in CI). Give the adapter a
+database user with SELECT rights only.
+
+Next kinds: MySQL/MariaDB (PyMySQL), SQL Server (pyodbc), Oracle (oracledb) — add them to `connectors/sql.py`
+(`SQL_TYPES`, URL check, connect options for read-only + timeout, `LIMIT 0` / `TOP 0` for Read Fields).
 
 ### 9.4 Sub-datasets and the Table editor (Jasper's `Dataset1` and the "Table" tab)
 
@@ -369,8 +382,8 @@ class Connector(Protocol):
 
 ### 9.5 Suggested order
 
-1. ~~CI + backend split~~ — **done**. Next small step: move the helpers in `context.py` into service modules.
-2. Connector layer + PostgreSQL first (then MySQL, SQL Server, Oracle).
+1. ~~CI + backend split, services~~ — **done**.
+2. ~~PostgreSQL~~ — **done**; then MySQL, SQL Server, Oracle.
 3. Sub-datasets + Table editor tab.
 4. Database storage, report versions, several workers.
 5. Background jobs, scheduling and e-mail (JasperReports Server "Schedule"), metrics and alerts.

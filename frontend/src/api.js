@@ -75,6 +75,8 @@ export const api = {
   testConnection: (id) => request(`/api/admin/connections/${encodeURIComponent(id)}/test`, { method: 'POST' }),
   deleteConnection: (id) => request(`/api/admin/connections/${encodeURIComponent(id)}`, { method: 'DELETE' }),
   importJrxml: (xml) => request('/api/admin/jrxml/import', { method: 'POST', body: { xml } }),
+  /** SQL "Read fields": the result columns from the database (LIMIT 0, no rows read). */
+  queryFields: (connectionId, querySource) => request('/api/admin/query/fields', { method: 'POST', body: { connectionId, querySource } }),
   parseQuery: (language, source, parameters) =>
     request('/api/admin/query/parse', { method: 'POST', body: { language, source, parameters } }),
   preview: (id, parameters, connectionId) =>

@@ -17,6 +17,7 @@ from backend.app.storage.audit import read_audit_records
 def register(app: FastAPI, ctx: SimpleNamespace) -> None:
     """Add the system endpoints to the app."""
     get_connection = ctx.get_connection
+    test_saved_adapter = ctx.test_saved_adapter
     require_admin = ctx.require_admin
     require_report_access = ctx.require_report_access
 
@@ -37,7 +38,10 @@ def register(app: FastAPI, ctx: SimpleNamespace) -> None:
         if profile is None:
             raise HTTPException(status_code=404, detail=f"Data adapter is not registered: {connection_id}")
         try:
-            _, database = get_connection(connection_id)
+            if profile.get("type", "mongodb") == "mongodb":
+                _, database = get_connection(connection_id)
+            else:
+                database = test_saved_adapter(connection_id)["database"]
         except HTTPException as exc:
             return {"status": "unavailable", "connectionId": connection_id, "name": profile.get("name", connection_id),
                     "detail": str(exc.detail)}
