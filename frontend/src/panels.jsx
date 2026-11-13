@@ -168,6 +168,7 @@ export function ServerPanel({ report, onOpenFromServer, notify, refreshKey, onCh
       <div className="panel-actions">
         <button className="btn sm" onClick={() => createFolder('')}>+ Server folder</button>
         <button className="btn sm" onClick={() => { load(); onChanged?.(); }} title="Refresh">↻</button>
+        <a className="btn sm" href="/server" target="_blank" rel="noopener" title="Open the Report Server (sign in with your /server account) in a new tab">🗄 Open server ↗</a>
       </div>
       <ul className="tree repo">
         <li>

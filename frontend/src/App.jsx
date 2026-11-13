@@ -10,6 +10,7 @@ import SetupForm from './SetupForm.jsx';
 import DatasetQueryDialog from './DatasetQueryDialog.jsx';
 import SourceView from './SourceView.jsx';
 import TableEditor from './TableEditor.jsx';
+import AppSwitcher from './shared/AppSwitcher.jsx';
 import ThemeToggle from './shared/ThemeToggle.jsx';
 import TemplateGallery from './TemplateGallery.jsx';
 import { AdaptersPanel, Outline, Palette, ServerPanel, WorkspacePanel, publishState } from './panels.jsx';
@@ -367,7 +368,8 @@ export default function App() {
     <div className="app">
       <header className="toolbar">
         <button type="button" className="btn drawer-btn" aria-label="Reports, adapters and outline" aria-expanded={drawer === 'left'} onClick={() => setDrawer(drawer === 'left' ? null : 'left')}>☰</button>
-        <a className="brand" href="/server"><span className="brand-mark">M</span><span className="lbl">Report Designer</span></a>
+        <span className="brand"><span className="brand-mark">M</span><span className="lbl">Report Designer</span></span>
+        <AppSwitcher current="/designer" />
         <span className="doc-title" title={report.title || 'Untitled'}>{report.title || 'Untitled'}{dirty ? ' •' : ''}</span>
         <div className="spacer" />
         <label className="btn" title="Open a .mrd report file, or import a Jaspersoft Studio .jrxml">📂<span className="lbl"> Open file…</span>

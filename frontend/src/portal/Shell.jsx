@@ -1,8 +1,9 @@
 /** Top bar shared by the React /server and /admin pages. On phones the links fold into a menu button. */
 import { useState } from 'react';
+import { APPS } from '../shared/AppSwitcher.jsx';
 import ThemeToggle from '../shared/ThemeToggle.jsx';
 
-const LINKS = [['/server', 'Server'], ['/designer', 'Designer'], ['/ui', 'Run reports'], ['/admin', 'Admin']];
+const LINKS = APPS.map((app) => [app.href, app.href === '/server' ? 'Server' : app.label]);
 
 export function Topbar({ current, subtitle, children }) {
   const [open, setOpen] = useState(false);
