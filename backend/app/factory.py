@@ -11,8 +11,9 @@ from fastapi.staticfiles import StaticFiles
 from backend.app.constants import SERVICE_VERSION
 from backend.app.context import create_context
 from backend.app.logs import HTTP_LOG
-from backend.app.routers import connections, designer, generate, pages, repository, server_portal, system, users, workspace
+from backend.app.routers import connections, designer, generate, jobs, pages, repository, server_portal, system, users, workspace
 from backend.app.security.access import client_address, enabled_areas, management_ip_allowed, path_area
+from backend.app.security.headers import add_security_headers, too_large
 
 
 def make_app() -> FastAPI:
@@ -26,6 +27,7 @@ def make_app() -> FastAPI:
         docs_url="/docs" if docs_on else None, redoc_url="/redoc" if docs_on else None,
         openapi_url="/openapi.json" if docs_on else None,
     )
+    app.state.ctx = ctx  # tests and tools reach the shared context (e.g. the job runner) here
     app.mount("/assets", StaticFiles(directory=str(ui_directory)), name="assets")
 
     @app.middleware("http")
@@ -44,6 +46,10 @@ def make_app() -> FastAPI:
         elif area in ("admin", "designer", "management-api") and not management_ip_allowed(client):
             HTTP_LOG.warning("Management access refused for %s from %s (not in REPORTING_ADMIN_ALLOWED_IPS)", path, client)
             blocked = JSONResponse({"detail": "Access from this network address is not allowed"}, status_code=403)
+        if blocked is None:
+            blocked = too_large(request)
+        if blocked is None and not path.startswith("/assets/"):
+            ctx.refresh_if_changed()  # another instance may have published or deleted reports
         if blocked is not None:
             response = blocked
         else:
@@ -52,6 +58,7 @@ def make_app() -> FastAPI:
             except Exception:
                 HTTP_LOG.exception("Unhandled error on %s %s", request.method, path)
                 raise
+        add_security_headers(request, response)
         duration = int((time.monotonic() - started) * 1000)
         if not path.startswith("/assets/") or response.status_code >= 400:
             status = response.status_code
@@ -67,6 +74,7 @@ def make_app() -> FastAPI:
     connections.register(app, ctx)
     workspace.register(app, ctx)
     server_portal.register(app, ctx)
+    jobs.register(app, ctx)
     users.register(app, ctx)
     system.register(app, ctx)
     generate.register(app, ctx)

@@ -1,9 +1,10 @@
 // "Dataset and Query" (Jaspersoft Studio's toolbar button / Outline → Dataset and Query):
 // the data adapter, query and fields, the parameters, the dataset filter expression and the sort fields.
 import { useState } from 'react';
+import DatasetsEditor from './DatasetsEditor.jsx';
 import { ParametersEditor, QueryEditor } from './SetupForm.jsx';
 
-const TABS = [['query', 'Query'], ['parameters', 'Parameters'], ['filter', 'Filter Expression'], ['sort', 'Sort Fields']];
+const TABS = [['query', 'Query'], ['parameters', 'Parameters'], ['filter', 'Filter Expression'], ['sort', 'Sort Fields'], ['datasets', 'Datasets']];
 
 function SortEditor({ state, dispatch }) {
   const { report, design } = state;
@@ -57,6 +58,7 @@ export default function DatasetQueryDialog({ state, dispatch, notify, onClose, i
           {tab === 'parameters' && <ParametersEditor state={state} dispatch={dispatch} />}
           {tab === 'filter' && <FilterEditor state={state} dispatch={dispatch} />}
           {tab === 'sort' && <SortEditor state={state} dispatch={dispatch} />}
+          {tab === 'datasets' && <DatasetsEditor state={state} dispatch={dispatch} notify={notify} />}
         </div>
         <div className="row"><span className="muted">Changes apply straight away (Ctrl+Z undoes design changes). Save keeps them.</span><button className="btn primary" onClick={onClose}>OK</button></div>
       </div>

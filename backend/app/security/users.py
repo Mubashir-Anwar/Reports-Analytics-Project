@@ -11,7 +11,7 @@ import time
 from typing import Any
 
 from backend.app.constants import PASSWORD_ITERATIONS, USER_ROLES
-from backend.app.storage.files import users_file
+from backend.app.storage.store import get_store
 
 
 # ----------------------------------------------------------------- server users and login sessions
@@ -22,22 +22,13 @@ def _hash_password(password: str, salt: str | None = None) -> tuple[str, str]:
 
 
 def load_users() -> list[dict[str, Any]]:
-    path = users_file()
-    if not path.exists():
-        return []
-    raw = json.loads(path.read_text(encoding="utf-8-sig"))
+    raw = get_store().read_json("users.json")
     items = raw.get("users", []) if isinstance(raw, dict) else []
     return [item for item in items if isinstance(item, dict) and item.get("username")]
 
 
 def save_users(users: list[dict[str, Any]]) -> None:
-    path = users_file()
-    path.parent.mkdir(parents=True, exist_ok=True)
-    temporary = path.with_suffix(path.suffix + ".tmp")
-    descriptor = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
-    with os.fdopen(descriptor, "w", encoding="utf-8", newline="\n") as stream:
-        stream.write(json.dumps({"users": users}, ensure_ascii=False, indent=2) + "\n")
-    temporary.replace(path)
+    get_store().write_json("users.json", {"users": users}, private=True)
 
 
 def find_user(username: str) -> dict[str, Any] | None:

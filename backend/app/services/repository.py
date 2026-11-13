@@ -4,9 +4,9 @@ Every function takes the service context `ctx` first; create_context() binds the
 from __future__ import annotations
 
 import copy
+import json
 import re
-import shutil
-from datetime import datetime, timezone
+from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 
@@ -18,13 +18,12 @@ from backend.app.definitions import ReportDefinition, _dynamic_report, discover_
 from backend.app.logs import LOG
 from backend.app.security.users import role_at_least
 from backend.app.storage.files import (
-    _write_json_atomically,
-    folders_file,
     list_saved_folders,
     normalize_folder_path,
-    report_definition_path,
-    report_definitions_directory,
+    report_definition_key,
+    save_folder_list,
 )
+from backend.app.storage.store import get_store
 
 __all__ = ['admin_report_payload', 'save_report_payload', 'folder_contents', 'delete_repository_folder', 'delete_published_report', 'published_or_404', 'design_summary', 'resource_details', 'free_report_id', 'published_report_summaries']
 
@@ -52,7 +51,7 @@ def admin_report_payload(ctx: SimpleNamespace, definition: ReportDefinition) -> 
     }
 
 
-def save_report_payload(ctx: SimpleNamespace, payload: Any, expected_id: str | None = None) -> ReportDefinition:
+def save_report_payload(ctx: SimpleNamespace, payload: Any, expected_id: str | None = None, *, action: str = "saved", user: str = "") -> ReportDefinition:
     if not isinstance(payload, dict):
         raise HTTPException(status_code=400, detail="The report definition must be a JSON object")
     try:
@@ -67,16 +66,17 @@ def save_report_payload(ctx: SimpleNamespace, payload: Any, expected_id: str | N
     profile_ids = {item["id"] for item in load_connection_profiles()}
     if definition.connection_id not in profile_ids:
         raise HTTPException(status_code=422, detail=f"Unknown connectionId: {definition.connection_id}")
-    path = report_definition_path(definition.report_id, definition.editor_config["folder"])
-    _write_json_atomically(path, definition.editor_config or payload)
+    store = get_store()
+    key = report_definition_key(definition.report_id, definition.editor_config["folder"])
+    config = definition.editor_config or payload
+    store.write_json(key, config)
     if existing and existing.editor_config:
-        previous_path = report_definition_path(
-            existing.report_id,
-            normalize_folder_path(existing.editor_config.get("folder", "General")),
-        )
-        if previous_path != path and previous_path.exists():
-            previous_path.unlink()
-    ctx.reports_by_id[definition.report_id] = _dynamic_report(definition.editor_config or payload, path)
+        previous_key = report_definition_key(existing.report_id, normalize_folder_path(existing.editor_config.get("folder", "General")))
+        if previous_key != key:
+            store.delete(previous_key)
+    ctx.save_version(definition.report_id, config, action, user)
+    ctx.bump_revision()
+    ctx.reports_by_id[definition.report_id] = _dynamic_report(config, Path(key))
     return ctx.reports_by_id[definition.report_id]
 
 
@@ -110,21 +110,16 @@ def delete_repository_folder(ctx: SimpleNamespace, folder: str, recursive: bool 
         if contents["reports"]:
             parts.append(f"{len(contents['reports'])} report(s): {', '.join(contents['reports'][:5])}")
         raise HTTPException(status_code=409, detail=f"The folder is not empty ({' and '.join(parts)}); confirm to delete it with everything inside")
+    store = get_store()
     for report_id in contents["reports"]:
         definition = ctx.reports_by_id[report_id]
-        path = report_definition_path(report_id, normalize_folder_path(definition.editor_config.get("folder", "General")))
-        if path.exists():
-            path.unlink()
+        store.delete(report_definition_key(report_id, normalize_folder_path(definition.editor_config.get("folder", "General"))))
         ctx.record_history(report_id, "deleted", user or "admin", f"with the folder {folder}")
-    root = report_definitions_directory().resolve()
-    directory = report_definition_path(".folder", folder).parent.resolve()
-    if directory.exists() and directory != root and root in directory.parents:
-        leftovers = [p for p in directory.rglob("*") if p.is_file()]
-        if leftovers and not recursive:
-            raise HTTPException(status_code=409, detail="The folder still has files in it; confirm to delete it with everything inside")
-        shutil.rmtree(directory)
+    if not store.remove_dir("/".join(["reports", *folder.split("/")]), recursive=recursive):
+        raise HTTPException(status_code=409, detail="The folder still has files in it; confirm to delete it with everything inside")
     removed = {folder, *contents["subfolders"]}
-    _write_json_atomically(folders_file(), {"folders": [item for item in saved_folders if item not in removed]})
+    save_folder_list([item for item in saved_folders if item not in removed])
+    ctx.bump_revision()
     if contents["reports"]:
         refreshed = discover_reports()
         ctx.reports_by_id.clear()
@@ -140,13 +135,10 @@ def delete_published_report(ctx: SimpleNamespace, report_id: str) -> dict[str, s
     definition = ctx.reports_by_id.get(report_id)
     if definition is None or definition.editor_config is None:
         raise HTTPException(status_code=404, detail="Saved report definition not found")
-    path = report_definition_path(
-        report_id,
-        normalize_folder_path(definition.editor_config.get("folder", "General")),
-    )
-    if not path.exists():
+    key = report_definition_key(report_id, normalize_folder_path(definition.editor_config.get("folder", "General")))
+    if not get_store().delete(key):
         raise HTTPException(status_code=404, detail="Saved report definition not found")
-    path.unlink()
+    ctx.bump_revision()
     refreshed = discover_reports()
     ctx.reports_by_id.clear()
     ctx.reports_by_id.update(refreshed)
@@ -185,10 +177,10 @@ def resource_details(ctx: SimpleNamespace, definition: ReportDefinition, session
     config = definition.editor_config or {}
     designer = role_at_least(session["role"], "designer")
     try:
-        path = report_definition_path(definition.report_id, normalize_folder_path(config.get("folder", "General")))
-        stat = path.stat() if path.exists() else None
+        modified = get_store().modified_at(report_definition_key(definition.report_id, normalize_folder_path(config.get("folder", "General"))))
     except (ValueError, OSError):
-        stat = None
+        modified = None
+    size = len(json.dumps(config, ensure_ascii=False).encode("utf-8")) if config else None
     used_by = sorted(item.report_id for item in ctx.reports_by_id.values() if item.report_id != definition.report_id
                      and definition.report_id in ctx.design_summary((item.editor_config or {}).get("design")).get("subreports", []))
     return {
@@ -205,8 +197,8 @@ def resource_details(ctx: SimpleNamespace, definition: ReportDefinition, session
         "queryLanguage": config.get("queryLanguage", "mongosh") if designer else None,
         "querySource": config.get("querySource", "") if designer else None,
         "design": ctx.design_summary(config.get("design")),
-        "file": {"name": f"{definition.report_id}.mrd", "size": stat.st_size if stat else None,
-                 "modifiedAt": datetime.fromtimestamp(stat.st_mtime, timezone.utc).isoformat() if stat else ""},
+        "file": {"name": f"{definition.report_id}.mrd", "size": size,
+                 "modifiedAt": modified.isoformat() if modified else ""},
         "usedBy": used_by,
         "history": list(reversed(ctx.read_history(definition.report_id)))[:50],
         "canEdit": designer, "canDelete": role_at_least(session["role"], "admin"),

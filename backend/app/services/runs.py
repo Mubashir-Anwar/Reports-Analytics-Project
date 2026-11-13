@@ -16,14 +16,14 @@ from backend.app.connectors import mongodb, sql as sql_connector
 from backend.app.connectors.errors import ConnectorQueryError, MongoReadAccessError
 from backend.app.connectors.mongo_fallback import _row_value
 from backend.app.constants import METADATA_KEYS, OUTPUT_FORMATS
-from backend.app.definitions import ReportDefinition, _dynamic_report, _safe_value, validate_parameters
+from backend.app.definitions import ReportDefinition, _dynamic_report, _safe_value, compile_dataset, validate_parameters
 from backend.app.logs import LOG
 from backend.app.queries.mongo_query import resolve_collection
 from backend.app.rendering import engine as designer_render
 from backend.app.rendering.outputs import render_report_output
 from backend.app.storage import audit as audit_store
 
-__all__ = ['admin_parameters', 'run_report_rows', 'subreport_loader', 'draft_definition', 'preview_definition', 'run_definition_file']
+__all__ = ['admin_parameters', 'run_report_rows', 'subreport_loader', 'dataset_loader', 'draft_definition', 'preview_definition', 'run_definition_file']
 
 
 def admin_parameters(ctx: SimpleNamespace, payload: dict[str, Any], definition: ReportDefinition) -> dict[str, Any]:
@@ -84,7 +84,41 @@ def subreport_loader(ctx: SimpleNamespace) -> Any:
         sub_rows = [{column: _safe_value(_row_value(row, column)) for column in columns} for row in found]
         sub_parameters = {k: (v.isoformat() if isinstance(v, date) else v) for k, v in parameters.items()}
         validated = designer_render.validate_design(design, columns, {spec.name for spec in definition.parameters} | set(sub_parameters))
+        # the subreport's own datasets read from the subreport's data adapter unless they name one
+        validated["datasets"] = [{**d, "connectionId": d["connectionId"] or definition.connection_id} for d in validated["datasets"]]
         cache[key] = {"design": validated, "title": definition.title, "columns": columns, "rows": sub_rows, "parameters": sub_parameters}
+        return cache[key]
+    return load
+
+
+def dataset_loader(ctx: SimpleNamespace, connection_id: str, report_id: str = "dataset") -> Any:
+    """Loader for Tables / Crosstabs with their own dataset (Jasper datasetRun) during one render. A dataset reads
+    from its own data adapter, else the report's. Results are cached per (dataset, parameters); at most 200 runs."""
+    cache: dict[tuple[str, tuple[tuple[str, str], ...]], list[dict[str, Any]]] = {}
+
+    def load(dataset: dict[str, Any], values: dict[str, Any]) -> list[dict[str, Any]]:
+        key = (dataset["name"], tuple(sorted((str(k), str(v)) for k, v in values.items())))
+        if key in cache:
+            return cache[key]
+        if len(cache) >= 200:
+            raise ValueError("more than 200 different dataset runs in one report")
+        definition = compile_dataset(dataset, report_id, connection_id)
+        types = {p["name"]: p["type"] for p in dataset["parameters"]}
+        pairs = [(k, str(v)[:10] if types.get(k) == "date" else str(v).lower() if isinstance(v, bool) else str(v))
+                 for k, v in values.items() if k in types]
+        parameters, _ = validate_parameters(definition, pairs)
+        try:
+            found = ctx.run_report_rows(definition, parameters, definition.connection_id,
+                                        max_rows=min(ctx.settings.max_rows, 5000), limit_rows=True)
+        except HTTPException as exc:
+            raise ValueError(str(exc.detail)) from None
+        except MongoReadAccessError as exc:
+            raise ValueError(ctx.access_error_detail(exc, definition.connection_id)) from None
+        except PyMongoError:
+            LOG.exception("Dataset %s query failed", dataset["name"])
+            raise ValueError("the MongoDB query failed; see the service log") from None
+        columns = list(definition.columns)
+        cache[key] = [{column: _safe_value(_row_value(row, column)) for column in columns} for row in found]
         return cache[key]
     return load
 
@@ -153,7 +187,8 @@ def run_definition_file(ctx: SimpleNamespace, definition: ReportDefinition, payl
                       "parameters": {k: v.isoformat() if isinstance(v, date) else v for k, v in parameters.items()}})
         rows = ctx.run_report_rows(definition, parameters, connection_id, max_rows=ctx.settings.max_rows, limit_rows=False)
         rows = [{key: _row_value(row, key) for key in definition.columns} for row in rows]
-        body, media_type = render_report_output(definition, parameters, rows, output_format, ctx.subreport_loader())
+        body, media_type = render_report_output(definition, parameters, rows, output_format, ctx.subreport_loader(),
+                                                ctx.dataset_loader(connection_id, definition.report_id))
         audit.update({"status": "success", "rowCount": len(rows)})
         return Response(body, media_type=media_type,
                         headers={"Content-Disposition": f'attachment; filename="{definition.report_id}.{output_format}"'})

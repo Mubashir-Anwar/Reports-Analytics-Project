@@ -28,6 +28,7 @@ def register(app: FastAPI, ctx: SimpleNamespace) -> None:
     require_report_access = ctx.require_report_access
     settings = ctx.settings
     subreport_loader = ctx.subreport_loader
+    dataset_loader = ctx.dataset_loader
 
     @app.get("/reports")
     def list_reports(request: Request) -> dict[str, Any]:
@@ -72,7 +73,8 @@ def register(app: FastAPI, ctx: SimpleNamespace) -> None:
             # MongoDB pipeline or SQL query, on the report's own data adapter (413 above the row limit)
             rows = run_report_rows(definition, parameters, definition.connection_id, max_rows=settings.max_rows, limit_rows=False)
             rows = [{key: _row_value(row, key) for key in definition.columns} for row in rows]
-            body, media_type = render_report_output(definition, parameters, rows, output_format, subreport_loader())
+            body, media_type = render_report_output(definition, parameters, rows, output_format, subreport_loader(),
+                                                    dataset_loader(definition.connection_id, definition.report_id))
             audit.update({"status": "success", "rowCount": len(rows)})
             if settings.audit_required:
                 # Fail closed: the report is released only after its audit record is stored.

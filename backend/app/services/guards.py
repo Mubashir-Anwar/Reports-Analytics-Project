@@ -17,6 +17,7 @@ from fastapi import HTTPException, Request
 from backend.app.constants import BOOTSTRAP_USERNAME, MIN_ACCESS_SECRET_LENGTH, ROLE_TOKEN_MIN_LENGTH, SESSION_COOKIE
 from backend.app.logs import LOG
 from backend.app.security.access import enabled_areas
+from backend.app.security.shared_state import is_revoked
 from backend.app.security.users import bootstrap_login_active, find_user, read_session_cookie, role_at_least
 
 __all__ = ['_verify_signed_link', 'require_report_access', 'require_admin', 'json_body', 'require_json_request', 'current_session', 'require_session', 'session_view']
@@ -132,7 +133,7 @@ def require_json_request(ctx: SimpleNamespace, request: Request) -> None:
 
 def current_session(ctx: SimpleNamespace, request: Request) -> dict[str, Any] | None:
     body = read_session_cookie(request.cookies.get(SESSION_COOKIE, ""))
-    if body is None or body.get("n") in ctx.state["revoked_sessions"]:
+    if body is None or is_revoked(body.get("n")):
         return None
     if body.get("b"):
         if not bootstrap_login_active():

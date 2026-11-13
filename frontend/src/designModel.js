@@ -91,6 +91,7 @@ export function emptyDesign() {
     calculatedFields: [],
     groups: [],
     variables: [],
+    datasets: [],
     bands: {
       title: emptyBand(), pageHeader: emptyBand(), columnHeader: emptyBand(), detail: emptyBand(),
       columnFooter: emptyBand(), pageFooter: emptyBand(), lastPageFooter: emptyBand(), summary: emptyBand(),
@@ -515,6 +516,7 @@ export function autoLayout(columns, labels = {}, title = 'Report', previous = em
   });
   design.variables = previous.variables.filter((v) => !v.field || columns.includes(v.field));
   design.calculatedFields = previous.calculatedFields;
+  design.datasets = previous.datasets || [];
   return design;
 }
 

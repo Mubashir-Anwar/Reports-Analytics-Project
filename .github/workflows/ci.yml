@@ -22,8 +22,19 @@ jobs:
         ports: ["5432:5432"]
         options: >-
           --health-cmd "pg_isready -U reporting_test" --health-interval 5s --health-timeout 5s --health-retries 10
+      mysql:  # real MySQL for tests/test_sql_dialects.py (read-only transaction, IN lists, Read Fields)
+        image: mysql:8.4
+        env:
+          MYSQL_ROOT_PASSWORD: reporting_root
+          MYSQL_DATABASE: reporting_test
+          MYSQL_USER: reporting_test
+          MYSQL_PASSWORD: reporting_test
+        ports: ["3306:3306"]
+        options: >-
+          --health-cmd "mysqladmin ping -h 127.0.0.1 -ureporting_test -preporting_test" --health-interval 5s --health-timeout 5s --health-retries 20
     env:
       PG_TEST_URL: postgresql://reporting_test:reporting_test@127.0.0.1:5432/reporting_test
+      MYSQL_TEST_URL: mysql://reporting_test:reporting_test@127.0.0.1:3306/reporting_test
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5

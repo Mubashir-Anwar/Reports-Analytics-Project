@@ -1,21 +1,19 @@
 """private_secrets.json (admin token, adapter secrets) and the optional local .env file."""
 from __future__ import annotations
 
-import json
 import os
 import secrets
 from typing import Any
 
 from backend.app.constants import PROJECT_ROOT
 from backend.app.logs import LOG
-from backend.app.storage.files import private_secrets_file
+from backend.app.storage.store import get_store
 
 
 def _load_private_secrets() -> dict[str, Any]:
-    path = private_secrets_file()
-    if not path.exists():
+    raw = get_store().read_json("private_secrets.json")
+    if raw is None:
         return {"admin_token": "", "mongo_connections": {}}
-    raw = json.loads(path.read_text(encoding="utf-8-sig"))
     if not isinstance(raw, dict):
         raise ValueError("The root of private_secrets.json must be a JSON object")
     connections = raw.get("mongo_connections", {})
@@ -28,19 +26,8 @@ def _load_private_secrets() -> dict[str, Any]:
 
 
 def _save_private_secrets(payload: dict[str, Any]) -> None:
-    path = private_secrets_file()
-    path.parent.mkdir(parents=True, exist_ok=True)
-    temporary = path.with_suffix(path.suffix + ".tmp")
-    serialized = json.dumps(payload, ensure_ascii=False, indent=2) + "\n"
-    # Restrictive mode is honored on Unix; Windows inherits the current user's ACL.
-    descriptor = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
-    with os.fdopen(descriptor, "w", encoding="utf-8", newline="\n") as stream:
-        stream.write(serialized)
-    temporary.replace(path)
-    try:
-        path.chmod(0o600)
-    except OSError:
-        LOG.debug("Could not set private secret file permissions on this platform")
+    # files backend: mode 0600 on Unix (Windows inherits the current user's ACL); PostgreSQL: a private row
+    get_store().write_json("private_secrets.json", payload, private=True)
 
 
 def ensure_admin_token() -> str:

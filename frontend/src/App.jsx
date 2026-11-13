@@ -9,6 +9,8 @@ import Properties from './Properties.jsx';
 import SetupForm from './SetupForm.jsx';
 import DatasetQueryDialog from './DatasetQueryDialog.jsx';
 import SourceView from './SourceView.jsx';
+import TableEditor from './TableEditor.jsx';
+import ThemeToggle from './shared/ThemeToggle.jsx';
 import TemplateGallery from './TemplateGallery.jsx';
 import { AdaptersPanel, Outline, Palette, ServerPanel, WorkspacePanel, publishState } from './panels.jsx';
 import { ZOOM_LIMITS, bandWidth, clampZoom, emptyDesign, findElement, getBand, setBand } from './designModel.js';
@@ -38,6 +40,7 @@ export default function App() {
   const [needToken, setNeedToken] = useState(false);
   const [tab, setTab] = useState('setup');
   const [leftTab, setLeftTab] = useState('workspace');
+  const [drawer, setDrawer] = useState(null); // small screens: 'left' | 'right' panel shown over the canvas
   const [publishing, setPublishing] = useState(null); // { folders, folder, replace, busy }
   const [zoom, setZoom] = useState(1);
   const [message, setMessage] = useState({ text: 'Ready', kind: '' });
@@ -108,6 +111,9 @@ export default function App() {
     notify(`${element.type === 'table' ? 'Table' : element.type === 'crosstab' ? 'Crosstab' : 'Subreport'} added — fine-tune it in Properties; Preview shows it with the records`, 'ok');
     setWizard(null);
   };
+
+  // Table editor (double-click a Table on the canvas, or Properties → Table → Open the table editor)
+  const [tableId, setTableId] = useState(null);
 
   // Expression Editor (double-click a Text Field / Static Text on the canvas or in the Outline)
   const [exprId, setExprId] = useState(null);
@@ -360,16 +366,17 @@ export default function App() {
   return (
     <div className="app">
       <header className="toolbar">
-        <a className="brand" href="/ui"><span className="brand-mark">M</span>Report Designer</a>
-        <span className="doc-title">{report.title || 'Untitled'}{dirty ? ' •' : ''}</span>
+        <button type="button" className="btn drawer-btn" aria-label="Reports, adapters and outline" aria-expanded={drawer === 'left'} onClick={() => setDrawer(drawer === 'left' ? null : 'left')}>☰</button>
+        <a className="brand" href="/server"><span className="brand-mark">M</span><span className="lbl">Report Designer</span></a>
+        <span className="doc-title" title={report.title || 'Untitled'}>{report.title || 'Untitled'}{dirty ? ' •' : ''}</span>
         <div className="spacer" />
-        <label className="btn" title="Open a .mrd report file, or import a Jaspersoft Studio .jrxml">📂 Open file…
+        <label className="btn" title="Open a .mrd report file, or import a Jaspersoft Studio .jrxml">📂<span className="lbl"> Open file…</span>
           <input type="file" accept={MRD_ACCEPT} hidden onChange={(e) => { openFile(e.target.files[0]); e.target.value = ''; }} />
         </label>
-        <button className="btn" onClick={saveFile} title="Download this report as one .mrd file (query, parameters, data adapter, design and images)">💾 Save as file</button>
-        <button className="btn" onClick={loadDemo} title="Demo design with sample fields">Demo design</button>
-        <button className="btn" disabled={!past.length} onClick={() => dispatch({ type: 'UNDO' })}>↶ Undo</button>
-        <button className="btn" disabled={!future.length} onClick={() => dispatch({ type: 'REDO' })}>↷ Redo</button>
+        <button className="btn" onClick={saveFile} title="Download this report as one .mrd file (query, parameters, data adapter, design and images)">💾<span className="lbl"> Save as file</span></button>
+        <button className="btn hide-narrow" onClick={loadDemo} title="Demo design with sample fields">Demo design</button>
+        <button className="btn" disabled={!past.length} onClick={() => dispatch({ type: 'UNDO' })} title="Undo (Ctrl+Z)">↶<span className="lbl"> Undo</span></button>
+        <button className="btn" disabled={!future.length} onClick={() => dispatch({ type: 'REDO' })} title="Redo (Ctrl+Y)">↷<span className="lbl"> Redo</span></button>
         <div className="zoom">
           <button className="btn sm" title="Zoom out (Ctrl −, Ctrl + wheel)" onClick={() => setZoom((z) => clampZoom(z - ZOOM_LIMITS.step))}>−</button>
           <button className="btn sm zoom-value" title="Reset to 100% (Ctrl 0)" onClick={() => setZoom(1)}>{Math.round(zoom * 100)}%</button>
@@ -377,10 +384,13 @@ export default function App() {
         </div>
         {(() => { const s = report.isNew ? { icon: '○', label: 'Not saved yet', cls: 'draft' } : publishState(report.status); return <span className={`pub-chip ${s.cls}`} title={s.label}>{s.icon} {report.isNew ? 'Not saved' : s.cls === 'published' ? 'Published' : s.cls === 'changed' ? 'Changed' : 'Draft'}</span>; })()}
         <button className="btn" onClick={save} title="Save in your designer workspace (Ctrl+S). The server is not changed.">Save</button>
-        <button className="btn primary" onClick={startPublish} title="Copy this report to a folder on the report server">Publish to server ⇪</button>
+        <button className="btn primary" onClick={startPublish} title="Copy this report to a folder on the report server">⇪<span className="lbl"> Publish</span></button>
+        <ThemeToggle />
+        <button type="button" className="btn drawer-btn" aria-label="Palette and properties" aria-expanded={drawer === 'right'} onClick={() => setDrawer(drawer === 'right' ? null : 'right')}>⚙</button>
       </header>
 
-      <div className="workspace">
+      <div className={`workspace ${drawer ? `show-${drawer}` : ''}`}>
+        {drawer && <button type="button" className="drawer-backdrop" aria-label="Close the panel" onClick={() => setDrawer(null)} />}
         <aside className="left">
           <div className="dock">
             <div className="dock-tabs">
@@ -406,7 +416,7 @@ export default function App() {
           </div>
           <div className="stage">
             {tab === 'setup' && <SetupForm state={state} dispatch={dispatch} notify={notify} onTemplates={() => setTemplates(true)} refreshKey={refreshKey} />}
-            {tab === 'design' && <Canvas design={design} selection={selection} tool={tool} zoom={zoom} setZoom={setZoom} dispatch={dispatch} actions={actions} openMenu={openMenu} onEditExpression={editExpression} onPercentage={onPercentage} onWizard={onWizard} prefs={canvasPrefs} setPrefs={setCanvasPrefs} hasClipboard={Boolean(readClipboard()?.items?.length)} onQuery={() => setQueryTab('query')} onTemplates={() => setTemplates(true)} />}
+            {tab === 'design' && <Canvas design={design} selection={selection} tool={tool} zoom={zoom} setZoom={setZoom} dispatch={dispatch} actions={actions} openMenu={openMenu} onEditExpression={editExpression} onPercentage={onPercentage} onWizard={onWizard} onOpenTable={setTableId} prefs={canvasPrefs} setPrefs={setCanvasPrefs} hasClipboard={Boolean(readClipboard()?.items?.length)} onQuery={() => setQueryTab('query')} onTemplates={() => setTemplates(true)} />}
             {tab === 'source' && <SourceView state={state} dispatch={dispatch} notify={notify} />}
             {tab === 'preview' && <Preview state={state} notify={notify} />}
           </div>
@@ -414,7 +424,7 @@ export default function App() {
 
         <aside className="right">
           <div className="dock"><div className="dock-tabs"><button className="on">Palette</button></div><Palette tool={tool} dispatch={dispatch} /></div>
-          <div className="dock grow"><div className="dock-tabs"><button className="on">Properties</button></div><Properties state={state} dispatch={dispatch} notify={notify} actions={actions} onEditExpression={editExpression} onOpenQuery={(t) => setQueryTab(t || 'query')} /></div>
+          <div className="dock grow"><div className="dock-tabs"><button className="on">Properties</button></div><Properties state={state} dispatch={dispatch} notify={notify} actions={actions} onEditExpression={editExpression} onOpenQuery={(t) => setQueryTab(t || 'query')} onOpenTable={setTableId} /></div>
         </aside>
       </div>
       <footer className={`status ${message.kind}`}>{message.text}</footer>
@@ -437,6 +447,7 @@ export default function App() {
           </div>
         </div>
       )}
+      {tableId && <TableEditor state={state} dispatch={dispatch} elementId={tableId} onClose={() => setTableId(null)} onOpenDatasets={() => { setTableId(null); setQueryTab('datasets'); }} />}
       {queryTab && <DatasetQueryDialog state={state} dispatch={dispatch} notify={notify} refreshKey={refreshKey} initialTab={queryTab} onClose={() => setQueryTab(null)} />}
       {templates && <TemplateGallery report={report} design={design} onApply={applyLayout} onClose={() => setTemplates(false)} />}
       {wizard && <ComponentWizard wizard={wizard} report={report} design={design} bandWidth={bandWidth(design)} onCancel={() => setWizard(null)} onDone={finishWizard} />}

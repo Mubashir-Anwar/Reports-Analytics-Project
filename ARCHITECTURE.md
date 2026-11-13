@@ -86,6 +86,7 @@ backend/app/
     repository.py          save/delete/copy reports and folders, summaries, the /server resource page
     workspace.py           designer drafts and their publish status
     history.py             history of each server report
+    versions.py            every saved version of a server report; the repository revision (several instances)
     accounts.py            /admin user helpers
   routers/                 one module per area; each has register(app, ctx)
     pages.py               /, /ui, /admin, /designer, /server
@@ -93,19 +94,24 @@ backend/app/
     repository.py          /api/admin/reports…, /api/admin/folders… (token access)
     connections.py         /api/admin/connections… (data adapters)
     workspace.py           /api/admin/workspace… and Publish
-    server_portal.py       /api/server/… (login session: repository, resources, copy/move, upload/download)
+    server_portal.py       /api/server/… (login session: repository, resources, copy/move, upload/download, versions)
+    jobs.py                /api/server/schedules…, /api/server/runs…, run in background
     users.py               /api/admin/users…
-    system.py              /health, adapter status, whoami, logs, audit
+    system.py              /health, /ready, adapter status, whoami, logs, audit
     generate.py            /reports and /generate/<ID>.<format>
   config.py                Settings from environment variables
   constants.py             Patterns, roles, formats, cookie names, PROJECT_ROOT
   logs.py                  Logger, rotating log file, reading log entries
-  security/                access.py (areas, client IP, admin IP allow-list) · secrets.py (private_secrets.json, .env)
-                           · users.py (accounts, password hashes, session cookies)
-  storage/                 files.py (data directory, folders, atomic JSON writes) · audit.py (run history)
-  connectors/              mongodb.py (connection checks, run a pipeline) · sql.py (PostgreSQL: test, read-only run,
-                           Read Fields) · profiles.py (data adapters, their type and secrets) · mongo_fallback.py
-                           (in-process pipeline stages) · errors.py
+  security/                access.py (areas, client IP, admin IP allow-list) · secrets.py (private secrets, .env)
+                           · users.py (accounts, password hashes, session cookies) · headers.py (CSP, HSTS, body
+                           size limit) · shared_state.py (sign-outs and failed sign-ins seen by every instance)
+  storage/                 store.py (the document store: files or PostgreSQL) · files.py (data directory, folders,
+                           storage keys) · audit.py (run history) · migrate.py (copy a data directory into PostgreSQL)
+  jobs/                    schedule.py (recurrence, next run, relative dates) · runner.py (scheduler thread + worker
+                           pool) · store.py (schedules, runs, output files) · mailer.py (SMTP)
+  connectors/              mongodb.py (connection checks, run a pipeline) · sql.py (PostgreSQL, MySQL/MariaDB, SQL
+                           Server, Oracle: test, read-only run, Read Fields) · profiles.py (data adapters, their type
+                           and secrets) · mongo_fallback.py (in-process pipeline stages) · errors.py
   queries/mongo_query.py   Query parsing: Mongo shell / JSON / JS / Python, Jasper runCommand, $P{}, read-only checks
   queries/sql_query.py     SQL report queries: one read-only statement, $P{} bound, $X{IN,…} lists, $P!{} refused
   definitions.py           ParameterSpec, ReportDefinition, saved JSON → definition, repository loader, parameter values
@@ -255,9 +261,15 @@ lose ours. JRXML is supported **in** (import); `.mrd` is the native format, like
 
 ---
 
-## 6. Storage on disk (`REPORTING_DATA_DIR`, default `./data`)
+## 6. Storage (`REPORTING_STORAGE`: `files` in `REPORTING_DATA_DIR`, or `postgresql`)
 
-| Path | Content | In git? |
+Everything below goes through `storage/store.py` (`get_store()`): with `files` each key is a file under the data
+directory (default `./data`); with `postgresql` (`REPORTING_STORAGE_URL`) each key is a row of
+`reporting_documents` (logs: `reporting_lines`). Several app instances can then share one repository; each
+instance reloads its report list when the repository revision changes (`services/versions.refresh_if_changed`).
+Move an existing data directory with `python -m backend.app.storage.migrate`.
+
+| Key | Content | In git? |
 |---|---|---|
 | `reports/<folder>/<ID>.json` | Published reports (the server repository) | No |
 | `workspace/<folder>/<ID>.json` | Designer drafts (+ publish status) | No |
@@ -266,7 +278,10 @@ lose ours. JRXML is supported **in** (import); `.mrd` is the native format, like
 | `private_secrets.json` | Admin token (local use), adapter URLs/passwords | **Never** |
 | `users.json` | `/server` accounts (password hashes) | **Never** |
 | `history/<ID>.json` | What happened to each server report | No |
-| `audit/`, `logs/` | Run history, service log | No |
+| `versions/<ID>/<n>.json` | Every saved version of a server report (last 50) | No |
+| `jobs/schedules.json`, `jobs/runs.json`, `jobs/output/` | Schedules, background/scheduled runs, their files | No |
+| `meta/…` | Repository revision, signed-out sessions, failed sign-ins | No |
+| `audit/`, `logs/` | Run history (`audit` in the store), service log (always a file) | No |
 
 Writes go through `_write_json_atomically` (temp file + rename), so a crash never leaves half a file.
 
@@ -305,20 +320,21 @@ Writes go through `_write_json_atomically` (temp file + rename), so a crash neve
 | Gap | Risk | Fix |
 |---|---|---|
 | ~~`reporting_core.py` is 4 300 lines~~ | — | **Done:** split into `backend/app` (§3), behaviour unchanged, all tests green |
-| State in process memory (`reports_by_id`, Mongo clients) and JSON files | Only **one** worker can run; no horizontal scaling | Move repository, workspace, users, history to a database (PostgreSQL) with a cache layer |
+| ~~State in process memory and JSON files~~ | — | **Done:** document store with a PostgreSQL backend, repository revision, shared sign-outs (§6); `deploy/docker-compose.yml` runs two instances |
 | ~~Dockerfile copied files that are not in git~~ | — | **Done:** multi-stage image from a clean checkout, no `data/` inside, liveness probe |
-| ~~Only MongoDB adapters~~ | — | **PostgreSQL done** (§9.3); MySQL, SQL Server, Oracle next |
-| One dataset per report | Tables/charts cannot have their own query like Jasper's `Dataset1` | Sub-datasets (§9.4) |
-| Large reports run inside the HTTP request | Timeouts, blocked workers | Background jobs with a queue, download when ready, scheduling |
-| No report versions (history records actions, not content) | Cannot roll back a bad publish | Store each published version; "Restore" on the History tab |
+| ~~Only MongoDB adapters~~ | — | **Done:** PostgreSQL, MySQL/MariaDB, SQL Server, Oracle (§9.3) |
+| ~~One dataset per report~~ | — | **Done:** sub-datasets for Table / Crosstab and the Table editor (§9.4) |
+| ~~Large reports run inside the HTTP request~~ | — | **Done:** "Run in background", schedules with e-mail, Runs list (`backend/app/jobs`) |
+| ~~No report versions~~ | — | **Done:** every save is a version; `/server` → Versions → View / Restore |
+| ~~No browser security headers~~ | — | **Done:** CSP, X-Frame-Options, nosniff, HSTS (opt-in), request size limit (`security/headers.py`) |
 | ~~No CI pipeline~~ | — | **Done:** `.github/workflows/ci.yml` — ruff, pytest, frontend build, Docker build and start |
-| Metrics only in logs | No alerting | `/metrics` (Prometheus), readiness probe that checks storage and adapters |
+| Metrics only in logs | No alerting | `/metrics` (Prometheus) still to do; **`/ready`** (storage + scheduler) is done |
 
 ### 9.2 Target structure
 
-**Status:** the backend part is done (see §3: routers, services, security, storage, connectors incl. PostgreSQL,
-queries, rendering, expressions, importers). Still to do: a database backend for `storage/`, more SQL connectors,
-`frontend/apps` + `frontend/shared`, and moving deployment files into `deploy/` and the guides into `docs/`.
+**Status:** the backend part is done (see §3), including the database backend for `storage/`, all four SQL
+connectors, jobs and versions. `frontend/src/shared/` (theme, ThemeToggle) and `deploy/` (docker-compose, nginx)
+exist. Still to do: moving the designer files into `frontend/src/designer/` and the guides into `docs/`.
 
 ```text
 backend/
@@ -369,21 +385,36 @@ Safety is two layers: the query check, and the read-only transaction in the data
 check — e.g. `nextval()` — is still refused; the tests prove it on a real PostgreSQL in CI). Give the adapter a
 database user with SELECT rights only.
 
-Next kinds: MySQL/MariaDB (PyMySQL), SQL Server (pyodbc), Oracle (oracledb) — add them to `connectors/sql.py`
-(`SQL_TYPES`, URL check, connect options for read-only + timeout, `LIMIT 0` / `TOP 0` for Read Fields).
+**MySQL / MariaDB, SQL Server and Oracle are done** too, in the same module (one `Dialect` each):
+
+| Kind | Driver | URL | Read-only / time limit | Read Fields |
+|---|---|---|---|---|
+| `mysql` | PyMySQL | `mysql://` or `mariadb://user:pw@host:3306/db[?ssl=true]` | `START TRANSACTION READ ONLY`, `max_execution_time` (MariaDB: `max_statement_time`) | `… LIMIT 0` |
+| `sqlserver` | pymssql | `sqlserver://user:pw@host:1433/db` (SQL login) | no read-only mode in SQL Server: every query is **rolled back**; `LOCK_TIMEOUT` + query timeout | `TOP 0` (WITH / ORDER BY: runs the query, reads no row) |
+| `oracle` | python-oracledb (thin) | `oracle://user:pw@host:1521/service_name` | `SET TRANSACTION READ ONLY`, `call_timeout` | `… WHERE 1 = 0` |
+
+Placeholders follow the driver: `%(name)s` (psycopg, PyMySQL, pymssql) or `:name` (Oracle); `$X{IN, …}` becomes
+`col = ANY(array)` on PostgreSQL and `col IN (:a, :b, …)` elsewhere (at most 1000 values). CI tests MySQL on a real
+server (`MYSQL_TEST_URL`); SQL Server and Oracle are tested with stand-in drivers.
 
 ### 9.4 Sub-datasets and the Table editor (Jasper's `Dataset1` and the "Table" tab)
 
-* `design.datasets = [{ name, connectionId?, query, parameters, fields }]`; Table / List / Crosstab / Chart get
-  `dataset: "Dataset1"` and a parameter map, exactly like Jasper's dataset run.
-* The Table wizard gets the first page from the screenshot: *new dataset* or *existing dataset*.
-* Double-clicking a Table opens its own editor tab (like *Main Report | Table*): header / detail / footer cells
-  as real elements (fonts, borders, Print When per cell), column groups, drag to resize.
+**Done.** `design.datasets = [{ name, connectionId, queryLanguage, collection, querySource, fields, parameters }]`
+(Dataset and Query → **Datasets** tab). A Table or Crosstab gets `datasetName` and `datasetParameters` (expressions
+in the report's scope, like Jasper's dataset run); a dataset parameter without a value takes the report parameter of
+the same name. The query is checked like a report query when publishing (`definitions.compile_dataset`) and runs
+through `services/runs.dataset_loader` (cached per parameter set, at most 200 runs, read-only as always). Without an
+adapter the designer preview shows sample records; a failing dataset prints its error in place of the table.
+
+Double-clicking a Table opens the **Table editor** (`TableEditor.jsx`): Column Header / Detail / Column Footer cells
+side by side, click to edit, drag a column edge to resize, add / move / delete columns, pick the dataset and map its
+parameters. Still open: List and Chart on a sub-dataset, column groups.
 
 ### 9.5 Suggested order
 
 1. ~~CI + backend split, services~~ — **done**.
-2. ~~PostgreSQL~~ — **done**; then MySQL, SQL Server, Oracle.
-3. Sub-datasets + Table editor tab.
-4. Database storage, report versions, several workers.
-5. Background jobs, scheduling and e-mail (JasperReports Server "Schedule"), metrics and alerts.
+2. ~~PostgreSQL, MySQL, SQL Server, Oracle~~ — **done**.
+3. ~~Sub-datasets + Table editor~~ — **done** (List / Chart datasets open).
+4. ~~Database storage, report versions, several instances~~ — **done**.
+5. ~~Background jobs, scheduling and e-mail~~ — **done**; `/metrics` and alerting still open.
+6. ~~Responsive UI (web + mobile), light/dark theme~~ — **done** (`shared/theme.css`).

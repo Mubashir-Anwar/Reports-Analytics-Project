@@ -1,7 +1,7 @@
 """SQL report queries (Jaspersoft Studio style) for the SQL connectors.
 
 * `$P{Name}`               → a bound parameter (never pasted into the SQL text)
-* `$X{IN, column, Name}`    → `column = ANY(<list>)`; an empty list means "no filter" (Jasper behaviour)
+* `$X{IN, column, Name}`    → `column = ANY(<list>)` (PostgreSQL) or `column IN (…)`; an empty list = no filter
 * `$X{NOTIN, column, Name}` → `NOT (column = ANY(<list>))`; empty = no filter
 * `$P!{Name}`               → refused: it would paste text into the SQL
 
@@ -35,12 +35,16 @@ class PreparedSql:
     parts: tuple[Any, ...]  # str pieces, ("P", name) and ("X", negate, column, name) tokens
     parameter_names: tuple[str, ...] = field(default=())
 
-    def bind(self, values: dict[str, Any], placeholder=lambda name: f"%({name})s") -> tuple[str, dict[str, Any]]:
-        """SQL text for the driver (pyformat placeholders) and the values to bind."""
+    def bind(self, values: dict[str, Any], style: str = "pyformat", lists: str = "any") -> tuple[str, dict[str, Any]]:
+        """SQL text for the driver and the values to bind.
+        style: "pyformat" (%(name)s: psycopg, PyMySQL, pymssql) or "named" (:name: Oracle).
+        lists: "any" (column = ANY(array): PostgreSQL) or "expand" (column IN (:a, :b, …): the others)."""
+        pyformat = style == "pyformat"
+        placeholder = (lambda name: f"%({name})s") if pyformat else (lambda name: f":{name}")
         sql, params = [], {}
         for index, part in enumerate(self.parts):
             if isinstance(part, str):
-                sql.append(part.replace("%", "%%"))
+                sql.append(part.replace("%", "%%") if pyformat else part)
             elif part[0] == "P":
                 key = f"p_{part[1]}"
                 params[key] = values.get(part[1])
@@ -52,8 +56,15 @@ class PreparedSql:
                     sql.append("(1 = 1)")  # Jasper: an empty $X{IN} list does not filter
                     continue
                 key = f"x{index}_{name}"
-                params[key] = items
-                condition = f"{column} = ANY({placeholder(key)})"
+                if lists == "any":
+                    params[key] = items
+                    condition = f"{column} = ANY({placeholder(key)})"
+                else:
+                    if len(items) > 1000:
+                        raise ValueError(f"$X{{IN, {column}, {name}}}: at most 1000 values")
+                    keys = [f"{key}_{i}" for i in range(len(items))]
+                    params.update(zip(keys, items))
+                    condition = f"{column} IN ({', '.join(placeholder(k) for k in keys)})"
                 sql.append(f"(NOT ({condition}))" if negate else f"({condition})")
         return "".join(sql), params
 

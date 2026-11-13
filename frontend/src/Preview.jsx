@@ -64,7 +64,7 @@ export default function Preview({ state, notify }) {
       let blob;
       if (limit === '20') {
         const data = await api.draftPreview(reportPayload(state), parameters, adapter);
-        runInfo = { mode: 'render', body: { design, columns: data.columns, rows: data.rows, parameters, title: report.title, reportId: report.id }, text: `${adapterName} · first ${data.rows.length} of ${data.rowCount} records` };
+        runInfo = { mode: 'render', body: { design, columns: data.columns, rows: data.rows, parameters, title: report.title, reportId: report.id, connectionId: adapter }, text: `${adapterName} · first ${data.rows.length} of ${data.rowCount} records` };
         blob = await api.renderFile({ ...runInfo.body, format: 'pdf' });
       } else {
         runInfo = { mode: 'run', definition: reportPayload(state), parameters, connectionId: adapter, text: `${adapterName} · all records` };

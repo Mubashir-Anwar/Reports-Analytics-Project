@@ -154,6 +154,38 @@ ORDER BY o.branch, o.placed_on
 
 Baqi sab (templates, Table/Crosstab, Preview, Publish, `/server`, `/generate`) MongoDB reports jaisa hi chalta hai.
 
+**MySQL / MariaDB, SQL Server, Oracle** bhi isi tarah: wizard mein type chunein (port khud badal jata hai; Oracle mein "Database" ki jagah **Service name**). SQL Server mein SQL login (username/password) chahiye; wahan read-only transaction nahi hoti, is liye har query ke baad rollback hota hai — user ko sirf SELECT ki ijazat zaroor dein.
+
+## Sub-datasets aur Table editor
+
+- Design toolbar → **Dataset & Query** → **Datasets** → **New dataset**: naam, adapter (khaali = report wala), query, **Read fields**, parameters.
+- Table ya Crosstab → Properties → **Dataset** tab → "Reads": apna dataset chunein aur har dataset parameter ke liye value dein, jaise `$F{OrderId}` (main report ka field). Khaali chhorein to report ka isi naam wala parameter jata hai.
+- Canvas par Table ko **double-click** = **Table editor**: Column Header / Detail / Column Footer cells, click karke badlein, column ka kinara kheench kar chauda karein, column add/move/delete, fields par click karke cell mein daalein.
+
+## Schedules aur background runs (`/server`)
+
+- Report → **Run** tab → **⟳ Run in background**: file server par banti hai, **Runs** (neeche/upar ka switch) se download karein. Bari reports ke liye.
+- Report → **Schedules** tab → **Schedule this report** (designer/admin): Once / har N minute / Daily / Weekly / Monthly, time zone, parameters, format, kitni files rakhni hain, e-mail (SMTP set ho to).
+- Date parameters relative ho sakte hain: `{yesterday}`, `{today-7}`, `{monthStart}`, `{prevMonthStart}`, `{prevMonthEnd}` … — job chalne wale din hisaab hota hai.
+- Upar **⏰ Schedules** aur **⟳ Runs** mein sab schedules aur outputs (Run now, Pause, Edit, Delete, Download).
+
+## Versions (wapas purana version)
+
+Server report ki har save (publish, edit, copy, move, upload, restore) ek **version** banti hai (aakhri 50). `/server` → report → **Versions** → **View** ya **↺ Restore**. Restore se naya version banta hai, kuch zaaya nahi hota; designer ki workspace copy bhi saath badalti hai.
+
+## Production: PostgreSQL storage, kai instances, HTTPS
+
+- `REPORTING_STORAGE=postgresql` + `REPORTING_STORAGE_URL=postgresql://…` — reports, users, versions, schedules, outputs, audit sab database mein; kai instances ek saath chal sakte hain (logout aur login limit bhi sab par lagti hai).
+- Purana `data/` folder copy karna: `python -m backend.app.storage.migrate` (DEPLOYMENT.md dekhein).
+- Tayyar setup: `deploy/docker-compose.yml` (PostgreSQL + 2 app instances + nginx HTTPS). `deploy/.env.example` ko `deploy/.env` bana kar secrets bharein — yeh file git mein kabhi na daalein.
+- `/ready` load balancer ke liye; pages par CSP/HSTS jaise security headers khud lagte hain.
+
+## Naya UI: mobile, tablet, dark mode
+
+- `/server` aur `/admin` phone par: upar ☰ menu, neeche **Repository / Schedules / Runs** ka tab bar, report kholne par poori screen aur **‹ All reports** se wapas.
+- Designer tablet/phone par: ☰ (bayan panel: Workspace, Server, Adapters, Outline) aur ⚙ (dayan: Palette, Properties) drawers ban jate hain; canvas ko poori jagah milti hai.
+- Har page par ◐/☀/☾ button: system / light / dark theme (browser yaad rakhta hai).
+
 ## Grizzly deployment tayyari
 
 Deployment ko ASGI app `app:app` chahiye. Start command yeh rakhein; platform ka port environment variable use karein:

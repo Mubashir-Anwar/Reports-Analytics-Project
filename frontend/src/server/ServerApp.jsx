@@ -3,6 +3,7 @@ import ContextMenu from '../ContextMenu.jsx';
 import { confirmFolderDelete } from '../folderDelete.js';
 import { Notice, Topbar, downloadBlob } from '../portal/Shell.jsx';
 import ResourcePanel from './ResourcePanel.jsx';
+import { RunsList, SchedulesList } from './Schedules.jsx';
 import UploadDialog from './UploadDialog.jsx';
 import { roleAtLeast, serverApi, whenSignedOut } from './serverApi.js';
 
@@ -53,6 +54,11 @@ function Repository({ user, onUser }) {
   const [clipboard, setClipboard] = useState(null); // { mode: 'copy' | 'cut', id, title }
   const [uploading, setUploading] = useState(false);
   const [version, setVersion] = useState(0); // reloads the resource panel after a change
+  const [view, setView] = useState('repository'); // repository | schedules | runs
+  const [scheduleInfo, setScheduleInfo] = useState(null);
+  const [runsVersion, setRunsVersion] = useState(0);
+  useEffect(() => { serverApi.scheduleInfo().then(setScheduleInfo).catch(() => setScheduleInfo(null)); }, []);
+  const showMessage = useCallback((m) => setMessage(m), []);
   const designer = roleAtLeast(user, 'designer');
   const admin = roleAtLeast(user, 'admin');
 
@@ -81,7 +87,11 @@ function Repository({ user, onUser }) {
     setMessage({ text, kind: 'ok' });
   };
   const fail = (error) => setMessage({ text: error.message, kind: 'error' });
-  const open = (id, nextTab = 'run') => { setSelectedId(id); setTab(nextTab); };
+  const open = (id, nextTab = 'run') => {
+    setSelectedId(id);
+    setTab(nextTab);
+    if (window.matchMedia?.('(max-width: 760px)').matches) window.requestAnimationFrame(() => document.querySelector('.server-grid')?.scrollIntoView({ behavior: 'smooth', block: 'start' }));
+  };
 
   /* ---------- actions */
   const createFolder = async (parent = folder) => {
@@ -130,6 +140,7 @@ function Repository({ user, onUser }) {
     { header: `${r.title} (${r.id})` },
     { label: 'Run', icon: '▶', onClick: () => open(r.id, 'run') },
     { label: 'Edit', icon: '✎', disabled: !designer, hint: designer ? '' : 'Needs a designer account', onClick: () => open(r.id, 'overview') },
+    { label: 'Schedule…', icon: '⏰', onClick: () => { setView('repository'); open(r.id, 'schedules'); } },
     { label: 'Parameters', icon: '$P', onClick: () => open(r.id, 'parameters') },
     { label: 'Data Source', icon: '⛁', onClick: () => open(r.id, 'datasource') },
     { label: 'Open in Designer', icon: '🎨', disabled: !designer, onClick: () => openInDesigner(r) },
@@ -169,16 +180,24 @@ function Repository({ user, onUser }) {
   return (
     <main className="page">
       <div className="page-head">
-        <div><p className="eyebrow">Repository</p><h1>Published reports</h1><p className="muted">Right-click a report or a folder for its actions. Only published or uploaded reports are on the server.</p></div>
+        <div><p className="eyebrow">Report server</p><h1>{{ repository: 'Published reports', schedules: 'Schedules', runs: 'Runs and outputs' }[view]}</h1>
+          <p className="muted">{{ repository: 'Right-click a report or a folder for its actions. Only published or uploaded reports are on the server.', schedules: 'Reports that run by themselves at set times. Create one from a report → Schedules.', runs: 'Background runs and scheduled outputs. Files are kept on the server until they are replaced or deleted.' }[view]}</p></div>
         <div className="row">
-          {designer && <button className="btn primary" onClick={() => setUploading(true)}>⤒ Add Resource</button>}
-          <button className="btn" onClick={load}>↻ Refresh</button>
+          <div className="segmented view-switch" role="tablist">
+            {[['repository', '🗄 Repository'], ['schedules', '⏰ Schedules'], ['runs', '⟳ Runs']].map(([id, label]) => (
+              <button key={id} role="tab" aria-selected={view === id} className={view === id ? 'on' : ''} onClick={() => setView(id)}>{label}</button>
+            ))}
+          </div>
+          {view === 'repository' && designer && <button className="btn primary" onClick={() => setUploading(true)}>⤒ Add Resource</button>}
+          {view === 'repository' && <button className="btn" onClick={load}>↻ Refresh</button>}
         </div>
       </div>
       {user.bootstrap && <Notice message={{ kind: 'warn', text: 'You are signed in with the first-setup admin login. Create a real admin user in Admin → Users; this login then stops working.' }} />}
       {message && <div style={{ marginTop: 10 }}><Notice message={message} /></div>}
       {clipboard && <div className="clip-bar">📋 {clipboard.mode === 'cut' ? 'Cut' : 'Copied'}: <b>{clipboard.title}</b> — right-click a folder → Paste <button className="btn quiet sm" onClick={() => setClipboard(null)}>✕</button></div>}
-      <div className="server-grid" style={{ marginTop: 14 }}>
+      {view === 'schedules' && <section className="card"><SchedulesList info={scheduleInfo} onMessage={showMessage} /></section>}
+      {view === 'runs' && <section className="card"><RunsList onMessage={showMessage} version={runsVersion} /></section>}
+      {view === 'repository' && <div className={`server-grid ${selectedId ? 'has-selection' : ''}`} style={{ marginTop: 14 }}>
         <aside className="card" onContextMenu={showMenu(folderMenu(''))}>
           <div className="card-head"><div><p className="eyebrow">Folders</p><h2>Repository</h2></div>{designer && <button className="btn sm quiet" onClick={() => createFolder()}>+ Folder</button>}</div>
           <input type="search" placeholder="⌕  Find a report" value={search} onChange={(e) => setSearch(e.target.value)} style={{ marginBottom: 10 }} />
@@ -217,9 +236,10 @@ function Repository({ user, onUser }) {
         </section>
         {selectedId
           ? <ResourcePanel key={`${selectedId}-${version}`} reportId={selectedId} tab={tab} setTab={setTab} onChanged={load}
+              scheduleInfo={scheduleInfo} onBackground={() => setRunsVersion((n) => n + 1)} onBack={() => setSelectedId('')}
               menu={(event, info) => setMenu({ x: event.clientX, y: event.clientY, items: reportMenu(reports.find((r) => r.id === info.id) || info) })} />
-          : <section className="card" style={{ textAlign: 'center', padding: '48px 18px' }}><div style={{ fontSize: 30, opacity: 0.5 }}>▤</div><h2>Choose a report</h2><p className="muted">Run it, or check its parameters, data source, query and history. Right-click for more.</p></section>}
-      </div>
+          : <section className="card resource hide-mobile" style={{ textAlign: 'center', padding: '48px 18px' }}><div style={{ fontSize: 30, opacity: 0.5 }}>▤</div><h2>Choose a report</h2><p className="muted">Run it, or check its parameters, data source, query and history. Right-click for more.</p></section>}
+      </div>}
       <ContextMenu menu={menu} onClose={() => setMenu(null)} />
       {uploading && (
         <UploadDialog folders={folders} folder={folder} onClose={() => setUploading(false)}
@@ -254,7 +274,7 @@ export default function ServerApp() {
   return (
     <>
       <Topbar current="/server" subtitle="Report Server">
-        {user && (<><span>Signed in as <b>{user.username}</b> <span className="chip">{user.role}</span></span><button className="btn sm" onClick={logout}>Sign out</button></>)}
+        {user && (<><span className="who">Signed in as <b>{user.username}</b> <span className="chip">{user.role}</span></span><button className="btn sm" onClick={logout} title={`Sign out ${user.username}`}>Sign out</button></>)}
       </Topbar>
       {user === undefined && <div className="login-wrap"><p className="muted">Checking your session…</p></div>}
       {user === null && <LoginForm key={loginMessage?.text || 'login'} message={loginMessage} onSignedIn={(u) => { setLoginMessage(null); setUser(u); }} />}

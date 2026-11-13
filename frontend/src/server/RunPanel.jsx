@@ -31,7 +31,7 @@ function ParameterInput({ parameter, value, onChange }) {
 }
 
 /** Input controls + format + Run (JasperReports Server's "Run" view). */
-export default function RunPanel({ report }) {
+export default function RunPanel({ report, onBackground }) {
   const [values, setValues] = useState({});
   const [format, setFormat] = useState('pdf');
   const [busy, setBusy] = useState(false);
@@ -43,6 +43,18 @@ export default function RunPanel({ report }) {
     setFormat(report.formats.includes(report.defaultFormat) ? report.defaultFormat : report.formats[0]);
     setResult(null);
   }, [report.id, JSON.stringify(report.parameters), report.formats.join()]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const chosenValues = () => Object.fromEntries(Object.entries(values).filter(([, value]) => value !== ''));
+  /** Big reports: the server makes the file in the background; it appears under Runs. */
+  const background = async () => {
+    setBusy(true);
+    try {
+      const { run: started } = await serverApi.runInBackground(report.id, chosenValues(), format);
+      setResult({ text: `Started in the background (${started.status}). The file will be under Runs when it is ready.`, kind: 'ok' });
+      onBackground?.();
+    } catch (error) { setResult({ text: error.message, kind: 'error' }); }
+    finally { setBusy(false); }
+  };
 
   const run = async (event) => {
     event.preventDefault();
@@ -75,6 +87,7 @@ export default function RunPanel({ report }) {
           <select value={format} onChange={(e) => setFormat(e.target.value)}>{report.formats.map((f) => <option key={f} value={f}>{FORMAT_LABELS[f] || f}</option>)}</select>
         </label>
         <button className="btn primary" type="submit" disabled={busy} style={{ padding: '9px 16px' }}>{busy ? 'Running…' : 'Run report →'}</button>
+        <button className="btn" type="button" disabled={busy} onClick={background} title="For big reports: keep working, download the file from Runs later">⟳ Run in background</button>
       </div>
       {result && <Notice message={result}>{result.url && <a href={result.url} target="_blank" rel="noopener noreferrer">Open the PDF in a new tab ↗</a>}</Notice>}
       <details style={{ marginTop: 12 }}><summary className="muted" style={{ cursor: 'pointer' }}>Report link for websites</summary><p className="muted">Websites call <code>/generate/{report.id}.{format}</code> with a signed link or the X-Report-Token header.</p></details>

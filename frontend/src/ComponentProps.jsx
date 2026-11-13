@@ -34,7 +34,7 @@ export function tableHeight(t) {
   return Math.max(16, (t.headerHeight || 0) + (t.rowHeight || 16) + footer);
 }
 
-export function TableProps({ element, patch, fields }) {
+export function TableProps({ element, patch, fields, onOpenEditor }) {
   const columns = element.columns || [];
   const setColumns = (next) => {
     const draft = { ...element, columns: next };
@@ -51,6 +51,7 @@ export function TableProps({ element, patch, fields }) {
   const style = (values) => patch({ ...values, height: tableHeight({ ...element, ...values }) });
   return (
     <>
+      {onOpenEditor && <button type="button" className="btn primary wide" onClick={onOpenEditor}>Open the table editor…</button>}
       <div className="prop-section">Columns <small>({columns.length}, total width {Math.round(columns.reduce((s, c) => s + (c.width || 0), 0))}px)</small></div>
       <datalist id="table-patterns">{PATTERN_CHOICES.map((p) => <option key={p} value={p} />)}</datalist>
       <div className="col-editor">
@@ -149,18 +150,52 @@ export function NoteProps({ element, patch }) {
 }
 
 /** Which records a Table / Crosstab / List shows (Jasper: the component's dataset run). */
-export function DatasetProps({ element, patch, fields, bandKey }) {
+export function DatasetProps({ element, patch, fields, bandKey, report, design, onOpenDatasets }) {
   const inGroup = Boolean(groupOfBand(bandKey)) || bandKey === 'detail';
+  const canHaveDataset = ['table', 'crosstab'].includes(element.type);
+  const datasets = design?.datasets || [];
+  const dataset = datasets.find((d) => d.name === element.datasetName);
+  const mapping = element.datasetParameters || [];
+  const setMapping = (name, expression) => patch({ datasetParameters: [...mapping.filter((m) => m.name !== name), { name, expression }] });
+  const chooseDataset = (name) => {
+    const next = datasets.find((d) => d.name === name);
+    patch({
+      datasetName: name, scope: 'report', sortField: '', filterExpression: '',
+      datasetParameters: (next?.parameters || []).map((p) => ({ name: p.name, expression: report.columns.includes(p.name) ? `$F{${p.name}}` : '' })),
+    });
+  };
   return (
     <>
+      {canHaveDataset && (
+        <>
+          <div className="prop-section">Dataset</div>
+          <Row label="Reads">
+            <span className="inline">
+              <select value={element.datasetName || ''} onChange={(e) => chooseDataset(e.target.value)}>
+                <option value="">Main report query</option>
+                {datasets.map((d) => <option key={d.name} value={d.name}>Dataset {d.name}</option>)}
+              </select>
+              <button type="button" className="btn sm" onClick={onOpenDatasets} title="Create or edit datasets">…</button>
+            </span>
+          </Row>
+          {element.datasetName && !dataset && <p className="hint warn">The dataset {element.datasetName} does not exist any more.</p>}
+          {dataset && dataset.parameters.map((p) => (
+            <Row key={p.name} label={`$P{${p.name}}`} title={`Value for the dataset parameter ${p.name} (${p.type})`}>
+              <input className="mono" value={mapping.find((m) => m.name === p.name)?.expression || ''}
+                placeholder={report.parameters.some((rp) => rp.name === p.name) ? 'empty = the report parameter' : '$F{Id}'} onChange={(e) => setMapping(p.name, e.target.value)} />
+            </Row>
+          ))}
+          {dataset && <p className="hint">The expressions use the <b>report's</b> fields and parameters (e.g. <code>$F&#123;OrderId&#125;</code> of the current record). The columns and the filter below use the dataset's fields.</p>}
+        </>
+      )}
       <div className="prop-section">Records</div>
-      <Row label="Scope">
+      {!element.datasetName && <Row label="Scope">
         <select value={element.scope || 'report'} onChange={(e) => patch({ scope: e.target.value })}>
           <option value="report">All records of the report</option>
           <option value="group">Only the records of the current group</option>
         </select>
-      </Row>
-      {element.scope === 'group' && !inGroup && <p className="hint warn">“Current group” works in a Group Header / Footer or in Detail; here it shows all records.</p>}
+      </Row>}
+      {!element.datasetName && element.scope === 'group' && !inGroup && <p className="hint warn">“Current group” works in a Group Header / Footer or in Detail; here it shows all records.</p>}
       <Row label="Filter (print when true)">
         <textarea rows={2} className="mono" value={element.filterExpression || ''} placeholder='$F{Status}.equals("Active")' onChange={(e) => patch({ filterExpression: e.target.value })} />
       </Row>
@@ -168,7 +203,7 @@ export function DatasetProps({ element, patch, fields, bandKey }) {
         <Row label="Sort by"><select value={element.sortField || ''} onChange={(e) => patch({ sortField: e.target.value })}><option value="">Report order</option>{fields.map((f) => <option key={f}>{f}</option>)}</select></Row>
         <Row label="Order"><select value={element.sortOrder || 'Ascending'} onChange={(e) => patch({ sortOrder: e.target.value })}><option>Ascending</option><option>Descending</option></select></Row>
       </div>
-      <p className="hint">The records come from the report's own query. In the filter, <code>$F&#123;…&#125;</code> is the record and <code>$P&#123;…&#125;</code> a report parameter.</p>
+      <p className="hint">The records come from {dataset ? `the dataset ${dataset.name}` : "the report's own query"}. In the filter, <code>$F&#123;…&#125;</code> is the record and <code>$P&#123;…&#125;</code> a report parameter.</p>
     </>
   );
 }

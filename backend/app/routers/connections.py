@@ -12,7 +12,8 @@ from backend.app.connectors.mongodb import _mongo_database_from_uri
 from backend.app.connectors.profiles import _profile_credentials, load_connection_profiles
 from backend.app.constants import ADAPTER_TYPES, CONNECTION_ID_PATTERN, ENV_KEY_PATTERN
 from backend.app.security.secrets import _load_private_secrets, _save_private_secrets
-from backend.app.storage.files import _write_json_atomically, add_saved_folder, connections_file, normalize_folder_path
+from backend.app.storage.files import add_saved_folder, normalize_folder_path
+from backend.app.storage.store import get_store
 
 
 def register(app: FastAPI, ctx: SimpleNamespace) -> None:
@@ -90,10 +91,10 @@ def register(app: FastAPI, ctx: SimpleNamespace) -> None:
             profile = legacy_profile
         elif kind in sql_connector.SQL_TYPES:
             if not sql_connector.valid_url(kind, uri):
-                raise HTTPException(status_code=422, detail="Give a PostgreSQL URL: postgresql://user:password@host:5432/database")
+                raise HTTPException(status_code=422, detail=sql_connector.url_hint(kind))
             database = sql_connector.database_from_url(uri)
             if not database:
-                raise HTTPException(status_code=422, detail="The URL has no database name: postgresql://user:password@host:5432/<database>")
+                raise HTTPException(status_code=422, detail=f"The URL has no database name. {sql_connector.url_hint(kind)}")
             profile = {"id": connection_id, "name": name, "type": kind, "storage": "file", "database": database}
         else:
             if not uri.startswith(("mongodb://", "mongodb+srv://")):
@@ -126,7 +127,7 @@ def register(app: FastAPI, ctx: SimpleNamespace) -> None:
             private = _load_private_secrets()
             private["mongo_connections"].pop(connection_id, None)
             _save_private_secrets(private)
-        _write_json_atomically(connections_file(), {"connections": updated})
+        get_store().write_json("connections.json", {"connections": updated})
         old_client = state["clients"].pop(connection_id, None)
         state["connection_signatures"].pop(connection_id, None)
         if old_client is not None:
@@ -157,7 +158,7 @@ def register(app: FastAPI, ctx: SimpleNamespace) -> None:
         if used_by:
             raise HTTPException(status_code=409, detail=f"Switch these reports to another connection first: {', '.join(used_by)}")
         profiles = [item for item in load_connection_profiles() if item["id"] != connection_id]
-        _write_json_atomically(connections_file(), {"connections": profiles})
+        get_store().write_json("connections.json", {"connections": profiles})
         private = _load_private_secrets()
         private["mongo_connections"].pop(connection_id, None)
         _save_private_secrets(private)
@@ -189,7 +190,7 @@ def register(app: FastAPI, ctx: SimpleNamespace) -> None:
             add_saved_folder(folder)
         else:
             target.pop("folder", None)
-        _write_json_atomically(connections_file(), {"connections": profiles})
+        get_store().write_json("connections.json", {"connections": profiles})
         return {"connectionId": connection_id, "folder": folder}
 
     @app.post("/api/admin/connections/{connection_id}/test")

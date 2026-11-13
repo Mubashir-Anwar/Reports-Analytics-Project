@@ -252,7 +252,7 @@ function CanvasToolbar({ count, lockedAll, actions, prefs, setPrefs, hasClipboar
   );
 }
 
-export default function Canvas({ design, selection, tool, zoom, setZoom, dispatch, actions, openMenu, onEditExpression, onPercentage, onWizard, prefs, setPrefs, hasClipboard, onQuery, onTemplates }) {
+export default function Canvas({ design, selection, tool, zoom, setZoom, dispatch, actions, openMenu, onEditExpression, onPercentage, onWizard, onOpenTable, prefs, setPrefs, hasClipboard, onQuery, onTemplates }) {
   const bandRefs = useRef({});
   const scrollRef = useRef(null);
   const pageRef = useRef(null);
@@ -693,7 +693,8 @@ export default function Canvas({ design, selection, tool, zoom, setZoom, dispatc
                       onPointerDown={beginDrag(key, element, 'move')}
                       onResizeDown={beginDrag(key, element, 'resize')}
                       onContextMenu={elementContextMenu(element.id)}
-                      onDoubleClick={['staticText', 'textField'].includes(element.type) ? (e) => { e.stopPropagation(); onEditExpression(element.id); } : undefined}
+                      onDoubleClick={['staticText', 'textField'].includes(element.type) ? (e) => { e.stopPropagation(); onEditExpression(element.id); }
+                        : element.type === 'table' && onOpenTable ? (e) => { e.stopPropagation(); onOpenTable(element.id); } : undefined}
                     />
                   ))}
                   {snapLines?.y.filter((line) => line.key === key).map((line) => <span key={`sy${line.y}`} className="snap-line h" style={{ top: line.y * zoom }} />)}

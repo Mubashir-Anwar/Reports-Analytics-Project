@@ -9,7 +9,8 @@ from fastapi import FastAPI, HTTPException, Request
 from backend.app.constants import REPORT_ID_PATTERN, WORKSPACE_META
 from backend.app.definitions import _dynamic_report
 from backend.app.logs import LOG
-from backend.app.storage.files import _write_json_atomically, add_saved_folder, normalize_folder_path, workspace_directory
+from backend.app.storage.files import add_saved_folder, normalize_folder_path
+from backend.app.storage.store import get_store
 
 
 def register(app: FastAPI, ctx: SimpleNamespace) -> None:
@@ -63,9 +64,10 @@ def register(app: FastAPI, ctx: SimpleNamespace) -> None:
         clean["folder"] = folder
         clean[WORKSPACE_META] = meta
         target = workspace_file(report_id, folder)
-        _write_json_atomically(target, clean)
-        if existing is not None and existing[0] != target and existing[0].exists():
-            existing[0].unlink()
+        store = get_store()
+        store.write_json(target, clean)
+        if existing is not None and existing[0] != target:
+            store.delete(existing[0])
         problem = ""
         try:
             _dynamic_report(strip_workspace_meta(clean))
@@ -80,7 +82,7 @@ def register(app: FastAPI, ctx: SimpleNamespace) -> None:
         entry = find_workspace_entry(report_id)
         if entry is None:
             raise HTTPException(status_code=404, detail="This report is not in the designer workspace")
-        entry[0].unlink()
+        get_store().delete(entry[0])
         return {"status": "deleted", "reportId": report_id, "stillOnServer": report_id in reports_by_id}
 
     @app.post("/api/admin/workspace-folders")
@@ -92,7 +94,7 @@ def register(app: FastAPI, ctx: SimpleNamespace) -> None:
         except ValueError as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from None
         ensure_workspace()
-        workspace_directory().joinpath(*folder.split("/")).mkdir(parents=True, exist_ok=True)
+        get_store().make_dir("/".join(["workspace", *folder.split("/")]))
         return {"folder": folder, "folders": workspace_folders(workspace_entries())}
 
     @app.delete("/api/admin/workspace-folders")
@@ -105,16 +107,10 @@ def register(app: FastAPI, ctx: SimpleNamespace) -> None:
             raise HTTPException(status_code=422, detail=str(exc)) from None
         if folder == "General":
             raise HTTPException(status_code=400, detail="The General folder cannot be deleted")
-        directory = workspace_directory().joinpath(*folder.split("/"))
         if any(str(data.get("folder", "")) == folder or str(data.get("folder", "")).startswith(f"{folder}/") for _, data in workspace_entries()):
             raise HTTPException(status_code=409, detail="Move or delete the reports in this folder first")
-        if directory.exists():
-            try:
-                for child in sorted(directory.rglob("*"), reverse=True):
-                    child.rmdir()
-                directory.rmdir()
-            except OSError:
-                raise HTTPException(status_code=409, detail="The folder is not empty") from None
+        if not get_store().remove_dir("/".join(["workspace", *folder.split("/")])):
+            raise HTTPException(status_code=409, detail="The folder is not empty")
         return {"deleted": folder, "folders": workspace_folders(workspace_entries())}
 
     @app.post("/api/admin/workspace/{report_id}/publish")
@@ -135,7 +131,7 @@ def register(app: FastAPI, ctx: SimpleNamespace) -> None:
         existing = reports_by_id.get(report_id)
         if existing is not None and options.get("replace") is not True:
             raise HTTPException(status_code=409, detail=f"{report_id} is already published on the server; confirm that the server copy should be replaced")
-        saved = save_report_payload(payload, expected_id=report_id if existing is not None else None)
+        saved = save_report_payload(payload, expected_id=report_id if existing is not None else None, action="published", user=f"designer ({role})")
         folder = saved.editor_config.get("folder", "General") if saved.editor_config else payload.get("folder", "General")
         add_saved_folder(folder)
         meta = dict(data.get(WORKSPACE_META) or {})
@@ -143,7 +139,7 @@ def register(app: FastAPI, ctx: SimpleNamespace) -> None:
         if meta.get("updatedAt", "") > meta["publishedAt"]:
             meta["updatedAt"] = meta["publishedAt"]
         data[WORKSPACE_META] = meta
-        _write_json_atomically(path, data)
+        get_store().write_json(path, data)
         record_history(report_id, "published", f"designer ({role})", f"{'replaced' if existing is not None else 'new'} in {folder}")
         LOG.info("Report %s published to the server folder %s", report_id, folder)
         return {"report": admin_report_payload(saved), "replaced": existing is not None, "workspace": workspace_summary(data)}

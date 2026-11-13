@@ -1,13 +1,13 @@
 """Data adapter profiles (connections.json) and where each one's credentials come from."""
 from __future__ import annotations
 
-import json
 import os
 
 from backend.app.constants import ADAPTER_TYPES, CONNECTION_ID_PATTERN, ENV_KEY_PATTERN
 from backend.app.logs import LOG
 from backend.app.security.secrets import _load_private_secrets
-from backend.app.storage.files import connections_file, normalize_folder_path
+from backend.app.storage.files import normalize_folder_path
+from backend.app.storage.store import get_store
 
 
 def _profile_credentials(profile: dict[str, str]) -> tuple[str, str]:
@@ -20,10 +20,9 @@ def _profile_credentials(profile: dict[str, str]) -> tuple[str, str]:
 
 
 def load_connection_profiles() -> list[dict[str, str]]:
-    path = connections_file()
     profiles: list[dict[str, str]] = []
-    if path.exists():
-        raw = json.loads(path.read_text(encoding="utf-8-sig"))
+    raw = get_store().read_json("connections.json")
+    if raw is not None:
         items = raw.get("connections", []) if isinstance(raw, dict) else []
         if not isinstance(items, list):
             raise ValueError("connections in connections.json must be an array")

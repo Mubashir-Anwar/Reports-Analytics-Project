@@ -16,6 +16,7 @@ from backend.app.constants import (
     SERVICE_VERSION,
 )
 from backend.app.definitions import discover_reports
+from backend.app.jobs.runner import JobRunner
 from backend.app.logs import LOG, configure_file_logging
 from backend.app.security.access import enabled_areas
 from backend.app.security.secrets import ensure_admin_token
@@ -43,7 +44,7 @@ def create_context() -> SimpleNamespace:
         LOG.warning("REPORTING_ACCESS_MODE=open: /generate and /reports need no credentials; keep this service off public networks")
     elif not os.getenv("REPORTING_ACCESS_SECRET", "").strip():
         LOG.warning("REPORTING_ACCESS_SECRET is not set: /generate and /reports accept only the admin token")
-    state: dict[str, Any] = {"clients": {}, "connection_signatures": {}, "revoked_sessions": set(), "login_failures": {}}
+    state: dict[str, Any] = {"clients": {}, "connection_signatures": {}}
 
     @asynccontextmanager
     async def lifespan(_app: FastAPI):
@@ -52,7 +53,9 @@ def create_context() -> SimpleNamespace:
             LOG.info("Default MongoDB connection ready")
         except HTTPException as exc:
             LOG.warning("Default MongoDB connection unavailable: %s", exc.detail)
+        ctx.job_runner.start()  # scheduled reports and background runs
         yield
+        ctx.job_runner.stop()
         for client in state["clients"].values():
             client.close()
 
@@ -69,4 +72,10 @@ def create_context() -> SimpleNamespace:
 
     ctx = SimpleNamespace(**{name: value for name, value in locals().items() if not name.startswith('__')})
     bind_services(ctx)  # the helpers in backend/app/services, with ctx filled in
+    ctx.job_runner = JobRunner(ctx)
+    try:  # the repository revision we started with (see services/versions.refresh_if_changed)
+        from backend.app.storage.store import get_store
+        state["revision"] = (get_store().read_json("meta/repository-revision.json") or {}).get("revision")
+    except (OSError, ValueError):
+        pass
     return ctx

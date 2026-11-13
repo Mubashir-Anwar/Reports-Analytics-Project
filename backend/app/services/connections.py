@@ -193,7 +193,7 @@ def connection_summary(ctx: SimpleNamespace, connection_id: str) -> dict[str, An
 
 
 def adapter_kind(ctx: SimpleNamespace, connection_id: str) -> str:
-    """"mongodb" or a SQL kind such as "postgresql" (unknown adapters count as MongoDB: get_connection reports them)."""
+    """"mongodb" or a SQL kind (postgresql, mysql, sqlserver, oracle) (unknown adapters count as MongoDB: get_connection reports them)."""
     profile = next((item for item in load_connection_profiles() if item["id"] == connection_id), None)
     return (profile or {}).get("type", "mongodb")
 
@@ -216,7 +216,7 @@ def test_adapter_values(ctx: SimpleNamespace, kind: str, uri: str, database: str
     """Test connection values typed in the adapter wizard (any adapter kind)."""
     if kind in sql_connector.SQL_TYPES:
         if not sql_connector.valid_url(kind, uri):
-            raise HTTPException(status_code=422, detail="Give a PostgreSQL URL: postgresql://user:password@host:5432/database")
+            raise HTTPException(status_code=422, detail=sql_connector.url_hint(kind))
         try:
             return sql_connector.test(kind, uri)
         except ConnectorQueryError as exc:

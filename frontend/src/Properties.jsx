@@ -5,6 +5,7 @@ import {
 } from './designModel.js';
 import { selectedIds } from './arrange.js';
 import { CrosstabProps, DatasetProps, ListProps, NoteProps, SubreportProps, TableProps } from './ComponentProps.jsx';
+import { componentFields } from './DatasetsEditor.jsx';
 
 /** Properties every element type has: with a multi-selection they are applied to all selected elements. */
 const COMMON_KEYS = new Set(['x', 'y', 'height', 'color', 'backColor', 'borderColor', 'borderWidth', 'lineStyle', 'borders', 'printWhenExpression',
@@ -35,7 +36,7 @@ const PATTERNS = [
   ['dd/MM/yyyy HH:mm', 'Date and time'], ['HH:mm', 'Time 14:05'], ['hh:mm a', 'Time 02:05 PM'],
 ];
 
-export default function Properties({ state, dispatch, notify, actions, onEditExpression, onOpenQuery }) {
+export default function Properties({ state, dispatch, notify, actions, onEditExpression, onOpenQuery, onOpenTable }) {
   const { design, report, selection } = state;
   const [shiftColumns, setShiftColumns] = useState(true);
   const [elementTab, setElementTab] = useState('');
@@ -215,12 +216,12 @@ export default function Properties({ state, dispatch, notify, actions, onEditExp
           </>
         )}
 
-        {tab === 'specific' && element.type === 'table' && <TableProps element={element} patch={patch} fields={fieldNames} />}
-        {tab === 'specific' && element.type === 'crosstab' && <CrosstabProps element={element} patch={patch} fields={fieldNames} />}
+        {tab === 'specific' && element.type === 'table' && <TableProps element={element} patch={patch} fields={componentFields(element, report, design)} onOpenEditor={() => onOpenTable?.(element.id)} />}
+        {tab === 'specific' && element.type === 'crosstab' && <CrosstabProps element={element} patch={patch} fields={componentFields(element, report, design)} />}
         {tab === 'specific' && element.type === 'list' && <ListProps />}
         {tab === 'specific' && element.type === 'subreport' && <SubreportProps element={element} patch={patch} report={report} design={design} />}
         {tab === 'specific' && element.type === 'note' && <NoteProps element={element} patch={patch} />}
-        {tab === 'dataset' && datasetTab && <DatasetProps element={element} patch={patch} fields={fieldNames} bandKey={bandKey} />}
+        {tab === 'dataset' && datasetTab && <DatasetProps element={element} patch={patch} fields={componentFields(element, report, design)} bandKey={bandKey} report={report} design={design} onOpenDatasets={() => onOpenQuery?.('datasets')} />}
 
         {tab === 'borders' && boxed && (
           <>

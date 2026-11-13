@@ -32,6 +32,7 @@ def register(app: FastAPI, ctx: SimpleNamespace) -> None:
     run_definition_file = ctx.run_definition_file
     sql_adapter = ctx.sql_adapter
     subreport_loader = ctx.subreport_loader
+    dataset_loader = ctx.dataset_loader
 
     @app.get("/api/admin/bootstrap", include_in_schema=False)
     def local_admin_bootstrap(request: Request) -> JSONResponse:
@@ -183,6 +184,10 @@ def register(app: FastAPI, ctx: SimpleNamespace) -> None:
             title = str(payload.get("title", "Report"))
             rows = rows[:2000]
             token = designer_render.SUBREPORT_LOADER.set(subreport_loader())  # Subreports run their published report
+            # Tables / Crosstabs with their own dataset: run it on the chosen adapter; without one, sample records
+            adapter = str(payload.get("connectionId") or "").strip()
+            dataset_token = designer_render.DATASET_LOADER.set(
+                dataset_loader(adapter, str(payload.get("reportId") or "preview")) if adapter else None)
             try:
                 if output_format == "pdf":
                     body = designer_render.render_design_pdf(design, title, columns, rows, raw_parameters, str(payload.get("reportId", "")))
@@ -196,6 +201,7 @@ def register(app: FastAPI, ctx: SimpleNamespace) -> None:
                     media_type = {"xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                                   "csv": "text/csv; charset=utf-8"}[output_format]
             finally:
+                designer_render.DATASET_LOADER.reset(dataset_token)
                 designer_render.SUBREPORT_LOADER.reset(token)
         except ValueError as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from None

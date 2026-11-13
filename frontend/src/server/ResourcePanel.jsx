@@ -3,9 +3,10 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Notice, formatWhen } from '../portal/Shell.jsx';
 import RunPanel, { FORMAT_LABELS } from './RunPanel.jsx';
+import { SchedulesList } from './Schedules.jsx';
 import { serverApi } from './serverApi.js';
 
-export const RESOURCE_TABS = [['run', 'Run'], ['overview', 'Overview'], ['parameters', 'Parameters'], ['datasource', 'Data Source'], ['query', 'Query'], ['history', 'History']];
+export const RESOURCE_TABS = [['run', 'Run'], ['overview', 'Overview'], ['parameters', 'Parameters'], ['datasource', 'Data Source'], ['query', 'Query'], ['schedules', 'Schedules'], ['versions', 'Versions'], ['history', 'History']];
 const ACTION_ICONS = { published: '⇪', edited: '✎', copied: '⧉', moved: '➜', uploaded: '⤒', deleted: '✕' };
 
 function OverviewTab({ info, onSave }) {
@@ -127,6 +128,52 @@ function QueryTab({ info, onSave }) {
   );
 }
 
+/** Every save of the report is kept; an older one can be looked at and made current again. */
+function VersionsTab({ info, onRestored }) {
+  const [versions, setVersions] = useState(null);
+  const [shown, setShown] = useState(null); // { version, definition }
+  const [error, setError] = useState('');
+  useEffect(() => { serverApi.versions(info.id).then((r) => setVersions(r.versions)).catch((e) => { setVersions([]); setError(e.message); }); }, [info.id]);
+  const show = async (number) => { try { setShown(await serverApi.version(info.id, number)); } catch (e) { setError(e.message); } };
+  const restore = async (number) => {
+    if (!window.confirm(`Make version ${number} the current version of “${info.title}”? The current state stays in the list as a version too.`)) return;
+    try { const result = await serverApi.restoreVersion(info.id, number); setVersions(result.versions); setShown(null); onRestored(result.report, number); } catch (e) { setError(e.message); }
+  };
+  if (versions === null) return <p className="muted">Loading…</p>;
+  return (
+    <div className="stack">
+      {error && <Notice message={{ kind: 'error', text: error }} />}
+      {!versions.length && <p className="muted">No versions yet: they start with the next publish or change.</p>}
+      <ul className="history versions">
+        {versions.map((v, index) => (
+          <li key={v.version}>
+            <span className="hist-icon">{index === 0 ? '●' : '○'}</span>
+            <b>v{v.version}</b> {v.action}{v.user ? <> by {v.user}</> : null}{index === 0 ? <span className="chip">current</span> : null}
+            <small>{formatWhen(v.savedAt)} · {v.title}</small>
+            <span className="row">
+              <button className="btn sm quiet" onClick={() => show(v.version)}>View</button>
+              {index > 0 && <button className="btn sm" onClick={() => restore(v.version)}>↺ Restore</button>}
+            </span>
+          </li>
+        ))}
+      </ul>
+      {shown && (
+        <div className="card version-view">
+          <div className="card-head"><div><p className="eyebrow">Version {shown.version}</p><h3>{shown.title}</h3></div><button className="btn quiet sm" onClick={() => setShown(null)}>✕</button></div>
+          <dl className="facts">
+            <dt>Saved</dt><dd>{formatWhen(shown.savedAt)} ({shown.action}{shown.user ? `, ${shown.user}` : ''})</dd>
+            <dt>Folder</dt><dd>{shown.folder}</dd>
+            <dt>Data adapter</dt><dd>{shown.definition.connectionId}</dd>
+            <dt>Fields</dt><dd>{(shown.definition.columns || []).join(', ')}</dd>
+            <dt>Parameters</dt><dd>{(shown.definition.parameters || []).map((p) => p.name).join(', ') || '—'}</dd>
+          </dl>
+          <details><summary className="muted">Query</summary><pre className="code-area">{shown.definition.querySource || JSON.stringify(shown.definition.pipeline || [], null, 2)}</pre></details>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function HistoryTab({ info }) {
   if (!info.history.length) return <p className="muted">No history yet (it starts with the next publish or change).</p>;
   return (
@@ -139,7 +186,7 @@ function HistoryTab({ info }) {
   );
 }
 
-export default function ResourcePanel({ reportId, tab, setTab, onChanged, menu }) {
+export default function ResourcePanel({ reportId, tab, setTab, onChanged, menu, scheduleInfo, onBackground, onBack }) {
   const [info, setInfo] = useState(null);
   const [message, setMessage] = useState(null);
   const load = useCallback(async () => {
@@ -148,7 +195,7 @@ export default function ResourcePanel({ reportId, tab, setTab, onChanged, menu }
   }, [reportId]);
   useEffect(() => { setInfo(null); load(); }, [load]);
 
-  if (!info) return <section className="card"><Notice message={message || { text: 'Loading…' }} /></section>;
+  if (!info) return <section className="card resource"><Notice message={message || { text: 'Loading…' }} /></section>;
   const save = async (changes) => {
     try {
       const next = await serverApi.edit(info.id, changes);
@@ -159,6 +206,7 @@ export default function ResourcePanel({ reportId, tab, setTab, onChanged, menu }
   };
   return (
     <section className="card resource">
+      {onBack && <button type="button" className="btn quiet sm only-mobile back-btn" onClick={onBack}>‹ All reports</button>}
       <div className="card-head">
         <div><p className="eyebrow">/{info.folder.split('/').join(' / ')}</p><h2>{info.title}</h2><p className="muted" style={{ fontSize: 12 }}><code>{info.id}</code> · {info.connection.name}</p></div>
         <button className="btn sm" onClick={(e) => menu(e, info)} title="Actions (also: right-click the report)">⋯ Actions</button>
@@ -167,11 +215,13 @@ export default function ResourcePanel({ reportId, tab, setTab, onChanged, menu }
         {RESOURCE_TABS.map(([id, label]) => <button key={id} className={tab === id ? 'on' : ''} onClick={() => setTab(id)}>{label}</button>)}
       </div>
       {message && <div style={{ marginBottom: 10 }}><Notice message={message} /></div>}
-      {tab === 'run' && <RunPanel report={info} />}
+      {tab === 'run' && <RunPanel report={info} onBackground={onBackground} />}
       {tab === 'overview' && <OverviewTab info={info} onSave={save} />}
       {tab === 'parameters' && <ParametersTab info={info} onSave={save} />}
       {tab === 'datasource' && <DataSourceTab info={info} onSave={save} />}
       {tab === 'query' && <QueryTab info={info} onSave={save} />}
+      {tab === 'schedules' && <SchedulesList report={info} info={scheduleInfo} onMessage={setMessage} />}
+      {tab === 'versions' && <VersionsTab info={info} onRestored={(report, number) => { setInfo(report); setMessage({ kind: 'ok', text: `Version ${number} is the current version again (the designer workspace copy too).` }); onChanged(); }} />}
       {tab === 'history' && <HistoryTab info={info} />}
     </section>
   );

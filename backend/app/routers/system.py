@@ -30,6 +30,19 @@ def register(app: FastAPI, ctx: SimpleNamespace) -> None:
             status = "not_configured" if exc.status_code == 503 and "set " in str(exc.detail).lower() else "unavailable"
             return JSONResponse({"status": status, "version": SERVICE_VERSION, "detail": exc.detail}, status_code=exc.status_code)
 
+    @app.get("/ready")
+    def ready() -> JSONResponse:
+        """Readiness for a load balancer: the storage (files or PostgreSQL) answers. MongoDB is checked by /health."""
+        from backend.app.storage.store import get_store
+        try:
+            store = get_store()
+            store.read_json("connections.json")
+        except Exception as exc:  # noqa: BLE001 - any storage failure means "not ready"
+            return JSONResponse({"status": "not_ready", "storage": "unavailable", "detail": type(exc).__name__}, status_code=503)
+        runner = ctx.job_runner
+        return JSONResponse({"status": "ready", "version": SERVICE_VERSION, "storage": store.backend,
+                             "scheduler": "on" if runner.scheduler_on else "off", "reports": len(ctx.reports_by_id)})
+
     @app.get("/reports/connections/{connection_id}/status")
     def report_connection_status(connection_id: str, request: Request) -> dict[str, Any]:
         """Is the data adapter of the report the user picked reachable? Used by the /ui runner."""

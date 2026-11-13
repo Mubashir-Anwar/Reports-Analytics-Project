@@ -339,18 +339,30 @@ export function DbLogo({ type = 'mongodb', size = 14 }) {
 const ADAPTER_TYPES = [
   { id: 'mongodb', name: 'MongoDB Connection', text: 'A MongoDB server (mongodb:// or mongodb+srv:// URL). Reports run their aggregation query on it.' },
   { id: 'postgresql', name: 'PostgreSQL', text: 'SQL SELECT queries on PostgreSQL (read-only), with $P{…} parameters like Jaspersoft Studio.' },
-  { id: 'mysql', name: 'MySQL / MariaDB', text: 'SQL SELECT queries on MySQL or MariaDB.', soon: true },
-  { id: 'sqlserver', name: 'Microsoft SQL Server', text: 'SQL SELECT queries on SQL Server.', soon: true },
-  { id: 'oracle', name: 'Oracle', text: 'SQL SELECT queries on Oracle Database.', soon: true },
+  { id: 'mysql', name: 'MySQL / MariaDB', text: 'SQL SELECT queries on MySQL 5.7+ or MariaDB (read-only transaction, time limit).' },
+  { id: 'sqlserver', name: 'Microsoft SQL Server', text: 'SQL SELECT queries on SQL Server (SQL login; every query is rolled back).' },
+  { id: 'oracle', name: 'Oracle', text: 'SQL SELECT queries on Oracle Database (read-only transaction; service name).' },
 ];
+
+/** Per SQL type: URL scheme, default port, what the database field is called, the SSL choices. */
+const SQL_KINDS = {
+  postgresql: { scheme: 'postgresql', port: '5432', database: 'Database', ssl: [['prefer', 'prefer (default)'], ['require', 'require'], ['verify-full', 'verify-full'], ['disable', 'disable']] },
+  mysql: { scheme: 'mysql', port: '3306', database: 'Database', ssl: [['prefer', 'off (default)'], ['require', 'require TLS']] },
+  sqlserver: { scheme: 'sqlserver', port: '1433', database: 'Database', ssl: null },
+  oracle: { scheme: 'oracle', port: '1521', database: 'Service name', ssl: null },
+};
 
 const adapterId = (name) => name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 39);
 
-/** PostgreSQL connection fields → postgresql://user:password@host:port/database?sslmode=… */
-function postgresUrl({ host, port, database, user, password, sslmode }) {
+/** SQL connection fields → scheme://user:password@host:port/database (+ ?sslmode=… / ?ssl=true) */
+export function sqlUrl(type, { host, port, database, user, password, sslmode }) {
+  const kind = SQL_KINDS[type] || SQL_KINDS.postgresql;
   if (!host.trim() || !database.trim()) return '';
   const auth = user.trim() ? `${encodeURIComponent(user.trim())}${password ? `:${encodeURIComponent(password)}` : ''}@` : '';
-  return `postgresql://${auth}${host.trim()}:${(port || '5432').toString().trim()}/${encodeURIComponent(database.trim())}${sslmode && sslmode !== 'prefer' ? `?sslmode=${sslmode}` : ''}`;
+  let suffix = '';
+  if (type === 'postgresql' && sslmode && sslmode !== 'prefer') suffix = `?sslmode=${sslmode}`;
+  if (type === 'mysql' && sslmode === 'require') suffix = '?ssl=true';
+  return `${kind.scheme}://${auth}${host.trim()}:${(port || kind.port).toString().trim()}/${encodeURIComponent(database.trim())}${suffix}`;
 }
 
 /** Like Jaspersoft Studio's "Data Adapter Wizard": 1) pick the type, 2) fill in the connection, Test, Finish. */
@@ -359,14 +371,20 @@ function AdapterWizard({ initial, folders, existingIds, onClose, onSaved, notify
   const [step, setStep] = useState(initial?.id || initial?.name ? 2 : 1); // edit / duplicate skip the type page
   const [type, setType] = useState(initial?.type || 'mongodb');
   const [form, setForm] = useState({ name: '', uri: '', database: '', folder: '', ...initial, id: initial?.id || '' });
-  const [pg, setPg] = useState({ host: 'localhost', port: '5432', database: initial?.database || '', user: '', password: '', sslmode: 'prefer' });
+  const [pg, setPg] = useState({ host: 'localhost', port: SQL_KINDS[initial?.type]?.port || '5432', database: initial?.database || '', user: '', password: '', sslmode: 'prefer' });
   const [result, setResult] = useState(null); // { ok, text }
   const [busy, setBusy] = useState('');
   const id = editing ? form.id : adapterId(form.name);
   const duplicateId = !editing && id && existingIds.includes(id);
   const typeInfo = ADAPTER_TYPES.find((t) => t.id === type) || ADAPTER_TYPES[0];
   const isSql = type !== 'mongodb';
-  const uri = isSql ? postgresUrl(pg) : form.uri.trim();
+  const sqlKind = SQL_KINDS[type] || SQL_KINDS.postgresql;
+  const uri = isSql ? sqlUrl(type, pg) : form.uri.trim();
+  const chooseType = (next) => {
+    setType(next);
+    // the port follows the database type unless the user typed another one
+    if (SQL_KINDS[next] && Object.values(SQL_KINDS).some((k) => k.port === pg.port)) setPg((current) => ({ ...current, port: SQL_KINDS[next].port, sslmode: 'prefer' }));
+  };
   const setPgField = (patch) => { setPg({ ...pg, ...patch }); setResult(null); };
 
   const test = async () => {
@@ -397,7 +415,7 @@ function AdapterWizard({ initial, folders, existingIds, onClose, onSaved, notify
               <li key={t.id} role="option" aria-selected={type === t.id} aria-disabled={t.soon || undefined}
                 className={t.soon ? 'soon' : type === t.id ? 'on' : ''}
                 title={t.soon ? 'Planned (see ARCHITECTURE.md §9.3)' : 'Double-click to continue'}
-                onClick={() => !t.soon && setType(t.id)} onDoubleClick={() => { if (!t.soon) { setType(t.id); setStep(2); } }}>
+                onClick={() => !t.soon && chooseType(t.id)} onDoubleClick={() => { if (!t.soon) { chooseType(t.id); setStep(2); } }}>
                 <span className="t-icon"><DbLogo type={t.id} size={26} /></span><span><b>{t.name}{t.soon ? <em className="soon-tag">coming next</em> : null}</b><small>{t.text}</small></span>
               </li>
             ))}
@@ -405,19 +423,21 @@ function AdapterWizard({ initial, folders, existingIds, onClose, onSaved, notify
         )}
         {step === 2 && (
           <div className="wizard-form">
-            <label className="modal-field">Name<input autoFocus value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder={isSql ? 'Finance PostgreSQL' : 'KMBL UAT MongoDB'} /></label>
+            <label className="modal-field">Name<input autoFocus value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder={isSql ? `Finance ${typeInfo.name.split(' ')[0]}` : 'KMBL UAT MongoDB'} /></label>
             {!editing && id && <small className={duplicateId ? 'err' : 'muted'}>ID: {id}{duplicateId ? ' — already used, choose another name' : ''}</small>}
             {isSql ? (
               <>
                 <div className="pg-grid">
                   <label className="modal-field">Host<input value={pg.host} onChange={(e) => setPgField({ host: e.target.value })} placeholder="db.example.com" /></label>
                   <label className="modal-field">Port<input value={pg.port} inputMode="numeric" onChange={(e) => setPgField({ port: e.target.value.replace(/[^0-9]/g, '') })} /></label>
-                  <label className="modal-field">Database<input value={pg.database} onChange={(e) => setPgField({ database: e.target.value })} placeholder="reports" /></label>
-                  <label className="modal-field">SSL
-                    <select value={pg.sslmode} onChange={(e) => setPgField({ sslmode: e.target.value })}>
-                      <option value="prefer">prefer (default)</option><option value="require">require</option><option value="verify-full">verify-full</option><option value="disable">disable</option>
-                    </select>
-                  </label>
+                  <label className="modal-field">{sqlKind.database}<input value={pg.database} onChange={(e) => setPgField({ database: e.target.value })} placeholder={type === 'oracle' ? 'FREEPDB1' : 'reports'} /></label>
+                  {sqlKind.ssl && (
+                    <label className="modal-field">SSL
+                      <select value={pg.sslmode} onChange={(e) => setPgField({ sslmode: e.target.value })}>
+                        {sqlKind.ssl.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+                      </select>
+                    </label>
+                  )}
                   <label className="modal-field">Username<input value={pg.user} autoComplete="off" onChange={(e) => setPgField({ user: e.target.value })} placeholder="report_reader" /></label>
                   <label className="modal-field">Password<input type="password" autoComplete="new-password" value={pg.password} onChange={(e) => setPgField({ password: e.target.value })} /></label>
                 </div>

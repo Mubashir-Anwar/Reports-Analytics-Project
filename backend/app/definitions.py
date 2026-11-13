@@ -4,7 +4,6 @@ from __future__ import annotations
 import base64
 import copy
 import importlib
-import json
 import math
 import os
 import pkgutil
@@ -40,7 +39,7 @@ from backend.app.queries.mongo_query import (
 )
 from backend.app.queries.sql_query import prepare_sql
 from backend.app.rendering import engine as designer_render
-from backend.app.storage.files import normalize_folder_path, report_definitions_directory
+from backend.app.storage.files import normalize_folder_path
 
 
 @dataclass(frozen=True)
@@ -292,6 +291,11 @@ def _dynamic_report(payload: dict[str, Any], source_path: Path | None = None) ->
     design = None
     if raw_design:
         design = designer_render.validate_design(raw_design, columns, parameter_names)
+        for dataset in design.get("datasets", []):  # each sub-dataset query must be valid and read-only too
+            try:
+                compile_dataset(dataset, report_id, connection_id)
+            except ValueError as exc:
+                raise ValueError(f"Dataset {dataset['name']}: {exc}") from None
     display_names = [layout["columnLabels"][column].casefold() for column in columns]
     if len(display_names) != len(set(display_names)):
         raise ValueError("Give every exported column a different display name")
@@ -377,6 +381,21 @@ def _dynamic_report(payload: dict[str, Any], source_path: Path | None = None) ->
     )
 
 
+def compile_dataset(dataset: dict[str, Any], report_id: str, connection_id: str) -> ReportDefinition:
+    """A sub-dataset (from a validated design) as a small runnable definition: same query checks as a report
+    (read-only, parameters defined). Its parameters are never asked from the user; the component passes them."""
+    return _dynamic_report({
+        "id": f"{report_id}__{dataset['name']}"[:80],
+        "title": dataset["name"],
+        "collection": dataset.get("collection", ""),
+        "connectionId": dataset.get("connectionId") or connection_id,
+        "queryLanguage": dataset["queryLanguage"],
+        "querySource": dataset["querySource"],
+        "columns": list(dataset["fields"]),
+        "parameters": [{"name": p["name"], "type": p["type"], "required": False} for p in dataset["parameters"]],
+    })
+
+
 def discover_reports() -> dict[str, ReportDefinition]:
     registry: dict[str, ReportDefinition] = {}
     if os.getenv("REPORTING_LOAD_BUILTIN_REPORTS", "false").lower() == "true":
@@ -391,26 +410,21 @@ def discover_reports() -> dict[str, ReportDefinition]:
             if definition.report_id in registry:
                 raise RuntimeError(f"Duplicate report_id: {definition.report_id}")
             registry[definition.report_id] = definition
-    directory = report_definitions_directory()
-    if directory.exists():
-        loaded_from: dict[str, Path] = {}
-        for path in sorted(directory.rglob("*.json")):
-            # One broken or hand-edited file must not take every other report (and the app) down.
-            try:
-                payload = json.loads(path.read_text(encoding="utf-8-sig"))
-                if not isinstance(payload, dict):
-                    raise ValueError("A report definition must be a JSON object")
-                definition = _dynamic_report(payload, path)
-            except (OSError, ValueError, TypeError, KeyError, AttributeError) as exc:
-                LOG.error("Skipping invalid report definition %s: %s", path, exc)
-                continue
-            if definition.report_id in loaded_from:
-                LOG.warning(
-                    "Duplicate report ID %s in %s and %s; using %s",
-                    definition.report_id, loaded_from[definition.report_id], path, path,
-                )
-            loaded_from[definition.report_id] = path
-            registry[definition.report_id] = definition
+    from backend.app.storage.store import get_store
+    loaded_from: dict[str, str] = {}
+    for key, payload in get_store().read_many("reports"):
+        # One broken or hand-edited file must not take every other report (and the app) down.
+        try:
+            if not isinstance(payload, dict):
+                raise ValueError("A report definition must be a JSON object")
+            definition = _dynamic_report(payload, Path(key))
+        except (OSError, ValueError, TypeError, KeyError, AttributeError) as exc:
+            LOG.error("Skipping invalid report definition %s: %s", key, exc)
+            continue
+        if definition.report_id in loaded_from:
+            LOG.warning("Duplicate report ID %s in %s and %s; using %s", definition.report_id, loaded_from[definition.report_id], key, key)
+        loaded_from[definition.report_id] = key
+        registry[definition.report_id] = definition
     return registry
 
 

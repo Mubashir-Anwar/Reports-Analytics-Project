@@ -39,6 +39,26 @@ export const serverApi = {
   move: (id, folder) => call(`/api/server/reports/${encodeURIComponent(id)}/move`, { method: 'POST', body: { folder } }),
   upload: (body) => call('/api/server/upload', { method: 'POST', body }),
   connections: () => call('/api/server/connections'),
+  // versions of a server report
+  versions: (id) => call(`/api/server/reports/${encodeURIComponent(id)}/versions`),
+  version: (id, number) => call(`/api/server/reports/${encodeURIComponent(id)}/versions/${number}`),
+  restoreVersion: (id, number) => call(`/api/server/reports/${encodeURIComponent(id)}/versions/${number}/restore`, { method: 'POST', body: {} }),
+  // schedules and background runs
+  scheduleInfo: () => call('/api/server/schedules/info'),
+  schedules: (reportId = '') => call(`/api/server/schedules${reportId ? `?reportId=${encodeURIComponent(reportId)}` : ''}`),
+  createSchedule: (body) => call('/api/server/schedules', { method: 'POST', body }),
+  updateSchedule: (id, body) => call(`/api/server/schedules/${encodeURIComponent(id)}`, { method: 'PUT', body }),
+  enableSchedule: (id, enabled) => call(`/api/server/schedules/${encodeURIComponent(id)}/enabled`, { method: 'POST', body: { enabled } }),
+  deleteSchedule: (id, outputs) => call(`/api/server/schedules/${encodeURIComponent(id)}${outputs ? '?outputs=true' : ''}`, { method: 'DELETE', body: {} }),
+  runScheduleNow: (id) => call(`/api/server/schedules/${encodeURIComponent(id)}/run`, { method: 'POST', body: {} }),
+  runInBackground: (id, parameters, format) => call(`/api/server/reports/${encodeURIComponent(id)}/background`, { method: 'POST', body: { parameters, format } }),
+  runs: (jobId = '') => call(`/api/server/runs${jobId ? `?jobId=${encodeURIComponent(jobId)}` : ''}`),
+  deleteRun: (id) => call(`/api/server/runs/${encodeURIComponent(id)}`, { method: 'DELETE', body: {} }),
+  async runFile(id) {
+    const response = await call(`/api/server/runs/${encodeURIComponent(id)}/file`, { raw: true });
+    const name = (response.headers.get('Content-Disposition') || '').match(/filename="([^"]+)"/)?.[1] || id;
+    return { blob: await response.blob(), name };
+  },
   async download(id) {
     const response = await call(`/api/server/reports/${encodeURIComponent(id)}/file`, { raw: true });
     return response.blob();

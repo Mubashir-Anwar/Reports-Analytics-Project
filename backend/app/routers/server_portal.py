@@ -5,7 +5,6 @@ import copy
 import json
 import os
 import secrets
-import time
 import xml.etree.ElementTree as ET
 from types import SimpleNamespace
 from typing import Any
@@ -14,9 +13,10 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse, Response
 
 from backend.app.connectors.profiles import load_connection_profiles
-from backend.app.constants import BOOTSTRAP_USERNAME, OUTPUT_FORMATS, SESSION_COOKIE
+from backend.app.constants import BOOTSTRAP_USERNAME, OUTPUT_FORMATS, REPORT_ID_PATTERN, SESSION_COOKIE, WORKSPACE_META
 from backend.app.logs import LOG
 from backend.app.mrd import parse_report_definition_xml, render_report_definition_xml
+from backend.app.security import shared_state
 from backend.app.security.access import client_address
 from backend.app.security.users import (
     bootstrap_login_active,
@@ -51,7 +51,6 @@ def register(app: FastAPI, ctx: SimpleNamespace) -> None:
     run_definition_file = ctx.run_definition_file
     save_report_payload = ctx.save_report_payload
     session_view = ctx.session_view
-    state = ctx.state
     sync_workspace_copy = ctx.sync_workspace_copy
 
     @app.post("/api/server/login")
@@ -61,10 +60,7 @@ def register(app: FastAPI, ctx: SimpleNamespace) -> None:
         username = str(payload.get("username", "")).strip()
         password = str(payload.get("password", ""))
         client = client_address(request)
-        window = time.time() - 600
-        failures = [stamp for stamp in state["login_failures"].get(client, []) if stamp > window]
-        state["login_failures"][client] = failures
-        if len(failures) >= 10:
+        if shared_state.recent_failures(client) >= 10:  # counted on every instance
             raise HTTPException(status_code=429, detail="Too many failed sign-ins; wait a few minutes and try again")
         user = find_user(username) if username else None
         session_user, version, bootstrap = "", 0, False
@@ -75,10 +71,10 @@ def register(app: FastAPI, ctx: SimpleNamespace) -> None:
             if admin_token and password and secrets.compare_digest(password, admin_token):
                 session_user, bootstrap = BOOTSTRAP_USERNAME, True
         if not session_user:
-            failures.append(time.time())
+            shared_state.record_failure(client)
             LOG.warning("Failed /server sign-in for user %r from %s", username[:64], client)
             raise HTTPException(status_code=401, detail="Wrong username or password")
-        state["login_failures"].pop(client, None)
+        shared_state.clear_failures(client)
         if user is not None and not bootstrap:
             users = load_users()
             for item in users:
@@ -97,7 +93,7 @@ def register(app: FastAPI, ctx: SimpleNamespace) -> None:
     def server_logout(request: Request) -> JSONResponse:
         session = current_session(request)
         if session is not None:
-            state["revoked_sessions"].add(session["nonce"])
+            shared_state.revoke_session(session["nonce"], session_lifetime_seconds())  # on every instance
             LOG.info("User %s signed out of /server", session["username"])
         response = JSONResponse({"status": "signed-out"})
         response.delete_cookie(SESSION_COOKIE, path="/")
@@ -209,7 +205,7 @@ def register(app: FastAPI, ctx: SimpleNamespace) -> None:
                 payload["queryLanguage"] = changes["queryLanguage"]
             if "collection" in changes:
                 payload["collection"] = str(changes["collection"] or "").strip()
-        saved = save_report_payload(payload, expected_id=report_id)
+        saved = save_report_payload(payload, expected_id=report_id, action="edited", user=session["username"])
         changed = sorted(k for k in changes if k in ("title", "description", "formats", "defaultFormat", "connectionId", "parameters", "querySource"))
         sync_workspace_copy(report_id, lambda data: data.update({k: copy.deepcopy(saved.editor_config.get(k)) for k in
                                                                 ("title", "description", "formats", "defaultFormat", "connectionId",
@@ -233,7 +229,7 @@ def register(app: FastAPI, ctx: SimpleNamespace) -> None:
             raise HTTPException(status_code=409, detail=f"A report with the ID {new_id} already exists")
         payload["id"] = new_id
         payload["title"] = str(body.get("title") or f"{definition.title} (copy)")[:300]
-        saved = save_report_payload(payload)
+        saved = save_report_payload(payload, action="copied", user=session["username"])
         add_saved_folder(payload["folder"])
         record_history(new_id, "copied", session["username"], f"from {report_id}")
         return {"report": resource_details(saved, session)}
@@ -249,7 +245,7 @@ def register(app: FastAPI, ctx: SimpleNamespace) -> None:
             raise HTTPException(status_code=422, detail=str(exc)) from None
         before = definition.editor_config.get("folder", "General")
         payload = {**copy.deepcopy(definition.editor_config), "folder": folder}
-        saved = save_report_payload(payload, expected_id=report_id)
+        saved = save_report_payload(payload, expected_id=report_id, action="moved", user=session["username"])
         add_saved_folder(folder)
         record_history(report_id, "moved", session["username"], f"{before} → {folder}")
         return {"report": resource_details(saved, session)}
@@ -300,7 +296,7 @@ def register(app: FastAPI, ctx: SimpleNamespace) -> None:
         exists = report_id in reports_by_id
         if exists and body.get("replace") is not True:
             raise HTTPException(status_code=409, detail=f"{report_id} is already on the server; tick “Replace” or give it a new ID")
-        saved = save_report_payload(payload, expected_id=report_id if exists else None)
+        saved = save_report_payload(payload, expected_id=report_id if exists else None, action="uploaded", user=session["username"])
         add_saved_folder(payload["folder"])
         record_history(report_id, "uploaded", session["username"], f"{'replaced' if exists else 'new'} in {payload['folder']}")
         return {"report": resource_details(saved, session), "replaced": exists, "warnings": warnings}
@@ -309,3 +305,41 @@ def register(app: FastAPI, ctx: SimpleNamespace) -> None:
     def server_connections(request: Request) -> dict[str, Any]:
         require_session(request, "designer")
         return {"connections": [connection_summary(item["id"]) for item in load_connection_profiles()]}
+
+    # ---------------------------------------------------------------- versions (every save of a server report)
+    @app.get("/api/server/reports/{report_id}/versions")
+    def server_report_versions(report_id: str, request: Request) -> dict[str, Any]:
+        require_session(request, "designer")
+        published_or_404(report_id)
+        return {"versions": ctx.list_versions(report_id)}
+
+    @app.get("/api/server/reports/{report_id}/versions/{number}")
+    def server_report_version(report_id: str, number: int, request: Request) -> dict[str, Any]:
+        require_session(request, "designer")
+        found = ctx.get_version(report_id, number) if REPORT_ID_PATTERN.fullmatch(report_id) else None
+        if not found:
+            raise HTTPException(status_code=404, detail="Version not found")
+        return found
+
+    @app.post("/api/server/reports/{report_id}/versions/{number}/restore")
+    def server_restore_version(report_id: str, number: int, request: Request) -> dict[str, Any]:
+        """Make an older version the current one again (as a new version; nothing is lost)."""
+        session = require_session(request, "designer")
+        require_json_request(request)
+        current = published_or_404(report_id)
+        found = ctx.get_version(report_id, number)
+        if not found or not isinstance(found.get("definition"), dict):
+            raise HTTPException(status_code=404, detail="Version not found")
+        payload = copy.deepcopy(found["definition"])
+        payload["folder"] = (current.editor_config or {}).get("folder", payload.get("folder", "General"))  # restoring does not move it
+        saved = save_report_payload(payload, expected_id=report_id, action=f"restored version {number}", user=session["username"])
+
+        def replace_draft(data: dict[str, Any]) -> None:
+            meta = data.get(WORKSPACE_META)
+            data.clear()
+            data.update(copy.deepcopy(saved.editor_config))
+            if meta:
+                data[WORKSPACE_META] = meta
+        sync_workspace_copy(report_id, replace_draft)
+        record_history(report_id, "restored", session["username"], f"version {number}")
+        return {"report": resource_details(saved, session), "versions": ctx.list_versions(report_id)}

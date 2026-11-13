@@ -217,4 +217,49 @@ docker run -d --name reporting -p 8000:8000 -v reporting-data:/data --env-file .
 * The `default` data adapter comes from `MONGODB_URI` / `MONGODB_DATABASE`; add more on `/admin → Data sources`.
 * The container's health check only tests that the process answers (`backend/app/healthcheck.py`). Use the JSON of
   `GET /health` (status `ok` / `unavailable`) for readiness and alerting about MongoDB.
-* Keep `--workers 1` (the image default) until the storage moves to a database (ARCHITECTURE.md §9).
+* `GET /ready` answers 200 when the storage works (files or PostgreSQL) — use it for the load balancer.
+* With `REPORTING_STORAGE=files` keep one instance and `--workers 1`. For several instances use the PostgreSQL
+  storage (below).
+
+## Several instances: PostgreSQL storage, HTTPS and a load balancer (`deploy/`)
+
+`deploy/docker-compose.yml` starts PostgreSQL (the service's own storage), two app instances and nginx (HTTPS,
+load balancing, 25 MB uploads):
+
+```bash
+cp deploy/.env.example deploy/.env          # fill in the secrets; never commit deploy/.env
+mkdir -p deploy/certs                        # fullchain.pem + privkey.pem
+docker compose -f deploy/docker-compose.yml --env-file deploy/.env up -d --build
+```
+
+Moving an existing `data/` folder into PostgreSQL (one time; the folder is not changed):
+
+```bash
+REPORTING_DATA_DIR=./data REPORTING_STORAGE_URL=postgresql://reporting:PASSWORD@host:5432/reporting python -m backend.app.storage.migrate
+```
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `REPORTING_STORAGE` | `files` | `files` (the data directory) or `postgresql` |
+| `REPORTING_STORAGE_URL` | — | `postgresql://…` for the storage database (not a report data adapter) |
+| `REPORTING_SESSION_SECRET` | random per process | **Set it, the same in every instance**, or sign-ins only work on one |
+| `REPORTING_SCHEDULER` | `on` | Run the report scheduler here; set `off` on every instance but one |
+| `REPORTING_SCHEDULER_POLL` / `REPORTING_JOB_WORKERS` | `20` s / `2` | How often schedules are checked / reports made at the same time |
+| `REPORTING_TIMEZONE` | `UTC` | Default time zone for new schedules and relative dates (e.g. `Asia/Karachi`) |
+| `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASSWORD`, `SMTP_FROM`, `SMTP_SECURITY` | — / 587 / — / — / — / `starttls` | E-mail for scheduled reports |
+| `REPORTING_MAX_BODY_MB` | `25` | Larger request bodies get 413 |
+| `REPORTING_HSTS` | `false` | Send Strict-Transport-Security on HTTPS (directly or via a trusted proxy) |
+| `REPORTING_TRUSTED_PROXIES` | — | Proxies whose `X-Forwarded-For` / `X-Forwarded-Proto` are believed |
+| `REPORTING_SECURE_COOKIES` | `false` | Session cookie only over HTTPS (set `true` behind an HTTPS proxy) |
+
+What every instance shares through the storage: reports, drafts, folders, data adapters and their secrets, users,
+history, versions, schedules, run outputs, the audit log, sign-outs and the sign-in limit. Each instance notices a
+publish or delete made by another within about three seconds. Service logs stay per container.
+
+**Security headers.** Every page gets a Content-Security-Policy (only this site's scripts; inline styles; data/blob
+images; blob frames for the PDF preview), `X-Frame-Options: SAMEORIGIN`, `X-Content-Type-Options: nosniff`,
+`Referrer-Policy: same-origin` and a Permissions-Policy. Put the service behind HTTPS and set `REPORTING_HSTS=true`.
+
+**Data adapters for SQL databases.** Give each adapter a database user that can only `SELECT`. PostgreSQL, MySQL and
+Oracle queries run in a read-only transaction; SQL Server has no such mode, so every query is rolled back after it
+is read — a SELECT-only login is the real protection there.

@@ -34,6 +34,11 @@ DATASET_TYPES = {"table", "crosstab", "list", "subreport"}
 TABLE_FOOTERS = {"none", "text", "Sum", "Count", "Average", "Min", "Max"}
 CROSSTAB_CALCULATIONS = {"Sum", "Count", "Average", "Min", "Max"}
 MAX_SUBREPORT_DEPTH = 2
+# Sub-datasets (Jasper subDataset): a Table or Crosstab can read its own query instead of the report's records.
+DATASET_COMPONENTS = {"table", "crosstab"}
+MAX_DATASETS = 10
+DATASET_LANGUAGES = {"aggregation-json", "mongosh", "javascript", "python", "sql"}
+DATASET_PARAMETER_TYPES = {"string", "integer", "number", "date", "boolean"}
 # Jasper "When No Data Type". Auto = the No Data band when there is one, else all sections without Detail.
 NO_DATA_TYPES = {"Auto", "NoPages", "BlankPage", "AllSectionsNoDetail", "NoDataSection"}
 BARCODE_TYPES = {"qr", "code128", "code39", "ean13"}
@@ -370,11 +375,14 @@ def validate_design(design: Any, columns: list[str], parameter_names: set[str]) 
             raise ValueError("The sort field does not exist")
         sort_spec.append({"field": str(item["field"]), "order": "Descending" if item.get("order") == "Descending" else "Ascending"})
 
+    datasets = _clean_datasets(design.get("datasets"))
+    datasets_by_name = {d["name"]: d for d in datasets}
+
     counter = {"elements": 0, "image_bytes": 0}
 
-    def check_expression(expression: str, where: str) -> None:
+    def check_expression(expression: str, where: str, fields: set[str] | None = None) -> None:
         for kind, name in tokens_in(expression):
-            known = {"F": field_names, "P": parameter_names, "V": variable_names}[kind]
+            known = {"F": field_names if fields is None else fields, "P": parameter_names, "V": variable_names}[kind]
             if name not in known:
                 raise ValueError(f"{where}: ${kind}{{{name}}} is not defined")
 
@@ -474,14 +482,30 @@ def validate_design(design: Any, columns: list[str], parameter_names: set[str]) 
             element["text"] = str(raw.get("text", ""))[:2000]
         elif kind in DATASET_TYPES:
             where = f"{band_name} {kind}"
-            element["scope"] = "group" if raw.get("scope") == "group" else "report"
+            own = field_names  # the fields this component's expressions may use
+            dataset_name = str(raw.get("datasetName", "") or "") if kind in DATASET_COMPONENTS else ""
+            element["datasetName"] = dataset_name
+            element["datasetParameters"] = []
+            if dataset_name:
+                dataset = datasets_by_name.get(dataset_name)
+                if dataset is None:
+                    raise ValueError(f"{where}: the dataset {dataset_name!r} does not exist (Dataset and Query -> Datasets)")
+                own = set(dataset["fields"])
+                declared = {p["name"] for p in dataset["parameters"]}
+                for item in (raw.get("datasetParameters") or [])[:30]:
+                    if not isinstance(item, dict) or str(item.get("name", "")) not in declared:
+                        raise ValueError(f"{where}: each dataset parameter must be one of the dataset's parameters")
+                    expression = str(item.get("expression", "") or "")[:500]
+                    check_expression(expression, f"{where} dataset parameter {item['name']}")  # main report scope
+                    element["datasetParameters"].append({"name": str(item["name"]), "expression": expression})
+            element["scope"] = "group" if raw.get("scope") == "group" and not dataset_name else "report"
             element["filterExpression"] = str(raw.get("filterExpression", "") or "").strip()[:500]
             if element["filterExpression"]:
                 if not jexpr.check_syntax(element["filterExpression"]):
                     raise ValueError(f"{where}: the filter expression could not be understood")
-                check_expression(element["filterExpression"], f"{where} filter")
+                check_expression(element["filterExpression"], f"{where} filter", own)
             sort_field = str(raw.get("sortField", "") or "")
-            if sort_field and sort_field not in field_names:
+            if sort_field and sort_field not in own:
                 raise ValueError(f"{where}: the sort field {sort_field} does not exist")
             element["sortField"] = sort_field
             element["sortOrder"] = "Descending" if raw.get("sortOrder") == "Descending" else "Ascending"
@@ -502,7 +526,7 @@ def validate_design(design: Any, columns: list[str], parameter_names: set[str]) 
                     if not isinstance(col, dict):
                         raise ValueError(f"{where}: each column must be a JSON object")
                     expression = str(col.get("expression", ""))[:1000]
-                    check_expression(expression, f"{where} column {index + 1}")
+                    check_expression(expression, f"{where} column {index + 1}", own)
                     footer = col.get("footer") if col.get("footer") in TABLE_FOOTERS else "none"
                     columns_out.append({
                         "header": str(col.get("header", ""))[:200],
@@ -520,9 +544,9 @@ def validate_design(design: Any, columns: list[str], parameter_names: set[str]) 
                 row_field, column_field = str(raw.get("rowField", "")), str(raw.get("columnField", ""))
                 measure = str(raw.get("measureField", "") or "")
                 calculation = raw.get("calculation") if raw.get("calculation") in CROSSTAB_CALCULATIONS else "Sum"
-                if row_field not in field_names or column_field not in field_names:
+                if row_field not in own or column_field not in own:
                     raise ValueError(f"{where}: choose existing fields for the rows and the columns")
-                if calculation != "Count" and measure not in field_names:
+                if calculation != "Count" and measure not in own:
                     raise ValueError(f"{where}: choose an existing measure field (or the Count calculation)")
                 element.update({
                     "rowField": row_field, "columnField": column_field, "measureField": measure, "calculation": calculation,
@@ -578,7 +602,48 @@ def validate_design(design: Any, columns: list[str], parameter_names: set[str]) 
         check_expression(filter_expression, "Report filter expression")
 
     return {"version": 1, "page": page, "calculatedFields": calculated, "groups": groups,
-            "variables": variables, "sort": sort_spec, "filterExpression": filter_expression, "bands": bands}
+            "variables": variables, "sort": sort_spec, "filterExpression": filter_expression, "datasets": datasets,
+            "bands": bands}
+
+
+def _clean_datasets(raw: Any) -> list[dict[str, Any]]:
+    """Jasper sub-datasets: a name, an optional own data adapter, a query, its fields and its parameters.
+    The query itself is checked (read-only, parameters defined) by definitions.compile_dataset when it runs or is saved."""
+    if raw in (None, ""):
+        return []
+    if not isinstance(raw, list) or len(raw) > MAX_DATASETS:
+        raise ValueError(f"datasets must be a list of at most {MAX_DATASETS} datasets")
+    out: list[dict[str, Any]] = []
+    for item in raw:
+        if not isinstance(item, dict):
+            raise ValueError("Each dataset must be a JSON object")
+        name = str(item.get("name", ""))
+        if not NAME_RE.fullmatch(name) or any(d["name"] == name for d in out):
+            raise ValueError(f"A dataset needs a valid, unique name: {name!r}")
+        language = str(item.get("queryLanguage", "mongosh")).lower()
+        if language not in DATASET_LANGUAGES:
+            raise ValueError(f"Dataset {name}: unknown query language {language!r}")
+        connection = str(item.get("connectionId", "") or "").strip()
+        if connection and not re.fullmatch(r"[A-Za-z0-9_-]{1,64}", connection):
+            raise ValueError(f"Dataset {name}: invalid data adapter ID")
+        fields = item.get("fields") or []
+        if (not isinstance(fields, list) or not fields or len(fields) > 200
+                or not all(isinstance(f, str) and 0 < len(f) <= 200 for f in fields)):
+            raise ValueError(f"Dataset {name}: read its fields first (at least one field)")
+        params: list[dict[str, str]] = []
+        for p in (item.get("parameters") or [])[:30]:
+            p_name = str(p.get("name", "")) if isinstance(p, dict) else ""
+            if not NAME_RE.fullmatch(p_name) or any(x["name"] == p_name for x in params):
+                raise ValueError(f"Dataset {name}: each parameter needs a valid, unique name")
+            p_type = str(p.get("type", "string")).lower()
+            params.append({"name": p_name, "type": p_type if p_type in DATASET_PARAMETER_TYPES else "string"})
+        out.append({
+            "name": name, "connectionId": connection, "queryLanguage": language,
+            "collection": "" if language == "sql" else str(item.get("collection", "") or "").strip()[:200],
+            "querySource": str(item.get("querySource", "") or "")[:100_000],
+            "fields": list(dict.fromkeys(fields)), "parameters": params,
+        })
+    return out
 
 
 # ----------------------------------------------------------------- expressions
@@ -721,6 +786,13 @@ def _font_names() -> tuple[str, str, str, str]:
 # Set by the service around a render: loader(report_id, parameters) -> {"design", "title", "columns", "rows", "parameters"}
 # for Subreport elements (the subreport runs its own query). Without a loader a subreport prints a placeholder.
 SUBREPORT_LOADER: contextvars.ContextVar = contextvars.ContextVar("subreport_loader", default=None)
+# Set by the service around a render: loader(dataset, parameter_values) -> list of records, for Tables / Crosstabs
+# with their own dataset. Without a loader (designer preview without a data adapter) they show sample records.
+DATASET_LOADER: contextvars.ContextVar = contextvars.ContextVar("dataset_loader", default=None)
+
+
+class DatasetError(Exception):
+    """A sub-dataset could not be read; the component prints the message instead of failing the report."""
 # Not printed by themselves: break (splits the band), note (designer only), and components that expand into rows.
 NOT_DRAWN = {"break", "note"} | DATASET_TYPES
 
@@ -1011,10 +1083,12 @@ class _Render:
         return TOKEN_RE.sub(lambda m: format_value(resolve(m.group(1), m.group(2)), ""), expression)
 
     def dataset_rows(self, element: dict[str, Any], row: dict[str, Any] | None, level: int | None) -> list[dict[str, Any]]:
-        """Records of a component: all report rows, or (scope "group") only the rows of the current group;
-        then the filter expression and the sort order."""
+        """Records of a component: its own dataset's records, all report rows, or (scope "group") only the rows of the
+        current group; then the filter expression and the sort order."""
         rows = self.rows
-        if element.get("scope") == "group" and level is not None and row is not None and self.groups:
+        if element.get("datasetName"):
+            rows = self.subdataset_rows(element, row)
+        elif element.get("scope") == "group" and level is not None and row is not None and self.groups:
             keys = [g["field"] for g in self.groups[:level + 1]]
             rows = [r for r in rows if all(r.get(k) == row.get(k) for k in keys)]
         expression = element.get("filterExpression")
@@ -1035,10 +1109,48 @@ class _Render:
             rows = present + missing
         return rows
 
+    def subdataset_rows(self, element: dict[str, Any], row: dict[str, Any] | None) -> list[dict[str, Any]]:
+        """Run the component's sub-dataset (Jasper datasetRun). Parameters: the mapped expressions; a dataset
+        parameter that is not mapped takes the report parameter of the same name, when there is one."""
+        dataset = next((d for d in self.design.get("datasets", []) if d["name"] == element["datasetName"]), None)
+        if dataset is None:
+            raise DatasetError(f"the dataset {element['datasetName']} does not exist")
+        loader = DATASET_LOADER.get()
+        if loader is None:
+            return sample_rows(dataset["fields"], 6)
+        values: dict[str, Any] = {}
+        mapped = {item["name"]: item["expression"] for item in element.get("datasetParameters", [])}
+        for spec in dataset["parameters"]:
+            if mapped.get(spec["name"]):
+                value = self.raw_value(mapped[spec["name"]], row)
+            else:
+                value = self.parameters.get(spec["name"])
+            if isinstance(value, (date, datetime)):
+                value = value.isoformat()
+            if value is not None and value != "":
+                values[spec["name"]] = value
+        try:
+            found = loader(dataset, values)
+        except DatasetError:
+            raise
+        except Exception as exc:  # noqa: BLE001 - shown in the report instead of failing the whole report
+            raise DatasetError(str(exc)) from None
+        return [{field: item.get(field) for field in dataset["fields"]} for item in found]
+
     def expand(self, element, band, row, level):
         """Segments to print for a component: (kind, band, row, engine, level); kind "header" repeats on new pages."""
         kind = element["type"]
-        if kind == "table":
+        if kind in DATASET_COMPONENTS and element.get("datasetName"):
+            try:
+                segments = list(self._table_segments(element, row, level) if kind == "table"
+                                else self._crosstab_segments(element, row, level))
+            except DatasetError as exc:
+                text = f"Dataset {element['datasetName']}: {exc}"
+                segments = [("row", {"height": 14, "elements": [
+                    _cell("staticText", element["x"], 0, element["width"], 14, element, text=text, italic=True,
+                          color="#b91c1c")]}, None, self, None)]
+            yield from segments
+        elif kind == "table":
             yield from self._table_segments(element, row, level)
         elif kind == "crosstab":
             yield from self._crosstab_segments(element, row, level)

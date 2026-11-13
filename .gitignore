@@ -19,3 +19,7 @@ data/workspace/
 data/history/
 data/audit/
 data/logs/
+
+# deployment secrets and certificates
+deploy/.env
+deploy/certs/
