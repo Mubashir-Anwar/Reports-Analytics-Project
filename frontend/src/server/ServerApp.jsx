@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import ContextMenu from '../ContextMenu.jsx';
 import { confirmFolderDelete } from '../folderDelete.js';
 import { Notice, Topbar, downloadBlob } from '../portal/Shell.jsx';
+import PermissionsDialog from './PermissionsDialog.jsx';
 import ResourcePanel from './ResourcePanel.jsx';
 import { RunsList, SchedulesList } from './Schedules.jsx';
 import UploadDialog from './UploadDialog.jsx';
@@ -55,18 +56,24 @@ function Repository({ user, onUser }) {
   const [uploading, setUploading] = useState(false);
   const [version, setVersion] = useState(0); // reloads the resource panel after a change
   const [view, setView] = useState('repository'); // repository | schedules | runs
+  const [folderAccess, setFolderAccess] = useState({}); // folder → 'none' | 'run' | 'manage' for this user
+  const [permFolder, setPermFolder] = useState(null); // folder whose Permissions dialog is open ('' = root)
   const [scheduleInfo, setScheduleInfo] = useState(null);
   const [runsVersion, setRunsVersion] = useState(0);
   useEffect(() => { serverApi.scheduleInfo().then(setScheduleInfo).catch(() => setScheduleInfo(null)); }, []);
   const showMessage = useCallback((m) => setMessage(m), []);
   const designer = roleAtLeast(user, 'designer');
   const admin = roleAtLeast(user, 'admin');
+  // folder permissions: what this user may do with a report / in a folder (the server checks it again)
+  const canManage = (r) => designer && (!r?.access || r.access === 'manage');
+  const canManageFolder = (path) => admin || (designer && (!path ? true : (folderAccess[path] || 'manage') === 'manage'));
 
   const load = useCallback(async () => {
     try {
       const data = await serverApi.repository();
       setFolders(data.folders);
       setReports(data.reports);
+      setFolderAccess(data.folderAccess || {});
       onUser(data.user);
       setFolder((current) => (current && !data.folders.includes(current) ? '' : current));
     } catch (error) { if (error.status !== 401) setMessage({ text: error.message, kind: 'error' }); }
@@ -139,16 +146,16 @@ function Repository({ user, onUser }) {
   const reportMenu = (r) => [
     { header: `${r.title} (${r.id})` },
     { label: 'Run', icon: '▶', onClick: () => open(r.id, 'run') },
-    { label: 'Edit', icon: '✎', disabled: !designer, hint: designer ? '' : 'Needs a designer account', onClick: () => open(r.id, 'overview') },
+    { label: 'Edit', icon: '✎', disabled: !canManage(r), hint: canManage(r) ? '' : designer ? 'Needs the Manage permission on this folder' : 'Needs a designer account', onClick: () => open(r.id, 'overview') },
     { label: 'Schedule…', icon: '⏰', onClick: () => { setView('repository'); open(r.id, 'schedules'); } },
     { label: 'Parameters', icon: '$P', onClick: () => open(r.id, 'parameters') },
     { label: 'Data Source', icon: '⛁', onClick: () => open(r.id, 'datasource') },
-    { label: 'Open in Designer', icon: '🎨', disabled: !designer, onClick: () => openInDesigner(r) },
-    { label: 'Download (.mrd)', icon: '⤓', disabled: !designer, onClick: () => download(r) },
+    { label: 'Open in Designer', icon: '🎨', disabled: !canManage(r), onClick: () => openInDesigner(r) },
+    { label: 'Download (.mrd)', icon: '⤓', disabled: !canManage(r), onClick: () => download(r) },
     '-',
     { label: 'Copy', icon: '⧉', shortcut: 'Ctrl+C', disabled: !designer, onClick: () => { setClipboard({ mode: 'copy', id: r.id, title: r.title }); setMessage({ text: `“${r.title}” copied — right-click a folder → Paste.`, kind: 'ok' }); } },
-    { label: 'Cut', icon: '✂', shortcut: 'Ctrl+X', disabled: !designer, onClick: () => { setClipboard({ mode: 'cut', id: r.id, title: r.title }); setMessage({ text: `“${r.title}” cut — right-click a folder → Paste to move it.`, kind: 'ok' }); } },
-    { label: 'Paste into this folder', icon: '📋', disabled: !designer || !clipboard, onClick: () => paste(r.folder) },
+    { label: 'Cut', icon: '✂', shortcut: 'Ctrl+X', disabled: !canManage(r), onClick: () => { setClipboard({ mode: 'cut', id: r.id, title: r.title }); setMessage({ text: `“${r.title}” cut — right-click a folder → Paste to move it.`, kind: 'ok' }); } },
+    { label: 'Paste into this folder', icon: '📋', disabled: !canManageFolder(r.folder) || !clipboard, onClick: () => paste(r.folder) },
     '-',
     { label: 'History', icon: '🕘', onClick: () => open(r.id, 'history') },
     { label: 'Properties', icon: '⚙', onClick: () => open(r.id, 'overview') },
@@ -156,10 +163,11 @@ function Repository({ user, onUser }) {
   ];
   const folderMenu = (path) => [
     { header: path ? `/${path}` : 'Repository' },
-    { label: 'Add Resource: upload .mrd / .jrxml', icon: '⤒', disabled: !designer, onClick: () => { setFolder(path); setUploading(true); } },
-    { label: 'New folder', icon: '📁', disabled: !designer, onClick: () => createFolder(path) },
-    { label: clipboard ? `Paste “${clipboard.title}”${clipboard.mode === 'cut' ? ' (move)' : ''}` : 'Paste', icon: '📋', disabled: !designer || !clipboard, onClick: () => paste(path) },
+    { label: 'Add Resource: upload .mrd / .jrxml', icon: '⤒', disabled: !canManageFolder(path), onClick: () => { setFolder(path); setUploading(true); } },
+    { label: 'New folder', icon: '📁', disabled: !canManageFolder(path), onClick: () => createFolder(path) },
+    { label: clipboard ? `Paste “${clipboard.title}”${clipboard.mode === 'cut' ? ' (move)' : ''}` : 'Paste', icon: '📋', disabled: !canManageFolder(path) || !clipboard, onClick: () => paste(path) },
     '-',
+    { label: 'Permissions…', icon: '🔒', disabled: !admin, hint: admin ? 'Who may see, run or change this folder' : 'Needs an admin account', onClick: () => setPermFolder(path) },
     { label: 'Delete folder…', icon: '✕', danger: true, disabled: !admin || !path || path === 'General', hint: !admin ? 'Deleting needs an admin account' : path === 'General' ? 'General cannot be deleted' : 'Also deletes its subfolders and reports (after you confirm)', onClick: () => deleteFolder(path) },
   ];
   const showMenu = (items) => (event) => { event.preventDefault(); event.stopPropagation(); setMenu({ x: event.clientX, y: event.clientY, items }); };
@@ -213,6 +221,7 @@ function Repository({ user, onUser }) {
             <div><p className="eyebrow">/ {folder ? folder.split('/').join(' / ') : ''}</p><h2>{folder ? folder.split('/').pop() : 'All reports'}</h2></div>
             <div className="row">
               {designer && clipboard && <button className="btn sm" onClick={() => paste(folder)} title="Paste here">📋 Paste</button>}
+              {admin && <button className="btn sm" onClick={() => setPermFolder(folder)} title="Who may see, run or change this folder">🔒 Permissions</button>}
               {admin && folder && folder !== 'General' && <button className="btn danger sm" onClick={() => deleteFolder()}>Delete folder</button>}
             </div>
           </div>
@@ -241,6 +250,7 @@ function Repository({ user, onUser }) {
           : <section className="card resource hide-mobile" style={{ textAlign: 'center', padding: '48px 18px' }}><div style={{ fontSize: 30, opacity: 0.5 }}>▤</div><h2>Choose a report</h2><p className="muted">Run it, or check its parameters, data source, query and history. Right-click for more.</p></section>}
       </div>}
       <ContextMenu menu={menu} onClose={() => setMenu(null)} />
+      {permFolder !== null && <PermissionsDialog folder={permFolder} onClose={() => setPermFolder(null)} onSaved={load} />}
       {uploading && (
         <UploadDialog folders={folders} folder={folder} onClose={() => setUploading(false)}
           onDone={async (result) => {

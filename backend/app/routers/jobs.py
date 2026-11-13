@@ -15,6 +15,7 @@ from backend.app.definitions import validate_parameters
 from backend.app.jobs import mailer, schedule, store
 from backend.app.jobs.runner import JobRunner
 from backend.app.logs import LOG
+from backend.app.security import permissions
 from backend.app.security.users import role_at_least
 
 MEDIA = {"pdf": "application/pdf", "csv": "text/csv; charset=utf-8",
@@ -51,7 +52,9 @@ def register(app: FastAPI, ctx: SimpleNamespace) -> None:
 
     def checked(payload: dict[str, Any], session: dict[str, Any]) -> dict[str, Any]:
         try:
-            job = schedule.clean_job(payload, report_ids=set(reports_by_id), allow_email=role_at_least(session["role"], "designer"))
+            job = schedule.clean_job(payload, report_ids={rid for rid, d in reports_by_id.items() if d.editor_config is not None
+                                                          and ctx.report_level(session, d) >= permissions.RUN},
+                                     allow_email=role_at_least(session["role"], "designer"))
             definition = reports_by_id[job["reportId"]]
             # parameter values are checked now (relative dates as of today), so mistakes show up when saving
             prompted = {spec.name for spec in definition.parameters if spec.prompt}
@@ -144,6 +147,7 @@ def register(app: FastAPI, ctx: SimpleNamespace) -> None:
         session = require_session(request, "designer")
         require_json_request(request)
         _items, job = find_job(job_id, session)
+        ctx.require_report(session, job["reportId"], permissions.RUN)
         return {"run": runner.enqueue(job["reportId"], job["format"], job["parameters"], session["username"], "manual", job)}
 
     @app.post("/api/server/reports/{report_id}/background")
@@ -151,9 +155,7 @@ def register(app: FastAPI, ctx: SimpleNamespace) -> None:
         """Like Run, but the file is made in the background and kept under Runs (for big reports)."""
         session = require_session(request)
         require_json_request(request)
-        definition = reports_by_id.get(report_id)
-        if definition is None:
-            raise HTTPException(status_code=404, detail="This report is not published on the server")
+        definition = ctx.require_report(session, report_id, permissions.RUN)
         payload = await json_body(request)
         output_format = str(payload.get("format", "pdf")).lower()
         raw = payload.get("parameters") or {}

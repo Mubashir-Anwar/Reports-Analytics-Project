@@ -16,6 +16,7 @@ from backend.app.connectors.profiles import load_connection_profiles
 from backend.app.constants import OUTPUT_FORMATS, REPORT_ID_PATTERN
 from backend.app.definitions import ReportDefinition, _dynamic_report, discover_reports
 from backend.app.logs import LOG
+from backend.app.security.permissions import MANAGE, RUN, load_rules, remove_rules_under
 from backend.app.security.users import role_at_least
 from backend.app.storage.files import (
     list_saved_folders,
@@ -119,6 +120,7 @@ def delete_repository_folder(ctx: SimpleNamespace, folder: str, recursive: bool 
         raise HTTPException(status_code=409, detail="The folder still has files in it; confirm to delete it with everything inside")
     removed = {folder, *contents["subfolders"]}
     save_folder_list([item for item in saved_folders if item not in removed])
+    remove_rules_under(folder)
     ctx.bump_revision()
     if contents["reports"]:
         refreshed = discover_reports()
@@ -175,14 +177,17 @@ def design_summary(ctx: SimpleNamespace, design: Any) -> dict[str, Any]:
 
 def resource_details(ctx: SimpleNamespace, definition: ReportDefinition, session: dict[str, Any]) -> dict[str, Any]:
     config = definition.editor_config or {}
-    designer = role_at_least(session["role"], "designer")
+    rules = load_rules()
+    # editing and seeing the query need a designer role AND the Manage permission on the report's folder
+    designer = role_at_least(session["role"], "designer") and ctx.report_level(session, definition, rules) >= MANAGE
     try:
         modified = get_store().modified_at(report_definition_key(definition.report_id, normalize_folder_path(config.get("folder", "General"))))
     except (ValueError, OSError):
         modified = None
     size = len(json.dumps(config, ensure_ascii=False).encode("utf-8")) if config else None
     used_by = sorted(item.report_id for item in ctx.reports_by_id.values() if item.report_id != definition.report_id
-                     and definition.report_id in ctx.design_summary((item.editor_config or {}).get("design")).get("subreports", []))
+                     and definition.report_id in ctx.design_summary((item.editor_config or {}).get("design")).get("subreports", [])
+                     and ctx.report_level(session, item, rules) >= RUN)  # never name reports this user may not see
     return {
         "id": definition.report_id, "title": definition.title, "description": config.get("description", ""),
         "folder": config.get("folder", "General"), "formats": config.get("formats", sorted(OUTPUT_FORMATS)),

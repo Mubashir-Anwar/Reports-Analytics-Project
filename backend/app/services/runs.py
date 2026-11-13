@@ -60,7 +60,7 @@ def run_report_rows(ctx: SimpleNamespace, definition: ReportDefinition, paramete
     return rows
 
 
-def subreport_loader(ctx: SimpleNamespace) -> Any:
+def subreport_loader(ctx: SimpleNamespace, allowed: Any = None) -> Any:
     """Loader for Subreport elements during one render: runs a published report with the given parameters.
     Results are cached per (report, parameters); at most 200 different runs per report."""
     cache: dict[tuple[str, tuple[tuple[str, str], ...]], dict[str, Any]] = {}
@@ -72,8 +72,8 @@ def subreport_loader(ctx: SimpleNamespace) -> Any:
         if len(cache) >= 200:
             raise ValueError("more than 200 different subreport runs in one report")
         definition = ctx.reports_by_id.get(report_id)
-        if definition is None:
-            raise ValueError("this report is not published on the server")
+        if definition is None or (allowed is not None and not allowed(report_id)):
+            raise ValueError("this report is not published on the server")  # hidden by a folder permission looks the same
         design = (definition.editor_config or {}).get("design")
         if not design:
             raise ValueError("this report has no band design (open it in the designer and publish it)")
@@ -161,7 +161,7 @@ def preview_definition(ctx: SimpleNamespace, definition: ReportDefinition, paylo
 
 
 def run_definition_file(ctx: SimpleNamespace, definition: ReportDefinition, payload: Any, path: str, access: str, *,
-                        fixed_connection: bool = False, user: str = "") -> Response:
+                        fixed_connection: bool = False, user: str = "", session: dict[str, Any] | None = None) -> Response:
     """Run a report in full and return the file. fixed_connection=True (the /server portal)
     always uses the report's own data adapter and only its enabled formats."""
     started = time.monotonic()
@@ -187,7 +187,8 @@ def run_definition_file(ctx: SimpleNamespace, definition: ReportDefinition, payl
                       "parameters": {k: v.isoformat() if isinstance(v, date) else v for k, v in parameters.items()}})
         rows = ctx.run_report_rows(definition, parameters, connection_id, max_rows=ctx.settings.max_rows, limit_rows=False)
         rows = [{key: _row_value(row, key) for key in definition.columns} for row in rows]
-        body, media_type = render_report_output(definition, parameters, rows, output_format, ctx.subreport_loader(),
+        body, media_type = render_report_output(definition, parameters, rows, output_format,
+                                                ctx.subreport_loader(ctx.report_allowed_for(session)),
                                                 ctx.dataset_loader(connection_id, definition.report_id))
         audit.update({"status": "success", "rowCount": len(rows)})
         return Response(body, media_type=media_type,

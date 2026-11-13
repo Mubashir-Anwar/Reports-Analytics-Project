@@ -87,6 +87,7 @@ backend/app/
     workspace.py           designer drafts and their publish status
     history.py             history of each server report
     versions.py            every saved version of a server report; the repository revision (several instances)
+    access.py              folder permissions applied to /server, schedules and subreports
     accounts.py            /admin user helpers
   routers/                 one module per area; each has register(app, ctx)
     pages.py               /, /ui, /admin, /designer, /server
@@ -103,7 +104,8 @@ backend/app/
   constants.py             Patterns, roles, formats, cookie names, PROJECT_ROOT
   logs.py                  Logger, rotating log file, reading log entries
   security/                access.py (areas, client IP, admin IP allow-list) · secrets.py (private secrets, .env)
-                           · users.py (accounts, password hashes, session cookies) · headers.py (CSP, HSTS, body
+                           · users.py (accounts, password hashes, session cookies) · permissions.py (folder rules:
+                           none / run / manage) · headers.py (CSP, HSTS, body
                            size limit) · shared_state.py (sign-outs and failed sign-ins seen by every instance)
   storage/                 store.py (the document store: files or PostgreSQL) · files.py (data directory, folders,
                            storage keys) · audit.py (run history) · migrate.py (copy a data directory into PostgreSQL)

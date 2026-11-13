@@ -17,7 +17,7 @@ from backend.app.connectors.profiles import load_connection_profiles
 from backend.app.constants import BOOTSTRAP_USERNAME, OUTPUT_FORMATS, REPORT_ID_PATTERN, SESSION_COOKIE, WORKSPACE_META
 from backend.app.logs import LOG
 from backend.app.mrd import parse_report_definition_xml, render_report_definition_xml
-from backend.app.security import shared_state
+from backend.app.security import permissions, shared_state
 from backend.app.security.access import client_address
 from backend.app.security.users import (
     bootstrap_login_active,
@@ -44,7 +44,6 @@ def register(app: FastAPI, ctx: SimpleNamespace) -> None:
     free_report_id = ctx.free_report_id
     json_body = ctx.json_body
     now_iso = ctx.now_iso
-    published_or_404 = ctx.published_or_404
     published_report_summaries = ctx.published_report_summaries
     record_history = ctx.record_history
     reports_by_id = ctx.reports_by_id
@@ -110,32 +109,41 @@ def register(app: FastAPI, ctx: SimpleNamespace) -> None:
 
     @app.get("/api/server/repository")
     def server_repository(request: Request) -> dict[str, Any]:
+        """Only the folders and reports this user may see (folder permissions); each with the user's access."""
         session = require_session(request)
         try:
             folders = list_saved_folders()
         except ValueError as exc:
             raise HTTPException(status_code=500, detail=str(exc)) from None
-        return {"folders": folders, "reports": sorted(published_report_summaries(), key=lambda item: item["title"].casefold()),
-                "user": session_view(session)}
+        rules = permissions.load_rules()
+        reports = []
+        for item in published_report_summaries():
+            have = permissions.level(session, item["folder"], rules)
+            if have >= permissions.RUN:
+                reports.append({**item, "access": permissions.NAMES[have]})
+        seen_folders = {r["folder"] for r in reports}
+        visible = [f for f in folders if permissions.level(session, f, rules) >= permissions.RUN
+                   or any(s == f or s.startswith(f"{f}/") for s in seen_folders)]
+        return {"folders": visible, "reports": sorted(reports, key=lambda item: item["title"].casefold()),
+                "user": session_view(session), "folderAccess": {f: permissions.NAMES[permissions.level(session, f, rules)] for f in visible}}
 
     @app.post("/api/server/reports/{report_id}/run")
     async def server_run_report(report_id: str, request: Request) -> Response:
         session = require_session(request)
-        definition = reports_by_id.get(report_id)
-        if definition is None:
-            raise HTTPException(status_code=404, detail="This report is not published on the server")
+        definition = ctx.require_report(session, report_id, permissions.RUN)
         payload = await json_body(request)
         return run_definition_file(definition, payload, request.url.path, "server-session",
-                                   fixed_connection=True, user=session["username"])
+                                   fixed_connection=True, user=session["username"], session=session)
 
     @app.post("/api/server/folders")
     async def server_create_folder(request: Request) -> dict[str, Any]:
-        require_session(request, "designer")
+        session = require_session(request, "designer")
         payload = await json_body(request)
         try:
             folder = normalize_folder_path(payload.get("path", ""))
         except ValueError as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from None
+        ctx.require_folder(session, folder.rsplit("/", 1)[0] if "/" in folder else "", permissions.MANAGE)
         return {"folder": folder, "folders": add_saved_folder(folder)}
 
     @app.delete("/api/server/folders")
@@ -151,16 +159,18 @@ def register(app: FastAPI, ctx: SimpleNamespace) -> None:
     @app.get("/api/server/folders/contents")
     def server_folder_contents(path: str, request: Request) -> dict[str, Any]:
         """What deleting a folder would remove (shown in the confirmation)."""
-        require_session(request)
+        session = require_session(request)
         try:
             folder = normalize_folder_path(path)
         except ValueError as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from None
+        ctx.require_folder(session, folder, permissions.RUN)
         return {"folder": folder, **folder_contents(folder)}
 
     @app.delete("/api/server/reports/{report_id}")
     def server_delete_report(report_id: str, request: Request) -> dict[str, str]:
         session = require_session(request, "admin")
+        ctx.require_report(session, report_id, permissions.MANAGE)
         result = delete_published_report(report_id)
         record_history(report_id, "deleted", session["username"])
         LOG.info("Report %s removed from the server by %s", report_id, session["username"])
@@ -169,14 +179,15 @@ def register(app: FastAPI, ctx: SimpleNamespace) -> None:
     @app.get("/api/server/reports/{report_id}")
     def server_report_details(report_id: str, request: Request) -> dict[str, Any]:
         session = require_session(request)
-        return resource_details(published_or_404(report_id), session)
+        definition = ctx.require_report(session, report_id, permissions.RUN)
+        return {**resource_details(definition, session), "access": permissions.NAMES[ctx.report_level(session, definition)]}
 
     @app.put("/api/server/reports/{report_id}")
     async def server_edit_report(report_id: str, request: Request) -> dict[str, Any]:
         """Edit a published report's properties: title, description, formats, data adapter, the questions
         (label, help, required, default, allowed values) and, for designers, the query."""
         session = require_session(request, "designer")
-        definition = published_or_404(report_id)
+        definition = ctx.require_report(session, report_id, permissions.MANAGE)
         changes = await json_body(request)
         payload = copy.deepcopy(definition.editor_config)
         for key in ("title", "description"):
@@ -222,13 +233,14 @@ def register(app: FastAPI, ctx: SimpleNamespace) -> None:
     @app.post("/api/server/reports/{report_id}/copy")
     async def server_copy_report(report_id: str, request: Request) -> dict[str, Any]:
         session = require_session(request, "designer")
-        definition = published_or_404(report_id)
+        definition = ctx.require_report(session, report_id, permissions.RUN)
         body = await json_body(request, optional=True)
         payload = copy.deepcopy(definition.editor_config)
         try:
             payload["folder"] = normalize_folder_path(body.get("folder") or payload.get("folder", "General"))
         except ValueError as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from None
+        ctx.require_folder(session, payload["folder"], permissions.MANAGE)
         new_id = str(body.get("newId") or "").strip() or free_report_id(report_id)
         if new_id in reports_by_id:
             raise HTTPException(status_code=409, detail=f"A report with the ID {new_id} already exists")
@@ -242,12 +254,13 @@ def register(app: FastAPI, ctx: SimpleNamespace) -> None:
     @app.post("/api/server/reports/{report_id}/move")
     async def server_move_report(report_id: str, request: Request) -> dict[str, Any]:
         session = require_session(request, "designer")
-        definition = published_or_404(report_id)
+        definition = ctx.require_report(session, report_id, permissions.MANAGE)
         body = await json_body(request)
         try:
             folder = normalize_folder_path(body.get("folder", ""))
         except ValueError as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from None
+        ctx.require_folder(session, folder, permissions.MANAGE)
         before = definition.editor_config.get("folder", "General")
         payload = {**copy.deepcopy(definition.editor_config), "folder": folder}
         saved = save_report_payload(payload, expected_id=report_id, action="moved", user=session["username"])
@@ -258,8 +271,8 @@ def register(app: FastAPI, ctx: SimpleNamespace) -> None:
     @app.get("/api/server/reports/{report_id}/file")
     def server_download_report(report_id: str, request: Request) -> Response:
         """The whole report (query, parameters, data adapter, band design, images) as one .mrd file."""
-        require_session(request, "designer")
-        definition = published_or_404(report_id)
+        session = require_session(request, "designer")
+        definition = ctx.require_report(session, report_id, permissions.MANAGE)  # the file holds the query
         return Response(render_report_definition_xml(admin_report_payload(definition)), media_type="application/xml; charset=utf-8",
                         headers={"Content-Disposition": f'attachment; filename="{report_id}.mrd"'})
 
@@ -299,6 +312,11 @@ def register(app: FastAPI, ctx: SimpleNamespace) -> None:
             raise HTTPException(status_code=422, detail=str(exc)) from None
         report_id = str(payload.get("id", ""))
         exists = report_id in reports_by_id
+        ctx.require_folder(session, payload["folder"], permissions.MANAGE)
+        if exists:
+            existing = reports_by_id[report_id]
+            if ctx.report_level(session, existing) < permissions.MANAGE:  # hidden or run-only: never replaced from here
+                raise HTTPException(status_code=409, detail=f"The ID {report_id} is already used on the server; give the report a new ID")
         if exists and body.get("replace") is not True:
             raise HTTPException(status_code=409, detail=f"{report_id} is already on the server; tick “Replace” or give it a new ID")
         saved = save_report_payload(payload, expected_id=report_id if exists else None, action="uploaded", user=session["username"])
@@ -314,13 +332,14 @@ def register(app: FastAPI, ctx: SimpleNamespace) -> None:
     # ---------------------------------------------------------------- versions (every save of a server report)
     @app.get("/api/server/reports/{report_id}/versions")
     def server_report_versions(report_id: str, request: Request) -> dict[str, Any]:
-        require_session(request, "designer")
-        published_or_404(report_id)
+        session = require_session(request, "designer")
+        ctx.require_report(session, report_id, permissions.MANAGE)
         return {"versions": ctx.list_versions(report_id)}
 
     @app.get("/api/server/reports/{report_id}/versions/{number}")
     def server_report_version(report_id: str, number: int, request: Request) -> dict[str, Any]:
-        require_session(request, "designer")
+        session = require_session(request, "designer")
+        ctx.require_report(session, report_id, permissions.MANAGE)
         found = ctx.get_version(report_id, number) if REPORT_ID_PATTERN.fullmatch(report_id) else None
         if not found:
             raise HTTPException(status_code=404, detail="Version not found")
@@ -331,7 +350,7 @@ def register(app: FastAPI, ctx: SimpleNamespace) -> None:
         """Make an older version the current one again (as a new version; nothing is lost)."""
         session = require_session(request, "designer")
         require_json_request(request)
-        current = published_or_404(report_id)
+        current = ctx.require_report(session, report_id, permissions.MANAGE)
         found = ctx.get_version(report_id, number)
         if not found or not isinstance(found.get("definition"), dict):
             raise HTTPException(status_code=404, detail="Version not found")
@@ -348,3 +367,43 @@ def register(app: FastAPI, ctx: SimpleNamespace) -> None:
         sync_workspace_copy(report_id, replace_draft)
         record_history(report_id, "restored", session["username"], f"version {number}")
         return {"report": resource_details(saved, session), "versions": ctx.list_versions(report_id)}
+
+
+    # ---------------------------------------------------------------- folder permissions (administrators)
+    @app.get("/api/server/permissions")
+    def server_get_permissions(request: Request, path: str = "") -> dict[str, Any]:
+        """The rules on one folder ("" = the root), what applies there from parent folders, and every user's result."""
+        require_session(request, "admin")
+        try:
+            folder = normalize_folder_path(path) if path else ""
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from None
+        rules = permissions.load_rules()
+        entry = rules.get(folder, {"users": {}, "roles": {}})
+        effective = []
+        for user in load_users():
+            if user.get("disabled"):
+                continue
+            level, why = permissions.explain({"username": user["username"], "role": user.get("role", "viewer")}, folder, rules)
+            effective.append({"username": user["username"], "role": user.get("role", "viewer"), "level": permissions.NAMES[level], "why": why})
+        inherited = [{"folder": f, **rules[f]} for f in permissions.folder_chain(folder)[1:] if f in rules]
+        return {"folder": folder, "rules": entry, "inherited": inherited, "effective": effective,
+                "users": sorted(u["username"] for u in load_users())}
+
+    @app.put("/api/server/permissions")
+    async def server_set_permissions(request: Request) -> dict[str, Any]:
+        session = require_session(request, "admin")
+        require_json_request(request)
+        body = await json_body(request)
+        try:
+            folder = normalize_folder_path(body["path"]) if body.get("path") else ""
+            entry = permissions.clean_entry(body.get("rules"))
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from None
+        known = {str(u["username"]).casefold() for u in load_users()}
+        unknown = sorted(name for name in entry["users"] if name not in known)
+        if unknown:
+            raise HTTPException(status_code=422, detail=f"Unknown user(s): {', '.join(unknown)}")
+        permissions.save_rules_for(folder, entry)
+        LOG.info("Permissions of /%s changed by %s: %s", folder, session["username"], entry)
+        return server_get_permissions(request, folder)

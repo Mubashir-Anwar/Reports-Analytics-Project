@@ -280,5 +280,22 @@ Checked in the security review (tests: `tests/test_security.py`, `tests/test_sto
 | Exports | Excel/CSV cells that start with `=`, `+`, `-`, `@` are neutralised (no formula injection) | — |
 | Backups | — | Back up the storage database (or the data folder) and keep `REPORTING_SECRETS_KEY`, `REPORTING_SESSION_SECRET` and the admin token in a password manager, separately |
 
-Known limits: every signed-in `/server` user can see and run every published report (no per-folder permissions
-yet); designers can query any registered data adapter, so adapter users must be limited in the database itself.
+### Folder permissions (which team sees which reports)
+
+`/server` → right-click a folder (or the **🔒 Permissions** button) → rules for users or roles (administrators only):
+
+| Level | Gives |
+|---|---|
+| **None** | The folder and its reports are hidden (they answer 404, as if they did not exist) |
+| **Run** | See, run, run in the background, schedule (designers) |
+| **Manage** | Also edit, copy/move into, upload into, download the `.mrd`, versions — designer and admin roles only |
+
+A rule applies to the folder and all its subfolders; the nearest folder with a rule wins, and in one folder a user
+rule wins over a role rule. Without rules the role decides (viewer = Run, designer = Manage). A viewer never gets
+more than Run; administrators always have everything. Example for two teams: on the root give `viewer` **None**, on
+`/Finance` give the finance users **Run**, on `/HR` the HR users. Subreports and scheduled jobs are checked too (a
+job stops working when its owner loses the permission). The dialog shows, per user, what they get and why.
+
+Known limits: the permissions are for `/server` sign-ins. Token access (`/generate` with the admin token or a
+signed link, the designer token) is not limited by folders — keep those tokens for trusted systems. Designers can
+query any registered data adapter, so adapter users must be limited in the database itself.

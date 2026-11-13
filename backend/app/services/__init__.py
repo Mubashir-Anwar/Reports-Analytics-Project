@@ -7,9 +7,9 @@ from __future__ import annotations
 from functools import partial, update_wrapper
 from types import SimpleNamespace
 
-from backend.app.services import accounts, connections, guards, history, repository, runs, versions, workspace
+from backend.app.services import access, accounts, connections, guards, history, repository, runs, versions, workspace
 
-MODULES = (connections, guards, runs, repository, workspace, history, accounts, versions)
+MODULES = (connections, guards, runs, repository, workspace, history, accounts, versions, access)
 
 
 def bind_services(ctx: SimpleNamespace) -> None:

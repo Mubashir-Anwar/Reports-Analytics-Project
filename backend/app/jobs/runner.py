@@ -21,6 +21,7 @@ from backend.app.definitions import validate_parameters
 from backend.app.jobs import mailer, schedule, store
 from backend.app.logs import LOG
 from backend.app.rendering.outputs import render_report_output
+from backend.app.security import permissions
 from backend.app.storage import audit as audit_store
 
 
@@ -134,8 +135,10 @@ class JobRunner:
         body = b""
         try:
             definition = ctx.reports_by_id.get(run["reportId"])
-            if definition is None:
-                raise ValueError("The report is no longer published on the server")
+            owner = ctx.session_for_user(run["owner"])
+            # checked again at run time: the owner may have lost the permission (or the account) since scheduling
+            if definition is None or owner is None or ctx.report_level(owner, definition) < permissions.RUN:
+                raise ValueError("The report is no longer published on the server, or its owner may no longer run it")
             enabled = (definition.editor_config or {}).get("formats", ["pdf", "xlsx", "csv"])
             if run["format"] not in enabled:
                 raise ValueError(f"The {run['format'].upper()} format is not enabled for this report")
@@ -149,7 +152,8 @@ class JobRunner:
             audit["connectionId"] = definition.connection_id
             rows = ctx.run_report_rows(definition, parameters, definition.connection_id, max_rows=ctx.settings.max_rows, limit_rows=False)
             rows = [{key: _row_value(row, key) for key in definition.columns} for row in rows]
-            body, _media = render_report_output(definition, parameters, rows, run["format"], ctx.subreport_loader(),
+            body, _media = render_report_output(definition, parameters, rows, run["format"],
+                                                ctx.subreport_loader(ctx.report_allowed_for(owner)),
                                                 ctx.dataset_loader(definition.connection_id, definition.report_id))
             name = f"{run['id']}.{run['format']}"
             store.write_output(name, body)

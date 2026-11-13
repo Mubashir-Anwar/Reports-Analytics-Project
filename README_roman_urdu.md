@@ -261,5 +261,15 @@ Jasper wali Java expressions ab safe tareeqe se chalti hain (Java ya eval ke bag
 - MongoDB query mein `$out`/`$merge`, JavaScript, `$currentOp` jaisi server info aur `system.*` collections mana hain; SQL mein sirf ek SELECT.
 - Background/scheduled report files `REPORTING_OUTPUT_DAYS` (default 30 din) baad khud mit jati hain.
 - Production mein HTTPS, `REPORTING_SECURE_COOKIES=true`, `REPORTING_HSTS=true`; Docker image mein `/docs` band hai.
-- Abhi har signed-in `/server` user har published report dekh sakta hai (folder-wise permissions abhi nahi).
 - Poori checklist: DEPLOYMENT.md → "Keeping the data safe".
+
+## Folder permissions (team-wise data alag)
+
+`/server` par admin login → folder par right-click → **Permissions…** (ya folder ke upar **🔒 Permissions**):
+
+- **None** = folder aur reports nazar hi nahi aatin; **Run** = dekh aur chala sakta hai; **Manage** = edit/upload/move bhi (sirf designer/admin role).
+- Rule us folder aur us ke andar ke sab folders par lagta hai; sab se qareeb wale folder ka rule chalta hai; user ka rule role ke rule par bhari.
+- Misal (do teams): root par `viewer` = **None**; `/Finance` par finance walon ko **Run**; `/HR` par HR walon ko **Run**.
+- Rule na ho to pehle jaisa: viewer = Run, designer = Manage; admin ko hamesha sab kuch.
+- Subreports aur schedules par bhi lagta hai: jis ki permission chhin jaye, us ki schedule bhi ruk jati hai.
+- Dhyan: `/generate` ke admin token / signed links aur designer token par folder permissions nahi lagti — yeh sirf bharosemand systems ke paas rakhein.
