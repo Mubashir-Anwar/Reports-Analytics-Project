@@ -1,6 +1,7 @@
 """Health, adapter status, who-am-i, logs and run history."""
 from __future__ import annotations
 
+import os
 from types import SimpleNamespace
 from typing import Any
 
@@ -42,6 +43,42 @@ def register(app: FastAPI, ctx: SimpleNamespace) -> None:
         runner = ctx.job_runner
         return JSONResponse({"status": "ready", "version": SERVICE_VERSION, "storage": store.backend,
                              "scheduler": "on" if runner.scheduler_on else "off"})
+
+    @app.get("/api/admin/system/status")
+    def admin_system_status(request: Request) -> dict[str, Any]:
+        """Production checklist for /admin → Overview: what is set up, what still needs attention."""
+        require_admin(request)
+        from backend.app.jobs import mailer
+        from backend.app.security.access import enabled_areas
+        from backend.app.security.users import bootstrap_login_active
+        from backend.app.storage.store import get_store
+        store = get_store()
+        secrets_raw = store.read_json("private_secrets.json") or {}
+        env = os.environ
+        checks = [
+            {"id": "storage", "ok": store.backend == "postgresql", "label": "Storage",
+             "value": "PostgreSQL (shared, several instances)" if store.backend == "postgresql" else "Files in the data folder (one instance)",
+             "hint": "REPORTING_STORAGE=postgresql for several instances and database backups"},
+            {"id": "secrets", "ok": secrets_raw.get("format") == "fernet-v1", "label": "Adapter passwords",
+             "value": "encrypted" if secrets_raw.get("format") == "fernet-v1" else "plain text in a private file",
+             "hint": "Set REPORTING_SECRETS_KEY to encrypt them"},
+            {"id": "session", "ok": bool(env.get("REPORTING_SESSION_SECRET", "").strip()), "label": "Session secret",
+             "value": "set" if env.get("REPORTING_SESSION_SECRET", "").strip() else "random per start (sign-ins end at restart)",
+             "hint": "Set REPORTING_SESSION_SECRET (the same on every instance)"},
+            {"id": "admin-user", "ok": not bootstrap_login_active(), "label": "Admin account",
+             "value": "named admin user exists" if not bootstrap_login_active() else "only the first-setup login (admin + token)",
+             "hint": "Create an admin user on the Users tab"},
+            {"id": "https", "ok": env.get("REPORTING_SECURE_COOKIES", "").lower() == "true", "label": "HTTPS cookies",
+             "value": "secure cookies on" if env.get("REPORTING_SECURE_COOKIES", "").lower() == "true" else "off",
+             "hint": "Behind HTTPS set REPORTING_SECURE_COOKIES=true and REPORTING_HSTS=true"},
+            {"id": "docs", "ok": "docs" not in enabled_areas(), "label": "API docs",
+             "value": "off" if "docs" not in enabled_areas() else "on (/docs)", "hint": "Leave docs out of REPORTING_ENABLED_AREAS in production"},
+            {"id": "scheduler", "ok": ctx.job_runner.scheduler_on, "label": "Scheduler",
+             "value": "on" if ctx.job_runner.scheduler_on else "off on this instance", "hint": "Exactly one instance should run it"},
+            {"id": "email", "ok": mailer.configured(), "label": "E-mail for schedules",
+             "value": "configured" if mailer.configured() else "not configured", "hint": "SMTP_HOST and SMTP_FROM"},
+        ]
+        return {"version": SERVICE_VERSION, "storage": store.backend, "checks": checks}
 
     @app.get("/reports/connections/{connection_id}/status")
     def report_connection_status(connection_id: str, request: Request) -> dict[str, Any]:

@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { api } from '../api.js';
 import { Notice, formatWhen } from '../portal/Shell.jsx';
 
-const ROLE_HELP = { viewer: 'Viewer — run reports', designer: 'Designer — run reports, create folders', admin: 'Admin — everything on /server' };
+const ROLE_HELP = { viewer: 'Viewer — run reports', designer: 'Designer — run and change reports where folder permissions allow', admin: 'Admin — everything on /server' };
 
 export default function UsersTab({ notify }) {
   const [data, setData] = useState({ users: [], roles: ['viewer', 'designer', 'admin'], bootstrapLogin: false });

@@ -204,6 +204,10 @@ def register(app: FastAPI, ctx: SimpleNamespace) -> None:
             payload["defaultFormat"] = payload.get("formats", ["pdf"])[0]
         if "connectionId" in changes:
             payload["connectionId"] = str(changes["connectionId"] or "").strip()
+            wants_sql = str(payload.get("queryLanguage", "")).lower() == "sql"
+            if (ctx.adapter_kind(payload["connectionId"]) != "mongodb") != wants_sql:
+                raise HTTPException(status_code=422, detail="Choose a data adapter of the same kind as the query: "
+                                                            + ("a SQL database" if wants_sql else "MongoDB"))
         if isinstance(changes.get("parameters"), list):
             edits = {str(item.get("name")): item for item in changes["parameters"] if isinstance(item, dict)}
             for parameter in payload.get("parameters", []):
@@ -407,3 +411,11 @@ def register(app: FastAPI, ctx: SimpleNamespace) -> None:
         permissions.save_rules_for(folder, entry)
         LOG.info("Permissions of /%s changed by %s: %s", folder, session["username"], entry)
         return server_get_permissions(request, folder)
+
+
+    @app.post("/api/server/connections/{connection_id}/test")
+    def server_test_connection(connection_id: str, request: Request) -> dict[str, Any]:
+        """Test a data adapter from a report's Data Source tab (designers and admins; no password is shown)."""
+        require_session(request, "designer")
+        require_json_request(request)
+        return ctx.test_adapter_by_id(connection_id)

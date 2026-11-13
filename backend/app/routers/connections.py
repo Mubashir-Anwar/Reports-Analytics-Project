@@ -18,17 +18,15 @@ from backend.app.storage.store import get_store
 
 def register(app: FastAPI, ctx: SimpleNamespace) -> None:
     """Add the connections endpoints to the app."""
-    reports_by_id = ctx.reports_by_id
     require_admin = ctx.require_admin
     state = ctx.state
     test_adapter_values = ctx.test_adapter_values
-    test_mongo_connection = ctx.test_mongo_connection
-    test_saved_adapter = ctx.test_saved_adapter
 
     @app.get("/api/admin/connections")
     def admin_list_connections(request: Request) -> dict[str, Any]:
         require_admin(request, "designer")
         profiles = load_connection_profiles()
+        usage = ctx.adapter_usage()
         result = []
         for profile in profiles:
             uri, database = _profile_credentials(profile)
@@ -40,6 +38,7 @@ def register(app: FastAPI, ctx: SimpleNamespace) -> None:
                 "database": database,
                 "credentialSource": "Private local file" if profile.get("storage") == "file" else "Environment settings",
                 "configured": bool(uri and database),
+                "usedBy": usage.get(profile["id"], []),
             })
         return {"connections": result}
 
@@ -154,9 +153,9 @@ def register(app: FastAPI, ctx: SimpleNamespace) -> None:
         require_admin(request)
         if connection_id == "default":
             raise HTTPException(status_code=400, detail="The default connection cannot be deleted")
-        used_by = [item.report_id for item in reports_by_id.values() if item.connection_id == connection_id]
+        used_by = ctx.adapter_usage().get(connection_id, [])
         if used_by:
-            raise HTTPException(status_code=409, detail=f"Switch these reports to another connection first: {', '.join(used_by)}")
+            raise HTTPException(status_code=409, detail=f"Switch these reports (or their datasets) to another data adapter first: {', '.join(used_by)}")
         profiles = [item for item in load_connection_profiles() if item["id"] != connection_id]
         get_store().write_json("connections.json", {"connections": profiles})
         private = _load_private_secrets()
@@ -196,17 +195,4 @@ def register(app: FastAPI, ctx: SimpleNamespace) -> None:
     @app.post("/api/admin/connections/{connection_id}/test")
     def admin_test_connection(connection_id: str, request: Request) -> dict[str, Any]:
         require_admin(request, "designer")
-        profile = next((item for item in load_connection_profiles() if item["id"] == connection_id), None)
-        if profile is None:
-            raise HTTPException(status_code=404, detail="Connection ID is not registered")
-        sql_result = test_saved_adapter(connection_id)  # SQL adapters; None for MongoDB
-        if sql_result is not None:
-            return sql_result
-        uri, database = _profile_credentials(profile)
-        if not uri or not database:
-            if profile.get("storage") == "file":
-                detail = "This data source has no saved MongoDB URL or database name"
-            else:
-                detail = f"Set {profile['uriEnv']} and {profile['databaseEnv']} in .env or the server environment"
-            raise HTTPException(status_code=422, detail=detail)
-        return test_mongo_connection(uri, database, connection_id)
+        return ctx.test_adapter_by_id(connection_id)

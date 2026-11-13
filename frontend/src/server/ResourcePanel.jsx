@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { Notice, formatWhen } from '../portal/Shell.jsx';
 import RunPanel, { FORMAT_LABELS } from './RunPanel.jsx';
 import { SchedulesList } from './Schedules.jsx';
+import { DbLogo, adapterTypeLabel } from '../shared/adapters.jsx';
 import { serverApi } from './serverApi.js';
 
 export const RESOURCE_TABS = [['run', 'Run'], ['overview', 'Overview'], ['parameters', 'Parameters'], ['datasource', 'Data Source'], ['query', 'Query'], ['schedules', 'Schedules'], ['versions', 'Versions'], ['history', 'History']];
@@ -88,29 +89,48 @@ function ParametersTab({ info, onSave }) {
 function DataSourceTab({ info, onSave }) {
   const [connections, setConnections] = useState([]);
   const [chosen, setChosen] = useState(info.connection.id);
-  useEffect(() => setChosen(info.connection.id), [info]);
+  const [test, setTest] = useState(null);
+  useEffect(() => { setChosen(info.connection.id); setTest(null); }, [info]);
   useEffect(() => { if (info.canEdit) serverApi.connections().then((d) => setConnections(d.connections)).catch(() => {}); }, [info.canEdit]);
   const c = info.connection;
+  const kind = c.type || 'mongodb';
+  const isSql = info.queryLanguage ? info.queryLanguage === 'sql' : kind !== 'mongodb';
+  // only adapters of the same kind as the query: a SQL query cannot run on MongoDB and the other way round
+  const usable = connections.filter((x) => ((x.type || 'mongodb') !== 'mongodb') === isSql);
+  const runTest = async (id) => {
+    setTest({ kind: '', text: 'Testing…' });
+    try { const r = await serverApi.testConnection(id); setTest({ kind: 'ok', text: r.message || 'Connected' }); }
+    catch (e) { setTest({ kind: 'error', text: e.message }); }
+  };
   return (
     <div className="stack">
+      <div className="ds-item flat">
+        <span className="ds-logo"><DbLogo type={kind} size={30} /></span>
+        <div className="ds-main">
+          <strong>{c.name} <code>{c.id}</code></strong>
+          <small>{c.missing ? 'Not registered any more!' : `${adapterTypeLabel(kind)}${c.database ? ` · ${c.database}` : ''}${c.folder ? ` · 📁 ${c.folder}` : ''}`}</small>
+          {!c.missing && <span className={`status-chip ${c.configured ? 'ok' : 'error'}`}>{c.configured ? 'Configured' : 'Setup needed'}</span>}
+        </div>
+        {info.canEdit && !c.missing && <button className="btn sm" onClick={() => runTest(c.id)}>Test</button>}
+      </div>
       <dl className="facts">
-        <dt>Data adapter</dt><dd>{c.name} <code>{c.id}</code>{c.missing ? ' — not registered any more!' : ''}</dd>
-        {c.folder && <><dt>Adapter folder</dt><dd>/{c.folder}</dd></>}
-        {c.database && <><dt>Database</dt><dd>{c.database}</dd></>}
-        <dt>Collection</dt><dd><code>{info.collection}</code></dd>
+        <dt>Query</dt><dd>{isSql ? 'SQL (read-only SELECT)' : 'MongoDB aggregation'}</dd>
+        {!isSql && <><dt>Collection</dt><dd><code>{info.collection}</code></dd></>}
       </dl>
+      {test && <Notice message={test} />}
       {info.canEdit && (
         <div className="row">
-          <label className="field" style={{ minWidth: 240 }}><span>Use another data adapter</span>
-            <select value={chosen} onChange={(e) => setChosen(e.target.value)}>
-              {connections.map((x) => <option key={x.id} value={x.id}>{x.folder ? `${x.folder} / ` : ''}{x.name} ({x.id})</option>)}
-              {!connections.some((x) => x.id === chosen) && <option value={chosen}>{chosen}</option>}
+          <label className="field" style={{ minWidth: 260 }}><span>Use another {isSql ? 'SQL' : 'MongoDB'} data adapter</span>
+            <select value={chosen} onChange={(e) => { setChosen(e.target.value); setTest(null); }}>
+              {usable.map((x) => <option key={x.id} value={x.id}>{x.folder ? `${x.folder} / ` : ''}{x.name} · {adapterTypeLabel(x.type)}{x.configured ? '' : ' (setup needed)'}</option>)}
+              {!usable.some((x) => x.id === chosen) && <option value={chosen}>{chosen}</option>}
             </select>
           </label>
+          <button className="btn sm" disabled={chosen === c.id} onClick={() => runTest(chosen)} style={{ alignSelf: 'flex-end' }}>Test it</button>
           <button className="btn primary sm" disabled={chosen === c.id} onClick={() => onSave({ connectionId: chosen })} style={{ alignSelf: 'flex-end' }}>Save</button>
         </div>
       )}
-      <p className="muted" style={{ fontSize: 12 }}>Data adapters (connection strings) are managed in <a href="/admin">Admin → Data sources</a>; passwords are never shown here.</p>
+      <p className="muted" style={{ fontSize: 12 }}>Data adapters are created and edited in <a href="/admin#sources">Admin → Data sources</a> or the Designer; passwords are never shown here.</p>
     </div>
   );
 }

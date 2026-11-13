@@ -39,6 +39,7 @@ export const serverApi = {
   move: (id, folder) => call(`/api/server/reports/${encodeURIComponent(id)}/move`, { method: 'POST', body: { folder } }),
   upload: (body) => call('/api/server/upload', { method: 'POST', body }),
   connections: () => call('/api/server/connections'),
+  testConnection: (id) => call(`/api/server/connections/${encodeURIComponent(id)}/test`, { method: 'POST', body: {} }),
   // folder permissions (administrators)
   permissions: (path) => call(`/api/server/permissions?path=${encodeURIComponent(path || '')}`),
   setPermissions: (path, rules) => call('/api/server/permissions', { method: 'PUT', body: { path, rules } }),

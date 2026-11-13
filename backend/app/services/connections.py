@@ -18,7 +18,7 @@ from backend.app.definitions import ReportDefinition
 from backend.app.logs import LOG
 
 __all__ = ['get_connection', 'test_mongo_connection', 'chosen_connection', 'access_error_detail', 'connection_summary',
-           'adapter_kind', 'sql_adapter', 'test_adapter_values', 'test_saved_adapter']
+           'adapter_kind', 'sql_adapter', 'test_adapter_values', 'test_saved_adapter', 'adapter_usage', 'test_adapter_by_id']
 
 
 def get_connection(ctx: SimpleNamespace, connection_id: str) -> tuple[MongoClient, str]:
@@ -188,8 +188,39 @@ def connection_summary(ctx: SimpleNamespace, connection_id: str) -> dict[str, An
     profile = next((item for item in load_connection_profiles() if item["id"] == connection_id), None)
     if profile is None:
         return {"id": connection_id, "name": connection_id, "missing": True}
-    return {"id": profile["id"], "name": profile["name"], "folder": profile.get("folder", ""), "storage": profile.get("storage", "env"),
+    uri, database = _profile_credentials(profile)
+    return {"id": profile["id"], "name": profile["name"], "type": profile.get("type", "mongodb"), "folder": profile.get("folder", ""),
+            "storage": profile.get("storage", "env"), "configured": bool(uri and (database or profile.get("type", "mongodb") != "mongodb")),
             "database": profile.get("database", "") if profile.get("storage") == "file" else f"from ${profile.get('databaseEnv', '')}"}
+
+
+def adapter_usage(ctx: SimpleNamespace) -> dict[str, list[str]]:
+    """Which published reports read from each data adapter (their main query or one of their datasets)."""
+    usage: dict[str, set[str]] = {}
+    for item in ctx.reports_by_id.values():
+        usage.setdefault(item.connection_id, set()).add(item.report_id)
+        for dataset in ((item.editor_config or {}).get("design") or {}).get("datasets") or []:
+            if isinstance(dataset, dict) and dataset.get("connectionId"):
+                usage.setdefault(str(dataset["connectionId"]), set()).add(item.report_id)
+    return {key: sorted(value) for key, value in usage.items()}
+
+
+def test_adapter_by_id(ctx: SimpleNamespace, connection_id: str) -> dict[str, Any]:
+    """Test a saved adapter of any kind by its ID (admin, designer and /server use this)."""
+    profile = next((item for item in load_connection_profiles() if item["id"] == connection_id), None)
+    if profile is None:
+        raise HTTPException(status_code=404, detail="Connection ID is not registered")
+    sql_result = ctx.test_saved_adapter(connection_id)  # SQL adapters; None for MongoDB
+    if sql_result is not None:
+        return sql_result
+    uri, database = _profile_credentials(profile)
+    if not uri or not database:
+        if profile.get("storage") == "file":
+            detail = "This data source has no saved MongoDB URL or database name"
+        else:
+            detail = f"Set {profile['uriEnv']} and {profile['databaseEnv']} in .env or the server environment"
+        raise HTTPException(status_code=422, detail=detail)
+    return ctx.test_mongo_connection(uri, database, connection_id)
 
 
 def adapter_kind(ctx: SimpleNamespace, connection_id: str) -> str:

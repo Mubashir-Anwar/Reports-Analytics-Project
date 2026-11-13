@@ -70,6 +70,7 @@ export const api = {
       : request(`/api/admin/reports/${encodeURIComponent(definition.id)}`, { method: 'PUT', body: definition }),
   deleteReport: (id) => request(`/api/admin/reports/${encodeURIComponent(id)}`, { method: 'DELETE' }),
   connections: () => request('/api/admin/connections'),
+  systemStatus: () => request('/api/admin/system/status'),
   saveConnection: (payload) => request('/api/admin/connections', { method: 'POST', body: payload }),
   testConnectionValues: (payload) => request('/api/admin/connections/test', { method: 'POST', body: payload }),
   testConnection: (id) => request(`/api/admin/connections/${encodeURIComponent(id)}/test`, { method: 'POST' }),

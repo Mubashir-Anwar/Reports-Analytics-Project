@@ -60,13 +60,13 @@ export default function AdminApp() {
       {state === 'ready' && (
         <main className="page">
           <div className="page-head">
-            <div><p className="eyebrow">Administration</p><h1>Server administration</h1><p className="muted">User accounts, MongoDB data sources and logs. Reports are designed in the <a href="/designer">Designer</a> and published to the <a href="/server">Server</a>.</p></div>
+            <div><p className="eyebrow">Administration</p><h1>Server administration</h1><p className="muted">User accounts, data sources (MongoDB, PostgreSQL, MySQL, SQL Server, Oracle), the production checklist and logs. Reports are designed in the <a href="/designer">Designer</a> and published to the <a href="/server">Server</a>.</p></div>
           </div>
           <nav className="tabs" role="tablist">
             {TABS.map(([id, label]) => <button key={id} role="tab" aria-selected={tab === id} className={tab === id ? 'on' : ''} onClick={() => { setTab(id); setMessage(null); }}>{label}</button>)}
           </nav>
           {message && <div style={{ marginBottom: 14 }}><Notice message={message} /></div>}
-          {tab === 'overview' && <OverviewTab who={who} notify={notify} />}
+          {tab === 'overview' && <OverviewTab who={who} notify={notify} onOpen={(id) => { setTab(id); setMessage(null); }} />}
           {tab === 'users' && <UsersTab notify={notify} />}
           {tab === 'sources' && <DataSourcesTab notify={notify} />}
           {tab === 'logs' && <LogsTab />}
