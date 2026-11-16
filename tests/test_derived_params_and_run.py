@@ -75,7 +75,7 @@ def test_derived_parameter_validation():
         bad({"name": "X", "type": "date", "prompt": False})
     with pytest.raises(ValueError, match="could not be understood"):
         bad({"name": "X", "type": "date", "prompt": False, "expression": "new Object()"})
-    with pytest.raises(ValueError, match="must be defined before"):
+    with pytest.raises(ValueError, match="not a parameter of this report"):  # any order is fine, unknown names are not
         bad({"name": "X", "type": "date", "prompt": False, "expression": "$P{Later}"})
     with pytest.raises(ValueError, match=r"\$P"):
         bad({"name": "X", "type": "string", "prompt": False, "expression": "$F{Name}"})

@@ -5,8 +5,8 @@
 const RULES = [
   [/^Fill in:/i, {
     title: 'Some report questions are empty',
-    hint: 'Fill in the parameters shown above the preview (the required ones are marked), then run the preview again.',
-    actions: [],
+    hint: 'Fill in the parameters marked * on the left of the preview, then press Run again. If a parameter may stay empty (e.g. an optional product code), untick “Required” for it under Parameters.',
+    actions: [['parameters', 'Open Parameters']],
   }],
   [/Choose a Data Adapter first/i, {
     title: 'Choose a data adapter',

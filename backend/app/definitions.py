@@ -135,16 +135,14 @@ def _dynamic_report(payload: dict[str, Any], source_path: Path | None = None) ->
         prompt = raw.get("prompt", True) is not False
         expression = str(raw.get("expression", "") or "").strip()
         if not prompt:
-            # Derived parameter (Jasper isForPrompting=false): computed from parameters defined above it.
+            # Derived parameter (Jasper isForPrompting=false): computed from other parameters (any order, no loops).
             if not expression:
                 raise ValueError(f"{name} is not asked from the user, so its expression (default value) is required")
             if not jexpr.check_syntax(expression):
                 raise ValueError(f"The expression of {name} could not be understood: {expression[:80]}")
-            for token_kind, ref in designer_render.tokens_in(expression):
+            for token_kind, _ref in designer_render.tokens_in(expression):
                 if token_kind != "P":
                     raise ValueError(f"The expression of {name} may use only $P{{...}} parameters")
-                if ref not in {spec.name for spec in parameters}:
-                    raise ValueError(f"$P{{{ref}}} in the expression of {name} must be defined before {name}")
         parameters.append(ParameterSpec(
             name=name,
             kind=kind,
@@ -157,6 +155,8 @@ def _dynamic_report(payload: dict[str, Any], source_path: Path | None = None) ->
             prompt=prompt,
             expression=expression[:2000] if not prompt else "",
         ))
+
+    parameters = _order_computed(parameters)
 
     # A collection chosen by a URL parameter must be limited to a fixed list; otherwise a caller could
     # point the report at any collection in the database (e.g. a users collection).
@@ -495,6 +495,33 @@ def validate_parameters(definition: ReportDefinition, query_pairs: list[tuple[st
     for spec in computed:
         values[spec.name] = _compute_parameter(spec, values)
     return values, metadata
+
+
+def _order_computed(parameters: list[ParameterSpec]) -> list[ParameterSpec]:
+    """Asked parameters keep their order; computed ones follow, each after the computed ones it uses (like Jasper,
+    the order in the list does not matter). Unknown references and loops are refused."""
+    names = {spec.name for spec in parameters}
+    computed = {spec.name: spec for spec in parameters if not spec.prompt}
+    needs: dict[str, set[str]] = {}
+    for spec in computed.values():
+        refs = {ref for kind, ref in designer_render.tokens_in(spec.expression) if kind == "P"}
+        unknown = sorted(refs - names)
+        if unknown:
+            raise ValueError(f"$P{{{unknown[0]}}} in the expression of {spec.name} is not a parameter of this report")
+        if spec.name in refs:
+            raise ValueError(f"The expression of {spec.name} uses {spec.name} itself")
+        needs[spec.name] = refs & set(computed)
+    ordered: list[ParameterSpec] = []
+    done: set[str] = set()
+    while len(done) < len(computed):
+        ready = [name for name in computed if name not in done and needs[name] <= done]
+        if not ready:
+            loop = sorted(name for name in computed if name not in done)
+            raise ValueError(f"These computed parameters depend on each other in a loop: {', '.join(loop)}")
+        for name in ready:  # keep the original order among those that are ready
+            done.add(name)
+            ordered.append(computed[name])
+    return [spec for spec in parameters if spec.prompt] + ordered
 
 
 def _compute_parameter(spec: ParameterSpec, values: dict[str, Any]) -> Any:

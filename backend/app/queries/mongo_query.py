@@ -17,6 +17,46 @@ def _date_boundary(value: date, boundary: str) -> datetime:
     return datetime.combine(value, end_time, tzinfo=timezone.utc)
 
 
+# $P!{X} (Jasper: paste the text into the query) is allowed only as a filter made of field names, values and these
+# comparison operators — no $where, $expr, $function or anything else that could run code or read other data.
+RAW_FILTER_OPERATORS = {
+    "$eq", "$ne", "$gt", "$gte", "$lt", "$lte", "$in", "$nin", "$exists", "$regex", "$options", "$not", "$all",
+    "$size", "$type", "$elemMatch", "$mod", "$and", "$or", "$nor",
+}
+
+
+def _raw_filter(name: str, text: str) -> Any:
+    """The value of a $P!{name} parameter that looks like {…} or […]: parsed as a literal and checked."""
+    if len(text) > 20_000:
+        raise ValueError(f"$P!{{{name}}}: the filter text is longer than 20 000 characters")
+    try:
+        parsed = _parse_mongosh_literal(text.strip())
+    except ValueError as exc:
+        raise ValueError(f"$P!{{{name}}} must be a filter like {{'$in': ['A', 'B']}}; its value could not be read: {exc}") from None
+
+    def check(node: Any, depth: int = 0) -> None:
+        if depth > 8:
+            raise ValueError(f"$P!{{{name}}}: the filter is nested too deeply")
+        if isinstance(node, dict):
+            if set(node) & {"$param", "$paramIn", "$literalDate", "$literalObjectId", "$literalInt64"}:
+                raise ValueError(f"$P!{{{name}}}: parameters inside the pasted filter are not allowed")
+            for key, value in node.items():
+                if key.startswith("$") and key not in RAW_FILTER_OPERATORS:
+                    raise ValueError(f"$P!{{{name}}}: {key} is not allowed in a pasted filter (only comparisons such as $in, $ne, $gt, $regex)")
+                if not key.startswith("$") and not re.fullmatch(r"[A-Za-z_][\w.-]{0,199}", key):
+                    raise ValueError(f"$P!{{{name}}}: {key!r} is not a field name")
+                check(value, depth + 1)
+        elif isinstance(node, list):
+            if len(node) > 1000:
+                raise ValueError(f"$P!{{{name}}}: at most 1000 values")
+            for item in node:
+                check(item, depth + 1)
+        elif not (node is None or isinstance(node, (str, int, float, bool))):
+            raise ValueError(f"$P!{{{name}}}: unsupported value {node!r}")
+    check(parsed)
+    return parsed
+
+
 def _resolve_pipeline_parameters(node: Any, params: dict[str, Any]) -> Any:
     if isinstance(node, dict):
         if set(node) == {"$literalDate"}:
@@ -51,11 +91,13 @@ def _resolve_pipeline_parameters(node: Any, params: dict[str, Any]) -> Any:
             if len(items) > 200 or any(len(item) > 120 for item in items):
                 raise ValueError(f"{node['$paramIn']}: at most 200 values (each up to 120 characters)")
             return {"$in": items} if items else {"$nin": []}
-        if "$param" in node and set(node).issubset({"$param", "boundary"}):
+        if "$param" in node and set(node).issubset({"$param", "boundary", "raw"}):
             name = str(node["$param"])
             if name not in params:
                 raise ValueError(f"Pipeline parameter is not defined: {name}")
             value = params[name]
+            if node.get("raw") and isinstance(value, str) and value.strip()[:1] in ("{", "["):
+                return _raw_filter(name, value)
             if isinstance(value, date) and not isinstance(value, datetime):
                 boundary = str(node.get("boundary", "start"))
                 if boundary not in {"start", "end"}:
@@ -228,8 +270,8 @@ def _parse_mongosh_literal(source: str) -> Any:
             return ast.literal_eval(value)
         if kind == "parameter":
             name = re.fullmatch(r"\$P!?\{([A-Za-z_][A-Za-z0-9_]*)\}", value).group(1)
-            # Jasper's $P! raw substitution is deliberately reduced to a typed scalar.
-            return {"$param": name}
+            # Jasper's $P!{} pastes text; here it becomes a value that may be a checked filter (see _raw_filter)
+            return {"$param": name, "raw": True} if value.startswith("$P!") else {"$param": name}
         if kind == "number":
             if any(char in value for char in ".eE"):
                 return float(value)
@@ -292,7 +334,7 @@ def _replace_jasper_parameters(source: str) -> str:
             continue
         match = pattern.match(source, index)
         if match:
-            output.append(json.dumps({"$param": match.group(1)}))
+            output.append(json.dumps({"$param": match.group(1), "raw": True} if match.group(0).startswith("$P!") else {"$param": match.group(1)}))
             index = match.end()
             continue
         output.append(char)
@@ -454,7 +496,7 @@ def _validate_pipeline_parameter_names(pipeline: Any, allowed_names: set[str]) -
             if str(pipeline["$paramIn"]) not in allowed_names:
                 raise ValueError(f"Define the query parameter {pipeline['$paramIn']} in the report questions first")
             return
-        if "$param" in pipeline and set(pipeline).issubset({"$param", "boundary"}):
+        if "$param" in pipeline and set(pipeline).issubset({"$param", "boundary", "raw"}):
             name = str(pipeline["$param"])
             if name not in allowed_names:
                 raise ValueError(f"Define the query parameter {name} in the report questions first")

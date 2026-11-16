@@ -565,7 +565,49 @@ def _arith(op: str, left: Any, right: Any) -> Any:
     return math.fmod(a, b) if isinstance(a, float) or isinstance(b, float) else int(math.fmod(a, b))
 
 
+def _java_regex(pattern: Any) -> "re.Pattern[str]":
+    """A Java regular expression (as in String.replaceAll) for Python; the common syntax is the same."""
+    text = java_str(pattern)
+    if len(text) > 500:
+        raise JExprError("The regular expression is longer than 500 characters")
+    try:
+        return re.compile(text)
+    except re.error as exc:
+        raise JExprError(f"The regular expression could not be read: {exc}") from None
+
+
+def _java_replacement(replacement: Any) -> Callable[["re.Match[str]"], str]:
+    """Java replacement text: $1 or ${name} insert a group; a backslash makes the next character literal."""
+    text = java_str(replacement)
+
+    def build(match: "re.Match[str]") -> str:
+        out, i = [], 0
+        while i < len(text):
+            char = text[i]
+            if char == "\\" and i + 1 < len(text):
+                out.append(text[i + 1])
+                i += 2
+            elif char == "$" and i + 1 < len(text) and text[i + 1].isdigit():
+                j = i + 1
+                while j < len(text) and text[j].isdigit():
+                    j += 1
+                out.append(match.group(int(text[i + 1:j])) or "")
+                i = j
+            elif char == "$" and text[i + 1:i + 2] == "{" and "}" in text[i:]:
+                end = text.index("}", i)
+                out.append(match.group(text[i + 2:end]) or "")
+                i = end + 1
+            else:
+                out.append(char)
+                i += 1
+        return "".join(out)
+    return build
+
+
 _STRING_METHODS: dict[str, Callable[..., Any]] = {
+    "replaceAll": lambda s, a, b: _cap(_java_regex(a).sub(_java_replacement(b), s)),
+    "replaceFirst": lambda s, a, b: _cap(_java_regex(a).sub(_java_replacement(b), s, count=1)),
+    "matches": lambda s, a: _java_regex(a).fullmatch(s) is not None,
     "equals": lambda s, o: isinstance(o, str) and s == o,
     "equalsIgnoreCase": lambda s, o: isinstance(o, str) and s.lower() == o.lower(),
     "trim": lambda s: s.strip(),
