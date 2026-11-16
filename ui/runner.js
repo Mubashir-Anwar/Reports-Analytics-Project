@@ -6,25 +6,16 @@ let selectedReport = null;
 let searchTerm = '';
 
 const formatLabels = { csv: 'CSV', xlsx: 'Excel (.xlsx)', pdf: 'PDF' };
-const ACCESS_MESSAGE = 'You do not have report access yet. Connect with the admin token on the Manage (/admin) page, then refresh this page.';
+const ACCESS_MESSAGE = 'Your sign-in has ended. Opening the sign-in page…';
 
-// /reports and /generate need credentials; the runner reuses the token the admin page stored for this tab.
-let adminToken = '';
-try { adminToken = sessionStorage.getItem('mongoReportingAdminToken') || ''; } catch { /* storage unavailable */ }
-
+// /reports and /generate use the signed-in account (session cookie); the server checks its Run reports right
+// and folder permissions. A website runs reports with an API key or a signed link instead (see Admin → API keys).
 function accessHeaders(extra = {}) {
-  return adminToken ? { ...extra, 'X-Admin-Token': adminToken } : extra;
+  return extra;
 }
 
-// On the user's own computer (REPORTING_LOCAL_BOOTSTRAP=true) the token can be picked up automatically.
-async function ensureLocalToken() {
-  if (adminToken) return;
-  try {
-    const response = await fetch('/api/admin/bootstrap', { cache: 'no-store' });
-    if (!response.ok) return;
-    adminToken = (await response.json()).token || '';
-    if (adminToken) sessionStorage.setItem('mongoReportingAdminToken', adminToken);
-  } catch { /* not available: the user connects on the admin page instead */ }
+function signInAgain() {
+  window.location.assign(`/login?next=${encodeURIComponent('/ui')}`);
 }
 
 function showServiceState(text, kind = 'pending') {
@@ -189,8 +180,8 @@ async function loadReports() {
   reportList.innerHTML = '<p class="muted">Loading reports…</p>';
   showPageMessage('');
   try {
-    const response = await fetch('/reports', { headers: accessHeaders({ Accept: 'application/json' }) });
-    if (response.status === 401) throw new Error(ACCESS_MESSAGE);
+    const response = await fetch('/reports', { headers: accessHeaders({ Accept: 'application/json' }), credentials: 'same-origin' });
+    if (response.status === 401) { signInAgain(); throw new Error(ACCESS_MESSAGE); }
     if (!response.ok) throw new Error(`Could not load reports (${response.status}).`);
     const data = await response.json();
     reports = data.reports || [];
@@ -257,8 +248,8 @@ runForm.addEventListener('submit', async (event) => {
   setRunMessage('Running the report and preparing your download…', 'pending');
   try {
     const url = `/generate/${encodeURIComponent(selectedReport.id)}.${format}?${query.toString()}`;
-    const response = await fetch(url, { headers: accessHeaders({ Accept: 'application/octet-stream, application/json' }) });
-    if (response.status === 401) throw new Error(ACCESS_MESSAGE);
+    const response = await fetch(url, { headers: accessHeaders({ Accept: 'application/octet-stream, application/json' }), credentials: 'same-origin' });
+    if (response.status === 401) { signInAgain(); throw new Error(ACCESS_MESSAGE); }
     if (!response.ok) throw new Error(await readError(response));
     const blob = await response.blob();
     const objectUrl = URL.createObjectURL(blob);
@@ -311,4 +302,14 @@ fetch('/health', { headers: { Accept: 'application/json' }, cache: 'no-store' })
   .then(() => { if (!selectedReport) showServiceState('Service running', 'ready'); })
   .catch(() => showServiceState('Service unavailable', 'error'));
 
-ensureLocalToken().then(loadReports);
+loadReports();
+
+// Show only the parts this account may open (the server refuses the others anyway).
+fetch('/api/server/me', { credentials: 'same-origin', cache: 'no-store' })
+  .then((response) => (response.ok ? response.json() : null))
+  .then((me) => {
+    if (!me) return;
+    document.querySelectorAll('[data-right]').forEach((link) => { link.hidden = !me.rights.includes(link.dataset.right); });
+    document.querySelectorAll('[data-signout]').forEach((button) => { button.hidden = false; });
+  })
+  .catch(() => {});

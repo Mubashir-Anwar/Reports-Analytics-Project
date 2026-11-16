@@ -90,3 +90,6 @@
 @media(max-width:980px){.runner-layout{grid-template-columns:minmax(240px,290px) minmax(0,1fr)}.runner-page .panel{padding:18px}.runner-panel{padding:22px!important}}
 @media(max-width:760px){.runner-wrap{padding-top:28px}.runner-layout{grid-template-columns:1fr}.report-list-panel{position:static;min-height:0}.report-list{grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:8px}.runner-folder-group{align-content:start}.runner-panel{min-height:350px}.selection-empty{min-height:290px}.runner-footer{align-items:flex-start;flex-wrap:wrap}.runner-footer a{margin-left:32px}}
 @media(max-width:560px){.runner-hero{align-items:flex-start;flex-direction:column;gap:16px}.runner-hero h1{font-size:28px}.runner-page .panel{padding:16px}.runner-panel{padding:18px!important}.report-heading{align-items:flex-start;flex-direction:column}.report-title-wrap h2{font-size:20px}.parameter-grid{grid-template-columns:1fr}.output-controls{align-items:stretch;flex-direction:column}.output-controls .field{width:100%}.output-controls .button{width:100%}.runner-footer a{margin-left:0}}
+
+/* Sign out button in the runner top bar */
+.nav-signout{border:0;background:none;cursor:pointer;font-family:inherit}

@@ -1,4 +1,4 @@
-"""/api/admin/bootstrap must never hand out the admin token through a reverse proxy."""
+"""/api/admin/bootstrap is gone: pages use the signed-in user, so the admin token is never handed to a browser."""
 import sys
 from pathlib import Path
 
@@ -43,14 +43,14 @@ def test_only_exact_true_enables(make_client, monkeypatch, value):
         assert _bootstrap(client).status_code == 404
 
 
-def test_enabled_local_browser_gets_token(make_client, monkeypatch):
+def test_even_enabled_on_localhost_no_token_is_handed_out(make_client, monkeypatch):
+    """REPORTING_LOCAL_BOOTSTRAP=true used to give every local page the admin token (any user on the PC got admin)."""
     monkeypatch.setenv("REPORTING_LOCAL_BOOTSTRAP", "true")
     for base_url in ("http://127.0.0.1:8000", "http://localhost:8000"):
         with make_client(base_url=base_url) as client:
             response = _bootstrap(client)
-        assert response.status_code == 200
-        assert response.json() == {"token": TOKEN}
-        assert response.headers["cache-control"] == "no-store"
+        assert response.status_code == 404
+        assert TOKEN not in response.text
 
 
 @pytest.mark.parametrize("header", [

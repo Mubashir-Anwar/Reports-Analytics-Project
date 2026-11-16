@@ -14,7 +14,7 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse, Response
 
 from backend.app.connectors.profiles import load_connection_profiles
-from backend.app.constants import BOOTSTRAP_USERNAME, OUTPUT_FORMATS, REPORT_ID_PATTERN, SESSION_COOKIE, WORKSPACE_META
+from backend.app.constants import BOOTSTRAP_USERNAME, OUTPUT_FORMATS, REPORT_ID_PATTERN, SESSION_COOKIE, USER_RIGHTS, WORKSPACE_META
 from backend.app.logs import LOG
 from backend.app.mrd import parse_report_definition_xml, render_report_definition_xml
 from backend.app.security import permissions, shared_state
@@ -22,13 +22,16 @@ from backend.app.security.access import client_address
 from backend.app.security.users import (
     bootstrap_login_active,
     check_user_password,
+    derived_role,
     find_user,
+    is_super_admin,
     load_users,
     make_session_cookie,
     password_needs_upgrade,
     save_users,
     session_lifetime_seconds,
     set_user_password,
+    user_rights,
 )
 from backend.app.storage.files import add_saved_folder, list_saved_folders, normalize_folder_path
 
@@ -85,9 +88,12 @@ def register(app: FastAPI, ctx: SimpleNamespace) -> None:
                     if password_needs_upgrade(item):  # older, weaker hash: replace it now that we know the password
                         set_user_password(item, password)
             save_users(users)
-        role = "admin" if bootstrap else str(user.get("role", "viewer"))
-        LOG.info("User %s signed in to /server (%s)", session_user, role)
-        response = JSONResponse({"username": session_user, "role": role, "bootstrap": bootstrap})
+        rights = sorted(USER_RIGHTS) if bootstrap else sorted(user_rights(user))
+        super_admin = bootstrap or is_super_admin(user)
+        role = derived_role(set(rights), super_admin)
+        LOG.info("User %s signed in (%s)", session_user, ", ".join(rights) or "no rights")
+        response = JSONResponse({"username": session_user, "role": role, "bootstrap": bootstrap, "rights": rights,
+                                 "superAdmin": super_admin})
         secure = request.url.scheme == "https" or os.getenv("REPORTING_SECURE_COOKIES", "false").strip().lower() == "true"
         response.set_cookie(SESSION_COOKIE, make_session_cookie(session_user, version, bootstrap), max_age=session_lifetime_seconds(),
                             httponly=True, samesite="strict", secure=secure, path="/")
@@ -105,7 +111,11 @@ def register(app: FastAPI, ctx: SimpleNamespace) -> None:
 
     @app.get("/api/server/me")
     def server_me(request: Request) -> dict[str, Any]:
-        return session_view(require_session(request))
+        """Who is signed in and which parts they may open (every page's app menu asks this)."""
+        session = current_session(request)
+        if session is None:
+            raise HTTPException(status_code=401, detail="Sign in first")
+        return session_view(session)
 
     @app.get("/api/server/repository")
     def server_repository(request: Request) -> dict[str, Any]:
@@ -388,8 +398,13 @@ def register(app: FastAPI, ctx: SimpleNamespace) -> None:
         for user in load_users():
             if user.get("disabled"):
                 continue
-            level, why = permissions.explain({"username": user["username"], "role": user.get("role", "viewer")}, folder, rules)
-            effective.append({"username": user["username"], "role": user.get("role", "viewer"), "level": permissions.NAMES[level], "why": why})
+            rights = user_rights(user)
+            role = derived_role(rights, is_super_admin(user))
+            if "server" in rights:
+                level, why = permissions.explain({"username": user["username"], "role": role}, folder, rules)
+            else:
+                level, why = permissions.NONE, "no Report Server right"
+            effective.append({"username": user["username"], "role": role, "level": permissions.NAMES[level], "why": why})
         inherited = [{"folder": f, **rules[f]} for f in permissions.folder_chain(folder)[1:] if f in rules]
         return {"folder": folder, "rules": entry, "inherited": inherited, "effective": effective,
                 "users": sorted(u["username"] for u in load_users())}

@@ -1,17 +1,15 @@
 """Designer tools: query parsing, JRXML import, design validate/render, draft preview and run, local bootstrap."""
 from __future__ import annotations
 
-import ipaddress
-import os
 from types import SimpleNamespace
 from typing import Any
 
 from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import JSONResponse, Response
+from fastapi.responses import Response
 
 from backend.app.connectors import sql as sql_connector
 from backend.app.connectors.errors import ConnectorQueryError
-from backend.app.constants import BOOTSTRAP_PROXY_HEADERS, OUTPUT_FORMATS, REPORT_ID_PATTERN
+from backend.app.constants import OUTPUT_FORMATS, REPORT_ID_PATTERN
 from backend.app.queries.mongo_query import (
     _validate_pipeline_parameter_names,
     _validate_read_only_pipeline,
@@ -33,33 +31,6 @@ def register(app: FastAPI, ctx: SimpleNamespace) -> None:
     sql_adapter = ctx.sql_adapter
     subreport_loader = ctx.subreport_loader
     dataset_loader = ctx.dataset_loader
-
-    @app.get("/api/admin/bootstrap", include_in_schema=False)
-    def local_admin_bootstrap(request: Request) -> JSONResponse:
-        """Allow the local browser UI to pick up its token without exposing it remotely.
-
-        Off unless REPORTING_LOCAL_BOOTSTRAP=true. The loopback + Host checks alone are not enough:
-        behind a reverse proxy on the same machine every request arrives from 127.0.0.1, and the
-        Host header is either the proxy's upstream (e.g. 127.0.0.1:8000) or set by the caller.
-        """
-        unavailable = HTTPException(status_code=404, detail="Local admin bootstrap is available only on this computer")
-        if os.getenv("REPORTING_LOCAL_BOOTSTRAP", "false").strip().lower() != "true":
-            raise unavailable
-        if any(request.headers.get(name) for name in BOOTSTRAP_PROXY_HEADERS):
-            raise unavailable
-        allowed_hosts = {"localhost", "127.0.0.1", "::1"}
-        host = (request.url.hostname or "").lower()
-        client_host = request.client.host if request.client else ""
-        try:
-            local_client = ipaddress.ip_address(client_host).is_loopback
-        except ValueError:
-            local_client = False
-        if host not in allowed_hosts or not local_client:
-            raise unavailable
-        token = os.getenv("REPORTING_ADMIN_TOKEN", "").strip()
-        if not token:
-            raise HTTPException(status_code=503, detail="The local admin token could not be initialised")
-        return JSONResponse({"token": token}, headers={"Cache-Control": "no-store"})
 
     @app.post("/api/admin/query/fields")
     async def admin_read_sql_fields(request: Request) -> dict[str, Any]:

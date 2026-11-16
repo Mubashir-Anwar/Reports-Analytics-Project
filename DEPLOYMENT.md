@@ -85,13 +85,20 @@ server {
 5. **Secrets** in the server's environment (not in files in the code folder):
    `REPORTING_ADMIN_TOKEN`, `REPORTING_DESIGNER_TOKEN` (optional), `REPORTING_ACCESS_SECRET`.
    Generate each with `python -c "import secrets; print(secrets.token_urlsafe(48))"`.
-6. **Must be false on a server**: `REPORTING_LOCAL_BOOTSTRAP=false`.
+6. **Accounts and rights**: sign in at `/login` as `admin` with the admin token (first setup only), then create
+   one or more **super admins** in Admin → Users & rights. Give every other account only the rights it needs:
+   Admin, Designer, Report Server, Analytics, Run reports. Pages and APIs check these rights; the admin token is
+   for automation only and is never handed to a browser.
 7. **Start with one worker**:
    `python -m uvicorn backend.app.main:app --host 127.0.0.1 --port 8000 --workers 1`
    (`app:app` still works: the root `app.py` imports the same app.)
    Saved reports and data adapters are cached inside the process; several workers would not see each
    other's changes. Put nginx/IIS in front for HTTPS.
-8. **Check**: `GET /health` → `{"status": "ok", ...}`; open `/admin` with the admin token; check the Logs tab.
+8. **Check**: `GET /health` → `{"status": "ok", ...}`; sign in at `/login`, open `/admin`; check the Logs tab.
+9. **Client websites** (run reports by URL): create one key per website in Admin → API keys (limit it to
+   folders and the website server's IP). The website's server calls
+   `GET /generate/<ID>.pdf?Param=…` with `X-API-Key: mrk_…`, or `POST /api/v1/links` for a short-lived signed URL
+   to give a browser. The key must never be put in a web page.
 
 On Windows, run the start command as a service (for example with NSSM or the Task Scheduler "at startup").
 A `Dockerfile` is included: mount a volume at `/data` and pass the secrets as environment variables:
@@ -197,6 +204,12 @@ public class ReportsProxy extends HttpHandler {
 // registration
 server.getServerConfiguration().addHttpHandler(new ReportsProxy(), "/ui", "/assets/*", "/reports", "/reports/*", "/generate/*");
 ```
+
+Prefer a per-website **API key** over the shared report token: create it in Admin → API keys (limit it to the
+folders the website may run and to the Grizzly server's IP) and send `.header("X-API-Key", apiKey)` instead of
+`X-Report-Token`. Disabling the key cuts that website off at once, and its runs are logged under the key's name.
+The proxied `/ui` page opens for the website's visitors because the proxy adds the key; on the reporting
+server itself `/ui` needs a signed-in user with the Run reports right.
 
 With this setup, run the reporting service with `REPORTING_ENABLED_AREAS=runner` on an address only Grizzly
 can reach (for example `127.0.0.1:8000`), and keep `/admin` and `/designer` on a separate internal instance.

@@ -1,0 +1,128 @@
+"""API keys: one per client website or system that runs reports by URL.
+
+A key looks like  mrk_<id>_<secret>.  Only a SHA-256 of the secret is stored (the secret is 256 random bits,
+so a plain hash is enough), the full key is shown once when it is created.
+
+The client's server sends it in a header (X-API-Key or Authorization: Bearer) and never puts it in a browser.
+For a browser it asks for a short-lived signed link instead (POST /api/v1/links): that link carries KeyId,
+Expires and Signature, so the key's limits (folders, expiry, disabled) still apply when it is opened.
+"""
+from __future__ import annotations
+
+import hashlib
+import hmac
+import re
+import secrets
+import time
+from datetime import datetime, timezone
+from typing import Any
+
+from backend.app.security.access import _in_networks, _parse_networks
+from backend.app.storage.store import get_store
+
+KEY = "api-keys.json"
+TOKEN_PATTERN = re.compile(r"^mrk_([a-f0-9]{12})_([A-Za-z0-9_-]{30,64})$")
+ID_PATTERN = re.compile(r"^[a-f0-9]{12}$")
+_TOUCH_SECONDS = 60
+_last_touch: dict[str, float] = {}
+
+
+def _now() -> str:
+    return datetime.now(timezone.utc).isoformat(timespec="seconds")
+
+
+def _digest(secret: str) -> str:
+    return hashlib.sha256(secret.encode("utf-8")).hexdigest()
+
+
+def load_keys() -> list[dict[str, Any]]:
+    raw = get_store().read_json(KEY)
+    items = raw.get("keys", []) if isinstance(raw, dict) else []
+    return [item for item in items if isinstance(item, dict) and ID_PATTERN.fullmatch(str(item.get("id", "")))]
+
+
+def save_keys(keys: list[dict[str, Any]]) -> None:
+    get_store().write_json(KEY, {"keys": keys}, private=True)
+
+
+def key_view(item: dict[str, Any]) -> dict[str, Any]:
+    """What the admin page shows (never the hash)."""
+    return {name: item.get(name) for name in ("id", "name", "folders", "allowedIps", "expiresAt", "disabled", "createdBy",
+                                               "createdAt", "lastUsedAt")} | {"prefix": f"mrk_{item['id']}_…"}
+
+
+def create_key(name: str, folders: list[str], allowed_ips: list[str], expires_at: str | None, created_by: str) -> tuple[dict[str, Any], str]:
+    key_id, secret = secrets.token_hex(6), secrets.token_urlsafe(32)
+    record = {"id": key_id, "name": name, "hash": _digest(secret), "folders": folders, "allowedIps": allowed_ips,
+              "expiresAt": expires_at, "disabled": False, "createdBy": created_by, "createdAt": _now(), "lastUsedAt": None}
+    keys = load_keys()
+    keys.append(record)
+    save_keys(keys)
+    return record, f"mrk_{key_id}_{secret}"
+
+
+def _usable(item: dict[str, Any] | None, client_ip: str) -> dict[str, Any] | None:
+    if item is None or item.get("disabled"):
+        return None
+    expires = item.get("expiresAt")
+    if expires:
+        try:
+            if datetime.fromisoformat(str(expires).replace("Z", "+00:00")) <= datetime.now(timezone.utc):
+                return None
+        except ValueError:
+            return None
+    allowed = [str(value) for value in item.get("allowedIps") or []]
+    if allowed and not _in_networks(client_ip, _parse_networks(",".join(allowed), "API key allowedIps")):
+        return None
+    return item
+
+
+def _touch(item: dict[str, Any]) -> None:
+    """Remember when the key was last used (at most once a minute per key, so runs do not rewrite the file)."""
+    if time.monotonic() - _last_touch.get(item["id"], -_TOUCH_SECONDS) < _TOUCH_SECONDS:
+        return
+    _last_touch[item["id"]] = time.monotonic()
+    keys = load_keys()
+    for stored in keys:
+        if stored["id"] == item["id"]:
+            stored["lastUsedAt"] = _now()
+    save_keys(keys)
+
+
+def key_from_token(token: str, client_ip: str) -> dict[str, Any] | None:
+    """The active key for a full mrk_… value, or None."""
+    match = TOKEN_PATTERN.fullmatch(token.strip())
+    if not match:
+        return None
+    item = next((stored for stored in load_keys() if stored["id"] == match.group(1)), None)
+    if item is None or not secrets.compare_digest(str(item.get("hash", "")), _digest(match.group(2))):
+        return None
+    item = _usable(item, client_ip)
+    if item is not None:
+        _touch(item)
+    return item
+
+
+def key_by_id(key_id: str, client_ip: str) -> dict[str, Any] | None:
+    """The active key named in a signed link (the link's Signature proves it was issued for this key)."""
+    if not ID_PATTERN.fullmatch(key_id or ""):
+        return None
+    item = _usable(next((stored for stored in load_keys() if stored["id"] == key_id), None), client_ip)
+    if item is not None:
+        _touch(item)
+    return item
+
+
+def link_secret() -> str:
+    """Secret for signed links issued to API keys (separate from REPORTING_ACCESS_SECRET)."""
+    from backend.app.security.users import _session_secret
+    return hmac.new(_session_secret(), b"api-key-links-v1", hashlib.sha256).hexdigest()
+
+
+def folder_allowed(item: dict[str, Any], folder: str) -> bool:
+    """A key limited to folders may only run reports in those folders (and their subfolders)."""
+    limits = [str(value).strip("/") for value in item.get("folders") or [] if str(value).strip("/")]
+    if not limits:
+        return True
+    folder = str(folder or "").strip("/")
+    return any(folder == limit or folder.startswith(limit + "/") for limit in limits)

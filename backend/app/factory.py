@@ -11,7 +11,19 @@ from fastapi.staticfiles import StaticFiles
 from backend.app.constants import SERVICE_VERSION
 from backend.app.context import create_context
 from backend.app.logs import HTTP_LOG
-from backend.app.routers import connections, designer, generate, jobs, pages, repository, server_portal, system, users, workspace
+from backend.app.routers import (
+    api_keys,
+    connections,
+    designer,
+    generate,
+    jobs,
+    pages,
+    repository,
+    server_portal,
+    system,
+    users,
+    workspace,
+)
 from backend.app.security.access import client_address, enabled_areas, management_ip_allowed, path_area
 from backend.app.security.headers import add_security_headers, too_large
 
@@ -39,7 +51,7 @@ def make_app() -> FastAPI:
         client = client_address(request)
         current_areas = enabled_areas()
         blocked: Response | None = None
-        if area in ("runner", "admin", "designer", "server", "docs") and area not in current_areas:
+        if area in ("runner", "admin", "designer", "server", "analytics", "docs") and area not in current_areas:
             blocked = JSONResponse({"detail": "Not Found"}, status_code=404)
         elif area == "management-api" and not current_areas & {"admin", "designer"}:
             blocked = JSONResponse({"detail": "Not Found"}, status_code=404)
@@ -76,6 +88,7 @@ def make_app() -> FastAPI:
     server_portal.register(app, ctx)
     jobs.register(app, ctx)
     users.register(app, ctx)
+    api_keys.register(app, ctx)
     system.register(app, ctx)
     generate.register(app, ctx)
     return app

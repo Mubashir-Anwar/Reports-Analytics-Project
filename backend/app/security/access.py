@@ -30,8 +30,12 @@ def path_area(path: str) -> str | None:
         return "admin"
     if path == "/designer" or path.startswith("/designer/"):
         return "designer"
+    if path in ("/login", "/api/server/login", "/api/server/logout", "/api/server/me"):
+        return None                     # sign-in works whichever areas are switched on
     if path == "/server" or path.startswith("/server/") or path.startswith("/api/server/"):
         return "server"
+    if path == "/analytics" or path.startswith("/analytics/"):
+        return "analytics"
     if path.startswith("/api/admin/"):
         return "management-api"
     if path in ("/docs", "/redoc", "/openapi.json") or path.startswith("/docs/"):

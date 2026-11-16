@@ -1,21 +1,14 @@
-// Thin client for the FastAPI admin API. Token: auto-bootstrap on localhost, else typed by the user.
-let token = '';
-try { token = sessionStorage.getItem('adminToken') || ''; } catch { /* storage unavailable */ }
-
-export function setToken(value) {
-  token = value;
-  try { sessionStorage.setItem('adminToken', value); } catch { /* ignore */ }
-}
-export const hasToken = () => Boolean(token);
-export function clearToken() {
-  token = '';
-  try { sessionStorage.removeItem('adminToken'); } catch { /* ignore */ }
-}
+// Thin client for the FastAPI admin API. It uses the signed-in user's session cookie (set at /login);
+// the server checks that account's rights (Designer, Admin, …) on every call. No token is kept in the page.
+import { goSignIn } from './shared/session.js';
 
 export async function request(path, { method = 'GET', body, raw = false } = {}) {
-  const headers = { 'X-Admin-Token': token };
-  if (body !== undefined) headers['Content-Type'] = 'application/json';
-  const response = await fetch(path, { method, headers, body: body === undefined ? undefined : JSON.stringify(body) });
+  const headers = {};
+  // Signed-in writes must be JSON (a cross-site form cannot send that), so DELETE/POST without a body send {}.
+  const send = body === undefined && method !== 'GET' ? {} : body;
+  if (send !== undefined) headers['Content-Type'] = 'application/json';
+  const response = await fetch(path, { method, headers, credentials: 'same-origin', body: send === undefined ? undefined : JSON.stringify(send) });
+  if (response.status === 401) goSignIn(); // the session ended: sign in again and come back to this page
   if (!response.ok) {
     let detail = response.statusText;
     try {
@@ -34,12 +27,6 @@ export async function request(path, { method = 'GET', body, raw = false } = {}) 
 }
 
 export const api = {
-  async bootstrap() {
-    const response = await fetch('/api/admin/bootstrap');
-    if (!response.ok) return false;
-    setToken((await response.json()).token);
-    return true;
-  },
   // designer workspace: internal saves; nothing here is on the server until it is published
   workspace: () => request('/api/admin/workspace'),
   workspaceReport: (id) => request(`/api/admin/workspace/${encodeURIComponent(id)}`),
@@ -93,6 +80,10 @@ export const api = {
   createUser: (payload) => request('/api/admin/users', { method: 'POST', body: payload }),
   updateUser: (username, change) => request(`/api/admin/users/${encodeURIComponent(username)}`, { method: 'PUT', body: change }),
   deleteUser: (username) => request(`/api/admin/users/${encodeURIComponent(username)}`, { method: 'DELETE' }),
+  apiKeys: () => request('/api/admin/api-keys'),
+  createApiKey: (payload) => request('/api/admin/api-keys', { method: 'POST', body: payload }),
+  updateApiKey: (id, change) => request(`/api/admin/api-keys/${encodeURIComponent(id)}`, { method: 'PUT', body: change }),
+  deleteApiKey: (id) => request(`/api/admin/api-keys/${encodeURIComponent(id)}`, { method: 'DELETE' }),
   logs: ({ lines, level, search }) => request(`/api/admin/logs?${new URLSearchParams({ lines, level, search })}`),
   audit: (limit) => request(`/api/admin/audit?limit=${encodeURIComponent(limit)}`),
   async logFile() { return (await request('/api/admin/logs/download', { raw: true })).blob(); },

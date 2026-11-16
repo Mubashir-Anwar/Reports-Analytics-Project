@@ -131,7 +131,7 @@ def register(app: FastAPI, ctx: SimpleNamespace) -> None:
         existing = reports_by_id.get(report_id)
         if existing is not None and options.get("replace") is not True:
             raise HTTPException(status_code=409, detail=f"{report_id} is already published on the server; confirm that the server copy should be replaced")
-        saved = save_report_payload(payload, expected_id=report_id if existing is not None else None, action="published", user=f"designer ({role})")
+        saved = save_report_payload(payload, expected_id=report_id if existing is not None else None, action="published", user=request.state.actor or f"designer ({role})")
         folder = saved.editor_config.get("folder", "General") if saved.editor_config else payload.get("folder", "General")
         add_saved_folder(folder)
         meta = dict(data.get(WORKSPACE_META) or {})
@@ -140,6 +140,6 @@ def register(app: FastAPI, ctx: SimpleNamespace) -> None:
             meta["updatedAt"] = meta["publishedAt"]
         data[WORKSPACE_META] = meta
         get_store().write_json(path, data)
-        record_history(report_id, "published", f"designer ({role})", f"{'replaced' if existing is not None else 'new'} in {folder}")
+        record_history(report_id, "published", request.state.actor or f"designer ({role})", f"{'replaced' if existing is not None else 'new'} in {folder}")
         LOG.info("Report %s published to the server folder %s", report_id, folder)
         return {"report": admin_report_payload(saved), "replaced": existing is not None, "workspace": workspace_summary(data)}

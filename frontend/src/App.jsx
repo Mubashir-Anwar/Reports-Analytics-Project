@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react';
-import { api, hasToken, setToken } from './api.js';
+import { api } from './api.js';
+import { signOut } from './shared/session.js';
 import Canvas from './Canvas.jsx';
 import ContextMenu from './ContextMenu.jsx';
 import ExpressionEditor from './ExpressionEditor.jsx';
@@ -24,14 +25,13 @@ import { readClipboard } from './arrange.js';
 
 const DEMO_COLUMNS = ['Identifier', 'Branch', 'Name', 'Amount', 'LastUpdateDateTime'];
 
-function Login({ onDone, hint }) {
-  const [value, setValue] = useState('');
+/** Shown when the signed-in account may not use the designer (the page itself already checks; this covers a session that changed). */
+function NoAccess({ text }) {
   return (
     <div className="login">
-      <h2>Admin token</h2>
-      <p className="muted">{hint}</p>
-      <input type="password" value={value} onChange={(e) => setValue(e.target.value)} placeholder="REPORTING_ADMIN_TOKEN" autoFocus />
-      <button className="btn primary" onClick={() => { setToken(value); onDone(); }}>Connect</button>
+      <h2>No access to the Designer</h2>
+      <p className="muted">{text}</p>
+      <button className="btn primary" onClick={signOut}>Sign out and use another account</button>
     </div>
   );
 }
@@ -39,7 +39,7 @@ function Login({ onDone, hint }) {
 export default function App() {
   const [state, dispatch] = useReducer(reducer, initialState);
   const [ready, setReady] = useState(false);
-  const [needToken, setNeedToken] = useState(false);
+  const [denied, setDenied] = useState('');
   const [tab, setTab] = useState('setup');
   const [leftTab, setLeftTab] = useState('workspace');
   const [drawer, setDrawer] = useState(null); // small screens: 'left' | 'right' panel shown over the canvas
@@ -155,9 +155,12 @@ export default function App() {
   };
 
   const connect = useCallback(async () => {
-    if (!hasToken()) await api.bootstrap().catch(() => false);
-    try { await api.folders(); setNeedToken(false); setReady(true); notify('Connected to the server', 'ok'); }
-    catch (error) { setNeedToken(true); setReady(false); notify(error.status === 401 ? 'An admin or designer token is needed' : error.message, 'error'); }
+    try { await api.folders(); setDenied(''); setReady(true); notify('Connected to the server', 'ok'); }
+    catch (error) {
+      setReady(false);
+      if (error.status === 403) setDenied(error.message); // signed in, but without the Designer right
+      else if (error.status !== 401) notify(error.message, 'error'); // 401: api.js already sends the browser to /login
+    }
   }, [notify]);
   useEffect(() => { connect(); }, [connect]);
 
@@ -365,7 +368,7 @@ export default function App() {
     saveFile,
   };
 
-  if (needToken) return <Login hint="On your own computer the token is picked up automatically. On a deployed server enter REPORTING_ADMIN_TOKEN or REPORTING_DESIGNER_TOKEN." onDone={connect} />;
+  if (denied) return <NoAccess text={denied} />;
   if (!ready) return <div className="login"><p>Connecting to the server…</p></div>;
 
   /** The fix buttons of the error popup. */

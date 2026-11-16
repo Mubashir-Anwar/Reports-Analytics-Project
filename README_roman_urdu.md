@@ -27,7 +27,7 @@ python -m pip install -r requirements.txt
 Copy-Item .env.example .env
 ```
 
-`.env` mein default MongoDB URI/database set karein. Misal ke taur par local Mongo ke liye `MONGODB_URI=mongodb://localhost:27017` aur `MONGODB_DATABASE=cas-cade` ho sakta hai. `REPORTING_ADMIN_TOKEN` khali chhor sakte hain: app pehli run par ek random token bana kar `data/private_secrets.json` mein save karti hai. Apne computer par `.env` mein `REPORTING_LOCAL_BOOTSTRAP=true` set karein; phir `/admin` ko `127.0.0.1` ya `localhost` se kholne par browser token khud uthata hai, copy/paste ki zaroorat nahi. Yeh setting default `false` hai aur server ya reverse proxy (nginx/IIS) ke peeche hamesha `false` rehni chahiye: proxy ki har request `127.0.0.1` se aati hai, is liye `true` hone par proxy ke zariye koi bhi admin token le sakta hai. `false` hone par token `data/private_secrets.json` ke `admin_token` se ya `REPORTING_ADMIN_TOKEN` se lekar admin page par enter karein. `.env` aur private secrets file share ya source control mein commit na karein.
+`.env` mein default MongoDB URI/database set karein. Misal ke taur par local Mongo ke liye `MONGODB_URI=mongodb://localhost:27017` aur `MONGODB_DATABASE=cas-cade` ho sakta hai. `REPORTING_ADMIN_TOKEN` khali chhor sakte hain: app pehli run par ek random token bana kar `data/private_secrets.json` mein save karti hai. Har page (`/designer`, `/server`, `/admin`, `/ui`, `/analytics`) user account se sign in hota hai (`/login`). Pehli dafa: username `admin` aur password admin token (`data/private_secrets.json` ka `admin_token` ya `REPORTING_ADMIN_TOKEN`). Phir Admin → Users & rights mein ek ya zyada **super admin** banayein; us ke baad yeh pehli-dafa wala login band ho jata hai. Admin token ab browser ko kabhi nahi diya jata (`REPORTING_LOCAL_BOOTSTRAP` khatam). `.env` aur private secrets file share ya source control mein commit na karein.
 
 Service start karein:
 
@@ -40,7 +40,9 @@ Browser mein:
 - `http://127.0.0.1:8000/ui` reports chalane ke liye.
 - `http://127.0.0.1:8000/designer` reports banane, workspace mein save karne aur server par publish karne ke liye.
 - `http://127.0.0.1:8000/server` sign in karke published reports ki repository dekhne aur chalane ke liye.
-- `http://127.0.0.1:8000/admin` sirf admin kaam: users, Mongo data sources aur logs. `REPORTING_LOCAL_BOOTSTRAP=true` ho to local admin token automatically load hota hai.
+- `http://127.0.0.1:8000/admin` sirf admin kaam: users aur un ke rights, API keys, data sources aur logs.
+- **Rights**: har user ko sirf woh hissa nazar aata hai jis ka right ho: Admin, Designer, Report Server, Analytics, Run reports. Super admin ke paas sab rights hain aur sirf woh administrators ko bana/badal/delete kar sakta hai (ek se zyada super admin ho sakte hain; kam az kam ek hamesha rehta hai).
+- **URL se report chalana (website/Grizzly)**: Admin → API keys mein har website ke liye ek key banayein. Website ka server `GET /generate/<ID>.pdf?Param=…` header `X-API-Key: mrk_…` ke saath bheje, ya browser ke liye `POST /api/v1/links` se chand minute wala signed link le. Key kabhi web page mein na daalein.
 - `http://127.0.0.1:8000/reports` report IDs aur URL parameters ke liye.
 - `http://127.0.0.1:8000/health` default Mongo connection status ke liye.
 - `http://127.0.0.1:8000/docs` API documentation ke liye.
@@ -194,7 +196,7 @@ Deployment ko ASGI app `app:app` chahiye. Start command yeh rakhein; platform ka
 uvicorn app:app --host 0.0.0.0 --port $PORT
 ```
 
-Grizzly environment mein `MONGODB_URI`, `MONGODB_DATABASE`, `REPORTING_ADMIN_TOKEN` aur audit/query limit variables configure karein. Deployment par `REPORTING_LOCAL_BOOTSTRAP` set na karein (ya `false` rakhein); admin token platform ke private environment settings mein rakhein. `REPORTING_DATA_DIR` ko persistent writable storage par set karein; isi mein reports, `connections.json`, `private_secrets.json` aur local audit file save hote hain. Deploy ke baad `/health`, `/ui` aur `/admin` check karein. Extra MongoDB connection URLs admin UI se save ho sakte hain, lekin persistent storage private aur access-controlled honi chahiye.
+Grizzly environment mein `MONGODB_URI`, `MONGODB_DATABASE`, `REPORTING_ADMIN_TOKEN` aur audit/query limit variables configure karein. Admin token platform ke private environment settings mein rakhein; deploy ke baad `/login` par super admin banayein. `REPORTING_DATA_DIR` ko persistent writable storage par set karein; isi mein reports, `connections.json`, `private_secrets.json` aur local audit file save hote hain. Deploy ke baad `/health`, `/ui` aur `/admin` check karein. Extra MongoDB connection URLs admin UI se save ho sakte hain, lekin persistent storage private aur access-controlled honi chahiye.
 
 ## Service ki hadain
 
@@ -203,7 +205,7 @@ Reports MongoDB aggregation pipeline se define hoti hain; Mongo Shell/JS/Python 
 
 ## Report Designer (Jasper Studio jaisa) — `/designer`
 
-React (Vite) based designer. Build ho chuka hai (`ui/app/`; isi ek React build se `/designer`, `/server` aur `/admin` teeno chalte hain), is liye Node ke baghair bhi `uvicorn app:app` ke baad `http://127.0.0.1:8000/designer` khul jata hai. Local par `REPORTING_LOCAL_BOOTSTRAP=true` ho to admin token khud mil jata hai; warna aur deployed server par `REPORTING_ADMIN_TOKEN` daalna hoga.
+React (Vite) based designer. Build ho chuka hai (`ui/app/`; isi ek React build se `/designer`, `/server` aur `/admin` teeno chalte hain), is liye Node ke baghair bhi `uvicorn app:app` ke baad `http://127.0.0.1:8000/designer` khul jata hai. Kholne par `/login` par apne account se sign in karein; Designer right wale users hi designer khol sakte hain.
 
 **Panels:** left par **Workspace**, **Server** aur **Data Adapters**, neeche **Outline**. Right par **Palette** (Static Text, Text Field, Line, Rectangle, Image, Chart) aur **Properties**. Beech mein 3 tabs: **Setup** (naam, adapter, collection, query, fields detect, parameters, auto layout), **Design** (bands wala canvas) aur **Preview**.
 

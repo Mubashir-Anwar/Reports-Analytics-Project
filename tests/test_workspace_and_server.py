@@ -190,7 +190,10 @@ def test_server_area_can_be_switched_off(tmp_path, monkeypatch, client):
     monkeypatch.setenv("REPORTING_ENABLED_AREAS", "runner,admin")
     off = TestClient(core.make_app())
     assert off.get("/server").status_code == 404
-    assert off.post("/api/server/login", json={"username": "admin", "password": ADMIN}).status_code == 404
+    assert off.get("/api/server/repository").status_code == 404
+    # Sign-in stays on: it is how users reach /admin and /ui on this instance too.
+    assert off.post("/api/server/login", json={"username": "admin", "password": ADMIN}).status_code == 200
+    assert off.get("/admin").status_code == 200
 
 
 def test_designer_server_and_admin_are_pages_of_the_react_build(client):

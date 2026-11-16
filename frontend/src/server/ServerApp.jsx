@@ -6,6 +6,7 @@ import PermissionsDialog from './PermissionsDialog.jsx';
 import ResourcePanel from './ResourcePanel.jsx';
 import { RunsList, SchedulesList } from './Schedules.jsx';
 import UploadDialog from './UploadDialog.jsx';
+import { safeNext } from '../shared/session.js';
 import { roleAtLeast, serverApi, whenSignedOut } from './serverApi.js';
 
 /* ---------------------------------------------------------------- sign in */
@@ -30,12 +31,12 @@ function LoginForm({ onSignedIn, message }) {
     <div className="login-wrap">
       <form className="card login" onSubmit={submit} autoComplete="on">
         <span className="brand-mark" aria-hidden="true">M</span>
-        <div><p className="eyebrow">Report server</p><h1>Sign in</h1><p className="muted">Sign in to browse the repository and run published reports.</p></div>
+        <div><p className="eyebrow">Mongo Reports</p><h1>Sign in</h1><p className="muted">One sign-in for the Designer, Report Server, Analytics, Run reports and Admin. You see the parts your account has rights for.</p></div>
         <label className="field"><span>Username</span><input name="username" autoComplete="username" value={username} onChange={(e) => setUsername(e.target.value)} required autoFocus /></label>
         <label className="field"><span>Password</span><input name="password" type="password" autoComplete="current-password" value={password} onChange={(e) => setPassword(e.target.value)} required /></label>
         <Notice message={error} />
         <button className="btn primary" type="submit" disabled={busy} style={{ justifyContent: 'center', padding: '10px' }}>{busy ? 'Signing in…' : 'Sign in'}</button>
-        <p className="muted" style={{ fontSize: 12 }}>Accounts are created in <a href="/admin">Admin → Users</a>. First setup: user <code>admin</code> with the admin token as the password, until an admin user exists.</p>
+        <p className="muted" style={{ fontSize: 12 }}>Accounts and their rights are set in Admin → Users &amp; rights. First setup: user <code>admin</code> with the admin token as the password, until a super admin exists.</p>
       </form>
     </div>
   );
@@ -265,20 +266,27 @@ function Repository({ user, onUser }) {
 }
 
 /* ---------------------------------------------------------------- app */
+/** After signing in: back to the page that sent the user here (?next=), else /server, or their first app without the Report Server right. */
+function leaveLogin(user) {
+  const next = safeNext(new URLSearchParams(window.location.search).get('next'));
+  if (next) { window.location.assign(next); return true; }
+  if (window.location.pathname === '/login' || !user.rights?.includes('server')) { window.location.assign('/'); return true; }
+  return false;
+}
+
 export default function ServerApp() {
   const [user, setUser] = useState(undefined); // undefined = checking, null = signed out
   const [loginMessage, setLoginMessage] = useState(null);
 
   useEffect(() => {
     whenSignedOut(() => { setUser(null); setLoginMessage({ text: 'Your session has ended. Please sign in again.', kind: 'error' }); });
-    serverApi.me().then(setUser).catch(() => setUser(null));
+    serverApi.me().then((u) => { if (!leaveLogin(u)) setUser(u); }).catch(() => setUser(null));
   }, []);
   const keepUser = useCallback((next) => setUser((current) => (current && next && current.username === next.username && current.role === next.role ? current : next)), []);
 
   const logout = async () => {
     try { await serverApi.logout(); } catch { /* signed out anyway */ }
-    setUser(null);
-    setLoginMessage({ text: 'You have signed out.', kind: 'ok' });
+    window.location.assign('/login');
   };
 
   return (
@@ -287,7 +295,7 @@ export default function ServerApp() {
         {user && (<><span className="who">Signed in as <b>{user.username}</b> <span className="chip">{user.role}</span></span><button className="btn sm" onClick={logout} title={`Sign out ${user.username}`}>Sign out</button></>)}
       </Topbar>
       {user === undefined && <div className="login-wrap"><p className="muted">Checking your session…</p></div>}
-      {user === null && <LoginForm key={loginMessage?.text || 'login'} message={loginMessage} onSignedIn={(u) => { setLoginMessage(null); setUser(u); }} />}
+      {user === null && <LoginForm key={loginMessage?.text || 'login'} message={loginMessage} onSignedIn={(u) => { setLoginMessage(null); if (!leaveLogin(u)) setUser(u); }} />}
       {user && <Repository user={user} onUser={keepUser} />}
     </>
   );

@@ -1,62 +1,47 @@
 import { useCallback, useEffect, useState } from 'react';
-import { api, clearToken, hasToken, setToken } from '../api.js';
+import { api } from '../api.js';
+import { signOut } from '../shared/session.js';
+import ApiKeysTab from './ApiKeysTab.jsx';
 import { Notice, Topbar } from '../portal/Shell.jsx';
 import DataSourcesTab from './DataSourcesTab.jsx';
 import LogsTab from './LogsTab.jsx';
 import OverviewTab from './OverviewTab.jsx';
 import UsersTab from './UsersTab.jsx';
 
-const TABS = [['overview', 'Overview'], ['users', 'Users'], ['sources', 'Data sources'], ['logs', 'Logs']];
+const TABS = [['overview', 'Overview'], ['users', 'Users & rights'], ['keys', 'API keys'], ['sources', 'Data sources'], ['logs', 'Logs']];
 
-/** /admin needs the admin token (the designer token is refused). On this computer it is picked up automatically. */
-function TokenForm({ onConnect, message }) {
-  const [value, setValue] = useState('');
-  return (
-    <div className="login-wrap">
-      <form className="card login" onSubmit={(e) => { e.preventDefault(); onConnect(value.trim()); }}>
-        <span className="brand-mark" aria-hidden="true">M</span>
-        <div><p className="eyebrow">Administration</p><h1>Admin token</h1><p className="muted">On your own computer the token is used automatically (REPORTING_LOCAL_BOOTSTRAP=true). On a deployed server enter REPORTING_ADMIN_TOKEN.</p></div>
-        <label className="field"><span>Admin token</span><input type="password" autoComplete="current-password" value={value} onChange={(e) => setValue(e.target.value)} required autoFocus /></label>
-        <Notice message={message} />
-        <button className="btn primary" type="submit" style={{ justifyContent: 'center', padding: 10 }}>Connect</button>
-      </form>
-    </div>
-  );
-}
+/** /admin needs a signed-in account with the Admin right (the server sends anyone else to /login or a "no access" page). */
 
 export default function AdminApp() {
-  const [state, setState] = useState('checking'); // checking | need-token | ready
+  const [state, setState] = useState('checking'); // checking | denied | ready
   const [who, setWho] = useState(null);
   const [message, setMessage] = useState(null);
   const [tab, setTab] = useState(() => (TABS.some(([id]) => `#${id}` === window.location.hash) ? window.location.hash.slice(1) : 'overview'));
 
   const connect = useCallback(async () => {
     setState('checking');
-    if (!hasToken()) await api.bootstrap().catch(() => false);
     try {
       const me = await api.whoami();
-      if (me.role !== 'admin') throw Object.assign(new Error('This is the designer token. /admin needs the admin token (REPORTING_ADMIN_TOKEN).'), { status: 403 });
+      if (me.role !== 'admin') throw new Error('Your account does not have the Admin right.');
       setWho(me);
       setState('ready');
     } catch (error) {
-      clearToken();
-      setMessage(error.status === 401 ? { text: 'The admin token is missing or wrong.', kind: 'error' } : { text: error.message, kind: 'error' });
-      setState('need-token');
+      setMessage({ text: error.message, kind: 'error' });
+      setState('denied');
     }
   }, []);
   useEffect(() => { connect(); }, [connect]);
   useEffect(() => { if (state === 'ready') window.history.replaceState(null, '', `#${tab}`); }, [tab, state]);
 
-  const disconnect = () => { clearToken(); setWho(null); setMessage({ text: 'Disconnected.', kind: '' }); setState('need-token'); };
   const notify = useCallback((text, kind = 'ok') => setMessage(text ? { text, kind } : null), []);
 
   return (
     <>
       <Topbar current="/admin" subtitle="Administration">
-        {state === 'ready' && (<><span className="chip">admin</span><button className="btn sm" onClick={disconnect}>Disconnect</button></>)}
+        {state === 'ready' && (<><span className="who">Signed in as <b>{who.user}</b> <span className="chip">{who.superAdmin ? 'super admin' : 'admin'}</span></span><button className="btn sm" onClick={signOut}>Sign out</button></>)}
       </Topbar>
       {state === 'checking' && <div className="login-wrap"><p className="muted">Connecting…</p></div>}
-      {state === 'need-token' && <TokenForm message={message} onConnect={(value) => { setToken(value); setMessage(null); connect(); }} />}
+      {state === 'denied' && <div className="login-wrap"><div className="card login"><Notice message={message} /><button className="btn" onClick={signOut}>Sign out and use another account</button></div></div>}
       {state === 'ready' && (
         <main className="page">
           <div className="page-head">
@@ -68,6 +53,7 @@ export default function AdminApp() {
           {message && <div style={{ marginBottom: 14 }}><Notice message={message} /></div>}
           {tab === 'overview' && <OverviewTab who={who} notify={notify} onOpen={(id) => { setTab(id); setMessage(null); }} />}
           {tab === 'users' && <UsersTab notify={notify} />}
+          {tab === 'keys' && <ApiKeysTab notify={notify} />}
           {tab === 'sources' && <DataSourcesTab notify={notify} />}
           {tab === 'logs' && <LogsTab />}
         </main>

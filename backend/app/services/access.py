@@ -11,7 +11,7 @@ from fastapi import HTTPException
 from backend.app.constants import BOOTSTRAP_USERNAME
 from backend.app.definitions import ReportDefinition
 from backend.app.security import permissions
-from backend.app.security.users import find_user
+from backend.app.security.users import derived_role, find_user, is_super_admin, user_rights
 
 __all__ = ['report_folder', 'folder_level', 'report_level', 'require_report', 'require_folder', 'session_for_user',
            'report_allowed_for']
@@ -51,12 +51,15 @@ def require_folder(ctx: SimpleNamespace, session: dict[str, Any], folder: str, n
 
 def session_for_user(ctx: SimpleNamespace, username: str) -> dict[str, Any] | None:
     """The user's current role, for work done later on their behalf (schedules). None = the user is gone or disabled."""
-    if username == BOOTSTRAP_USERNAME:
-        return {"username": username, "role": "admin"}
     user = find_user(username)
+    if user is None and username == BOOTSTRAP_USERNAME:
+        return {"username": username, "role": "admin", "rights": {"server", "runner", "admin", "designer"}}
     if user is None or user.get("disabled"):
         return None
-    return {"username": user["username"], "role": user.get("role", "viewer")}
+    rights = user_rights(user)
+    if "server" not in rights:                 # the Report Server right was taken away: the schedule stops running
+        return None
+    return {"username": user["username"], "role": derived_role(rights, is_super_admin(user)), "rights": rights}
 
 
 def report_allowed_for(ctx: SimpleNamespace, session: dict[str, Any] | None):

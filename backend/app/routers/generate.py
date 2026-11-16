@@ -26,6 +26,7 @@ def register(app: FastAPI, ctx: SimpleNamespace) -> None:
     published_report_summaries = ctx.published_report_summaries
     reports_by_id = ctx.reports_by_id
     require_report_access = ctx.require_report_access
+    report_in_scope = ctx.report_in_scope
     settings = ctx.settings
     subreport_loader = ctx.subreport_loader
     dataset_loader = ctx.dataset_loader
@@ -33,7 +34,11 @@ def register(app: FastAPI, ctx: SimpleNamespace) -> None:
     @app.get("/reports")
     def list_reports(request: Request) -> dict[str, Any]:
         require_report_access(request)
-        return {"reports": published_report_summaries()}
+        summaries = published_report_summaries()
+        if getattr(request.state, "report_scope", None) is None:
+            return {"reports": summaries}
+        visible = {report_id for report_id, item in reports_by_id.items() if report_in_scope(request, item)}
+        return {"reports": [item for item in summaries if item.get("id") in visible]}
 
     @app.get("/generate/{report_file}")
     def generate(report_file: str, request: Request) -> Response:
@@ -61,7 +66,8 @@ def register(app: FastAPI, ctx: SimpleNamespace) -> None:
                 raise HTTPException(status_code=400, detail="The path must be /generate/<REPORT_ID>.<pdf|xlsx|csv>")
             report_id, output_format = match.group(1), match.group(2).lower()
             definition = reports_by_id.get(report_id)
-            if definition is None:
+            if definition is None or not report_in_scope(request, definition):
+                definition = None                      # a report outside the caller's folders looks like a missing one
                 raise HTTPException(status_code=404, detail="Report ID is not registered")
             enabled_formats = (definition.editor_config or {}).get("formats", sorted(OUTPUT_FORMATS))
             if output_format not in enabled_formats:

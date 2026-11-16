@@ -10,7 +10,7 @@ import secrets
 import time
 from typing import Any
 
-from backend.app.constants import LEGACY_PASSWORD_ITERATIONS, PASSWORD_ITERATIONS, USER_ROLES
+from backend.app.constants import LEGACY_PASSWORD_ITERATIONS, PASSWORD_ITERATIONS, USER_RIGHTS, USER_ROLES
 from backend.app.storage.store import get_store
 
 
@@ -54,9 +54,35 @@ def check_user_password(user: dict[str, Any], password: str) -> bool:
     return secrets.compare_digest(digest, str(user.get("hash", "")))
 
 
+def is_super_admin(user: dict[str, Any]) -> bool:
+    """Super admins have every right. Accounts saved before rights existed: role admin = super admin."""
+    if "superAdmin" in user:
+        return bool(user.get("superAdmin"))
+    return "rights" not in user and user.get("role") == "admin"
+
+
+_LEGACY_RIGHTS = {"designer": ("designer", "server", "runner"), "viewer": ("server", "runner")}
+
+
+def user_rights(user: dict[str, Any]) -> set[str]:
+    """The parts of the product this account may open (super admin: all of them)."""
+    if is_super_admin(user):
+        return set(USER_RIGHTS)
+    if isinstance(user.get("rights"), list):
+        return {str(item) for item in user["rights"]} & set(USER_RIGHTS)
+    return set(_LEGACY_RIGHTS.get(str(user.get("role", "viewer")), ()))
+
+
+def derived_role(rights: set[str], super_admin: bool = False) -> str:
+    """viewer/designer/admin for folder permissions inside /server."""
+    if super_admin or "admin" in rights:
+        return "admin"
+    return "designer" if "designer" in rights else "viewer"
+
+
 def bootstrap_login_active() -> bool:
-    """Until an admin user exists, 'admin' can sign in to /server with the admin token as password."""
-    return not any(item.get("role") == "admin" for item in load_users())
+    """Until a super admin exists, 'admin' can sign in to /server with the admin token as password."""
+    return not any(is_super_admin(item) for item in load_users())
 
 
 def role_at_least(role: str, minimum: str) -> bool:

@@ -7,10 +7,13 @@ from pathlib import Path
 PROJECT_ROOT = Path(__file__).resolve().parents[2]  # the repository root (ui/, data/, reports/, .env)
 
 # Areas that can be switched off per deployment (REPORTING_ENABLED_AREAS). /reports, /generate and /health are always on.
-ALL_AREAS = ("runner", "admin", "designer", "server", "docs")
+ALL_AREAS = ("runner", "admin", "designer", "server", "analytics", "docs")
 ROLE_TOKEN_MIN_LENGTH = 24
 # /server login: users live in <data dir>/users.json (PBKDF2 hashes), sessions are signed cookies.
-USER_ROLES = ("viewer", "designer", "admin")  # lowest to highest
+USER_ROLES = ("viewer", "designer", "admin")  # lowest to highest (derived from the rights below; used by folder permissions)
+# What a user may open. A super admin has every right and is the only one who may manage administrators.
+USER_RIGHTS = ("admin", "designer", "server", "analytics", "runner")
+RIGHT_LABELS = {"admin": "Admin", "designer": "Designer", "server": "Report Server", "analytics": "Analytics", "runner": "Run reports"}
 USERNAME_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._@-]{1,63}$")
 MIN_PASSWORD_LENGTH = 8
 PASSWORD_ITERATIONS = 600_000  # PBKDF2-SHA256, OWASP 2023
@@ -26,7 +29,7 @@ QUERY_LANGUAGES = {"aggregation-json", "mongosh", "javascript", "python", "sql"}
 ADAPTER_TYPES = {"mongodb", "postgresql", "mysql", "sqlserver", "oracle"}
 METADATA_KEYS = {"GeneratedBy", "GeneratedByCode", "Folder", "Generate"}
 # Signed /generate links carry these two query parameters; they are never report parameters.
-SIGNED_LINK_KEYS = ("Expires", "Signature")
+SIGNED_LINK_KEYS = ("Expires", "Signature", "KeyId")
 MIN_ACCESS_SECRET_LENGTH = 32
 # Any of these means the request passed through a proxy, so "loopback client" proves nothing.
 BOOTSTRAP_PROXY_HEADERS = ("forwarded", "x-forwarded-for", "x-forwarded-host", "x-forwarded-proto", "x-real-ip", "via")

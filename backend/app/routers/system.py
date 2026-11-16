@@ -100,7 +100,10 @@ def register(app: FastAPI, ctx: SimpleNamespace) -> None:
     @app.get("/api/admin/whoami")
     def admin_whoami(request: Request) -> dict[str, Any]:
         role = require_admin(request, "designer")
-        return {"role": role, "version": SERVICE_VERSION, "areas": sorted(enabled_areas())}
+        session = getattr(request.state, "session", None)
+        return {"role": role, "version": SERVICE_VERSION, "areas": sorted(enabled_areas()),
+                "user": getattr(request.state, "actor", ""), "rights": sorted(session["rights"]) if session else [],
+                "superAdmin": bool(session["superAdmin"]) if session else role == "admin"}
 
     @app.get("/api/admin/logs")
     def admin_logs(request: Request, lines: int = 300, level: str = "INFO", search: str = "") -> dict[str, Any]:

@@ -16,8 +16,7 @@ FROM python:3.12-slim
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     REPORTING_DATA_DIR=/data \
-    REPORTING_LOCAL_BOOTSTRAP=false \
-    REPORTING_ACCESS_MODE=required     REPORTING_ENABLED_AREAS=runner,admin,designer,server
+    REPORTING_ACCESS_MODE=required     REPORTING_ENABLED_AREAS=runner,admin,designer,server,analytics
 
 WORKDIR /app
 COPY requirements.txt .

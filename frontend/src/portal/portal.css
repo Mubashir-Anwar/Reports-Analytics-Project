@@ -285,3 +285,19 @@ table.data tr.failed td { color: var(--danger); }
 .check-icon { display: grid; place-items: center; width: 22px; height: 22px; border-radius: 50%; font-size: 12px; font-weight: 800; }
 .checklist li.ok .check-icon { background: var(--ok-soft); color: var(--ok); }
 .checklist li.todo .check-icon { background: var(--warn-soft); color: var(--warn); }
+
+/* Users & rights, API keys */
+.rights { display: flex; flex-wrap: wrap; gap: 6px; }
+.right-chip { display: inline-flex; align-items: center; gap: 6px; padding: 5px 10px; border: 1px solid var(--line); border-radius: 999px; font-size: 12px; cursor: pointer; user-select: none; }
+.right-chip.on { border-color: var(--accent); background: var(--accent-soft); color: var(--accent); }
+.right-chip input { margin: 0; }
+.right-chip input:disabled { cursor: not-allowed; }
+.rights.compact .right-chip { padding: 3px 8px; font-size: 11px; }
+.user-item { align-items: flex-start; }
+.user-item > div:first-child { min-width: 180px; }
+.chip.accent { margin-left: 6px; }
+.key-once { display: grid; gap: 8px; margin-bottom: 12px; }
+.key-value { display: block; padding: 8px 10px; border-radius: 8px; background: var(--bg, rgba(0,0,0,.05)); word-break: break-all; font-size: 12px; user-select: all; }
+.howto { margin-top: 16px; }
+.howto summary { cursor: pointer; font-weight: 600; }
+.howto pre { white-space: pre-wrap; word-break: break-all; font-size: 12px; padding: 10px; border-radius: 8px; border: 1px solid var(--line); overflow-x: auto; }

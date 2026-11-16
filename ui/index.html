@@ -13,10 +13,11 @@
     <a class="brand" href="/ui"><span class="brand-mark">M</span><span>Mongo Reports<small>Reporting workspace</small></span></a>
     <nav aria-label="Main navigation">
       <a class="nav-link active" href="/ui" aria-current="page">Run reports</a>
-      <a class="nav-link" href="/server">Server</a>
-      <a class="nav-link" href="/designer">Designer</a>
-      <a class="nav-link" href="/admin">Admin</a>
-      <a class="nav-link" href="/health">Service health</a>
+      <a class="nav-link" href="/server" data-right="server" hidden>Server</a>
+      <a class="nav-link" href="/designer" data-right="designer" hidden>Designer</a>
+      <a class="nav-link" href="/analytics" data-right="analytics" hidden>Analytics</a>
+      <a class="nav-link" href="/admin" data-right="admin" hidden>Admin</a>
+      <button type="button" class="nav-link nav-signout" data-signout hidden>Sign out</button>
     </nav>
   </header>
 
@@ -96,5 +97,6 @@
     <footer class="runner-footer"><span class="footer-mark">M</span><span>Reports are designed in the Designer and published to the Report Server.</span><a href="/server">Open the report server <span aria-hidden="true">↗</span></a></footer>
   </main>
   <script src="/assets/runner.js" defer></script>
+  <script src="/assets/signout.js" defer></script>
 </body>
 </html>
