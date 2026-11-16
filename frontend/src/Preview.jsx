@@ -137,6 +137,11 @@ export default function Preview({ state, notify }) {
                 <span>{p.label || p.name}{p.required ? <b className="req"> *</b> : null}</span>
                 {p.type === 'boolean' ? (
                   <select value={valueOf(p)} onChange={(e) => setValues({ ...values, [p.name]: e.target.value })}><option value="true">true</option><option value="false">false</option></select>
+                ) : p.allowedValues?.length ? (
+                  <select value={valueOf(p)} onChange={(e) => setValues({ ...values, [p.name]: e.target.value })}>
+                    <option value="">— choose —</option>
+                    {p.allowedValues.map((v) => <option key={String(v)} value={String(v)}>{String(v)}</option>)}
+                  </select>
                 ) : (
                   <input type={p.type === 'date' ? 'date' : ['integer', 'number'].includes(p.type) ? 'number' : 'text'} value={valueOf(p)} onChange={(e) => setValues({ ...values, [p.name]: e.target.value })} onKeyDown={(e) => { if (e.key === 'Enter') run(); }} />
                 )}

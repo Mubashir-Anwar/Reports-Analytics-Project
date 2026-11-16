@@ -152,16 +152,46 @@ export function QueryEditor({ state, dispatch, notify, refreshKey }) {
   );
 }
 
+/** Comma-separated list input: the text is kept while typing and turned into a list when the field is left. */
+function AllowedValuesInput({ values, onChange, needed }) {
+  const joined = (values || []).join(', ');
+  const [text, setText] = useState(joined);
+  useEffect(() => { setText(joined); }, [joined]);
+  const commit = () => {
+    const list = [...new Set(text.split(',').map((v) => v.trim()).filter(Boolean))];
+    if (list.join(', ') !== joined) onChange(list);
+    else setText(joined);
+  };
+  return (
+    <input value={text} placeholder={needed ? 'needed, e.g. CAR, BIKE' : 'any value'}
+      className={needed && !(values || []).length ? 'needs-value' : undefined}
+      title="Comma-separated list. The user then picks one of these values instead of typing."
+      onChange={(e) => setText(e.target.value)} onBlur={commit}
+      onKeyDown={(e) => { if (e.key === 'Enter') e.currentTarget.blur(); }} />
+  );
+}
+
 /** Report parameters (input controls). */
 export function ParametersEditor({ state, dispatch }) {
   const { report } = state;
   const set = (patch) => dispatch({ type: 'REPORT', patch });
   const addParam = () => set({ parameters: [...report.parameters, { name: `Param${report.parameters.length + 1}`, type: 'string', label: '', required: false }] });
   const patchParam = (index, values) => set({ parameters: report.parameters.map((p, i) => (i === index ? { ...p, ...values } : p)) });
+  // Parameters used in the collection name (e.g. Edith-$P{ProductCode}-PaymentPlans) must list their allowed values.
+  const inCollection = new Set([...String(report.collection || '').matchAll(/\$P\{(\w+)\}/g)].map((m) => m[1]));
+  // With fixed text around it (Edith-…-PaymentPlans) the user may type the value; a bare $P{X} needs a list.
+  const shaped = String(report.collection || '').replace(/$P{w+}/g, '').replace(/[^A-Za-z0-9]/g, '').length >= 3;
+  const missing = shaped ? [] : report.parameters.filter((p) => inCollection.has(p.name) && !(p.allowedValues || []).length);
   return (
     <>
+      {missing.length > 0 && (
+        <p className="hint warn">
+          The collection name <code>{report.collection}</code> is built from {missing.map((p) => p.name).join(', ')}.
+          The name has no fixed text, so for safety list the values a user may choose under “Allowed values” (e.g. <code>CAR, BIKE</code>), or put fixed text around the parameter (e.g. <code>Orders-$P&#123;Branch&#125;</code>).
+        </p>
+      )}
       <table className="grid">
-        <thead><tr><th>Name (URL key)</th><th>Type</th><th>Label</th><th>Required</th><th /></tr></thead>
+        <thead><tr><th>Name (URL key)</th><th>Type</th><th>Label</th><th>Allowed values</th><th>Required</th><th /></tr></thead>
         <tbody>
           {report.parameters.map((p, i) => (
             // eslint-disable-next-line react/no-array-index-key -- a name can be edited, the position is the identity
@@ -169,6 +199,10 @@ export function ParametersEditor({ state, dispatch }) {
               <td><input value={p.name} onChange={(e) => patchParam(i, { name: e.target.value.replace(/[^A-Za-z0-9_]/g, '') })} /></td>
               <td><select value={p.type} onChange={(e) => patchParam(i, { type: e.target.value })}>{['date', 'string', 'integer', 'number', 'boolean'].map((t) => <option key={t}>{t}</option>)}</select></td>
               <td><input value={p.label || ''} onChange={(e) => patchParam(i, { label: e.target.value })} /></td>
+              <td>{p.prompt === false ? <small>—</small> : (
+                <AllowedValuesInput values={p.allowedValues} needed={inCollection.has(p.name) && !shaped}
+                  onChange={(list) => patchParam(i, list.length ? { allowedValues: list } : { allowedValues: undefined })} />
+              )}</td>
               <td>{p.prompt === false ? <small title="Computed from other parameters">ƒ computed</small> : <input type="checkbox" checked={Boolean(p.required)} onChange={(e) => patchParam(i, { required: e.target.checked })} />}</td>
               <td><button className="icon" onClick={() => set({ parameters: report.parameters.filter((_, j) => j !== i) })}>✕</button></td>
             </tr>

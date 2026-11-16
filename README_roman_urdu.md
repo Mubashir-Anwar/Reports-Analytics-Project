@@ -87,7 +87,7 @@ link = f"https://reports.example.com{path_and_query}&Signature={signature}"
 
 Service ke saamne reverse proxy koi path prefix (misal `/reporting`) hata kar bhejta ho tab bhi sign hamesha `/generate/...` se shuru hone wala path karein. Audit record ke `access` field mein likha hota hai ke request `signed-link`, `report-token`, `admin-token` ya `open` se aayi.
 
-CSV mein `=`, `+`, `-`, `@`, tab ya carriage return se shuru hone wali **text** values ke aage `'` lag jata hai, taa ke Excel unhein formula ke taur par na chalaye (asal numbers jaise `-5` waise hi rehte hain). XLSX mein aisi values hamesha text cells hoti hain. Collection naam `$P{...}` parameter se bane to us parameter ki `allowedValues` dena lazmi hai.
+CSV mein `=`, `+`, `-`, `@`, tab ya carriage return se shuru hone wali **text** values ke aage `'` lag jata hai, taa ke Excel unhein formula ke taur par na chalaye (asal numbers jaise `-5` waise hi rehte hain). XLSX mein aisi values hamesha text cells hoti hain. Collection naam `$P{...}` parameter se bane: agar naam mein fixed text bhi ho (jaise `Edith-$P{ProductCode}-PaymentPlans`) to user value khud type kar sakta hai (sirf letters, numbers, `_` aur `-`); agar poora naam sirf parameter ho (`$P{Collection}`) to us parameter ki `allowedValues` dena lazmi hai.
 
 ## UI se nayi report banana
 

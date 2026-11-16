@@ -244,6 +244,18 @@ def _convert_band(band: ET.Element | None, name: str, ctx: _Ctx, table_out: dict
     result = {"height": _num(band.get("height")) if band is not None else 0, "elements": []}
     if band is None:
         return result
+    # A table inside a band (e.g. a letter laid out entirely in the Title band) is split in three:
+    # the part above the table stays in this band, the table becomes the columnHeader/detail rows,
+    # and the part below it is returned in table_out["below"] (it becomes the Summary band, printed once after the rows).
+    table_bottom = None
+    if not table_out:
+        for child in band:
+            if _local(child.tag) == "componentElement" and any(_local(c.tag) == "table" for c in child.iter()):
+                rep = _kid(child, "reportElement")
+                if rep is not None:
+                    table_bottom = _num(rep.get("y")) + _num(rep.get("height"))
+                break
+    below: list[dict[str, Any]] = []
     for child in band:
         tag = _local(child.tag)
         if tag == "componentElement":
@@ -257,12 +269,21 @@ def _convert_band(band: ET.Element | None, name: str, ctx: _Ctx, table_out: dict
                 continue
             table_out.update({"table": table, "x": _num(rep.get("x")), "y": _num(rep.get("y")), "band": name})
             result["height"] = max(0.0, _num(rep.get("y")))  # rows after the table are generated from columnHeader/detail bands
-            if _num(band.get("height")) > _num(rep.get("y")) + _num(rep.get("height")) + 1:
-                ctx.warnings.append(f"{name}: the part below the table was not imported")
             continue
         element = _convert_element(child, ctx, name)
-        if element is not None:
+        if element is None:
+            continue
+        if table_bottom is not None and element["y"] >= table_bottom - 0.5:
+            below.append(element)
+        else:
             result["elements"].append(element)
+    if table_bottom is not None and below:
+        top = min(el["y"] for el in below)
+        gap = 10.0                                  # small space between the last table row and what followed the table
+        for el in below:
+            el["y"] = el["y"] - top + gap
+        height = max(_num(band.get("height")) - top + gap, max(el["y"] + el["height"] for el in below))
+        table_out["below"] = {"height": height, "elements": below}
     return result
 
 
@@ -489,8 +510,13 @@ def import_jrxml(xml_text: str) -> dict[str, Any]:
     columns_from_design = not columns
     if not collection:
         warnings.append("The collection name was not found in the query; fill it in on the Setup tab")
+    shaped = len(re.sub(r"[^A-Za-z0-9]", "", re.sub(r"\$P\{\w+\}", "", collection))) >= 3
     for name in re.findall(r"\$P\{([A-Za-z_]\w*)\}", collection):
-        warnings.append(f"The collection name is built from the parameter {name}; give {name} its allowedValues (a list of allowed values) before saving")
+        for item in user_params:
+            if item["name"] == name:
+                item["required"] = True                    # the collection cannot be found without it
+        if not shaped:
+            warnings.append(f"The collection name is built from the parameter {name}; give {name} its allowedValues (a list of allowed values) before saving")
 
     # --- design
     ctx = _Ctx(styles, aliases, warnings)
@@ -508,6 +534,16 @@ def import_jrxml(xml_text: str) -> dict[str, Any]:
                 warnings.append(f"The {key} band already had elements; the table elements were added to them")
             bands[key]["elements"].extend(generated[key]["elements"])
             bands[key]["height"] = max(bands[key]["height"], generated[key]["height"])
+        below = table_info.get("below")
+        if below:
+            summary = bands["summary"]
+            shift = below["height"]
+            for el in summary["elements"]:          # the report's own summary follows the moved part
+                el["y"] += shift
+            summary["elements"] = below["elements"] + summary["elements"]
+            summary["height"] = shift + summary["height"]
+            warnings.append(f"{table_info['band']}: the part below the table was moved to the Summary band "
+                            "(printed once, right after the table rows)")
     if (bands["noData"]["height"] or bands["noData"]["elements"]) and root.get("whenNoDataType") not in (None, "NoDataSection"):
         warnings.append("The No Data band is printed whenever the report has no rows (whenNoDataType is treated as NoDataSection)")
 

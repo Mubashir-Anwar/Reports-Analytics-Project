@@ -115,3 +115,55 @@ def test_java_expression_renders_in_csv():
     rep, design = result["report"], result["design"]
     out = dr.render_design_csv(design, rep["title"], rep["columns"], [{"Fields.A": "1234567"}, {"Fields.A": None}], {}).decode("utf-8-sig")
     assert "1,234,567" in out
+
+
+LETTER = """<?xml version="1.0" encoding="UTF-8"?>
+<jasperReport xmlns="http://jasperreports.sourceforge.net/jasperreports" name="Letter" pageWidth="600" pageHeight="2000"
+  columnWidth="560" leftMargin="20" rightMargin="20" topMargin="20" bottomMargin="20" isIgnorePagination="true">
+  <subDataset name="Dataset1">
+    <parameter name="Code" class="java.lang.String"/>
+    <parameter name="CollectionName" class="java.lang.String" isForPrompting="false">
+      <defaultValueExpression><![CDATA["Plans-"+$P{Code}]]></defaultValueExpression>
+    </parameter>
+    <queryString language="MongoDbQuery"><![CDATA[{"runCommand": {"aggregate": $P{CollectionName}, "pipeline": [
+      {"$project": {"Name": "$Name", "No": "$No"}}]}}]]></queryString>
+    <field name="Name" class="java.lang.String"/><field name="No" class="java.lang.Integer"/>
+  </subDataset>
+  <parameter name="Code" class="java.lang.String"/>
+  <parameter name="CollectionName" class="java.lang.String" isForPrompting="false">
+    <defaultValueExpression><![CDATA["Plans-"+$P{Code}]]></defaultValueExpression>
+  </parameter>
+  <queryString language="MongoDbQuery"><![CDATA[{"runCommand": {"aggregate": $P{CollectionName}, "pipeline": [{"$project": {"Name": "$Name"}}]}}]]></queryString>
+  <field name="Name" class="java.lang.String"/>
+  <title><band height="900">
+    <staticText><reportElement x="0" y="0" width="300" height="20"/><text><![CDATA[ABOVE]]></text></staticText>
+    <componentElement><reportElement x="0" y="100" width="300" height="30"/>
+      <jr:table xmlns:jr="http://jasperreports.sourceforge.net/jasperreports/components">
+        <datasetRun subDataset="Dataset1"/>
+        <jr:column width="300"><jr:detailCell height="30">
+          <textField><reportElement x="0" y="0" width="300" height="30"/><textFieldExpression><![CDATA[$F{No}]]></textFieldExpression></textField>
+        </jr:detailCell></jr:column>
+      </jr:table>
+    </componentElement>
+    <staticText><reportElement x="0" y="400" width="300" height="20"/><text><![CDATA[BELOW1]]></text></staticText>
+    <textField><reportElement x="0" y="800" width="300" height="20"/><textFieldExpression><![CDATA[$F{Name}]]></textFieldExpression></textField>
+  </band></title>
+</jasperReport>"""
+
+
+def test_table_inside_title_keeps_the_part_below_in_summary():
+    """A letter laid out in one Title band with a table in the middle: nothing below the table may be lost."""
+    out = jrxml_import.import_jrxml(LETTER)
+    bands = out["design"]["bands"]
+    assert [e.get("text") for e in bands["title"]["elements"]] == ["ABOVE"]
+    assert bands["title"]["height"] == 100
+    assert [e.get("expression") for e in bands["detail"]["elements"]] == ["$F{No}"]
+    summary = bands["summary"]["elements"]
+    assert summary[0]["text"] == "BELOW1" and summary[0]["y"] == 10          # starts right after the rows
+    assert summary[1]["expression"] == "$F{Name}" and summary[1]["y"] == 410  # spacing between them is kept
+    assert bands["summary"]["height"] >= 430
+    assert any("moved to the Summary band" in w for w in out["warnings"])
+    assert out["report"]["collection"] == "Plans-$P{Code}"
+    rows = [{"Name": "N", "No": i} for i in range(3)]
+    pdf = dr.render_design_pdf(out["design"], "L", out["report"]["columns"], rows, {"Code": "X"})
+    assert pdf.startswith(b"%PDF")

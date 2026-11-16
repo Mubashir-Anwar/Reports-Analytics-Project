@@ -158,19 +158,23 @@ def _dynamic_report(payload: dict[str, Any], source_path: Path | None = None) ->
 
     parameters = _order_computed(parameters)
 
-    # A collection chosen by a URL parameter must be limited to a fixed list; otherwise a caller could
-    # point the report at any collection in the database (e.g. a users collection).
+    # A collection chosen by a parameter must not reach any collection in the database (e.g. a users collection).
+    # With fixed text around it (Edith-$P{ProductCode}-PaymentPlans) a typed value is safe: it is limited to
+    # letters, numbers, _ and - (no dots, so no system.* names) and the result keeps the fixed shape.
+    # A name that is only a parameter ($P{Collection}) has no shape, so it needs a fixed list (allowedValues).
     specs_by_name = {spec.name: spec for spec in parameters}
+    fixed_text = re.sub(r"\$P\{[A-Za-z_][A-Za-z0-9_]*\}", "", collection)
+    shaped = len(re.sub(r"[^A-Za-z0-9]", "", fixed_text)) >= 3
     for collection_parameter in re.findall(r"\$P\{([A-Za-z_][A-Za-z0-9_]*)\}", collection):
         spec = specs_by_name.get(collection_parameter)
         if spec is None:
             raise ValueError(f"Define the collection parameter {collection_parameter} in the report questions")
         if not spec.prompt:
             raise ValueError(f"The collection-name parameter {collection_parameter} cannot be computed; ask the user and give allowedValues")
-        if not spec.allowed_values:
+        if not spec.allowed_values and not shaped:
             raise ValueError(
                 f"The collection name is built from the parameter {collection_parameter}; this parameter must have allowedValues "
-                "(a list of allowed values)"
+                "(a list of allowed values), or the collection name needs fixed text around it (e.g. Orders-$P{Branch})"
             )
         bad_values = [value for value in spec.allowed_values if not COLLECTION_PARAM_VALUE.fullmatch(str(value))]
         if bad_values:

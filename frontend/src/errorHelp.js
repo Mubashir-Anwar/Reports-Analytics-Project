@@ -8,6 +8,16 @@ const RULES = [
     hint: 'Fill in the parameters marked * on the left of the preview, then press Run again. If a parameter may stay empty (e.g. an optional product code), untick “Required” for it under Parameters.',
     actions: [['parameters', 'Open Parameters']],
   }],
+  [/is not valid in a collection name/i, {
+    title: 'Fill in the value for the collection name',
+    hint: 'Part of the collection name comes from this parameter (e.g. ProductCode in Edith-…-PaymentPlans). Type a value using only letters, numbers, _ and - (e.g. CAR), then Run again.',
+    actions: [],
+  }],
+  [/collection name is built from the parameter (\w+)|must have allowedValues|allowedValues of/i, {
+    title: 'List the allowed values for the collection name',
+    hint: 'The collection name is made from a parameter (e.g. Edith-$P{ProductCode}-PaymentPlans). When the whole name is only a parameter ($P{Collection}), the user may only pick from a list: open Parameters and type the values under “Allowed values”, separated by commas (e.g. CAR, BIKE). Or put fixed text around it (e.g. Orders-$P{Branch}); then the user may type the value.',
+    actions: [['parameters', 'Open Parameters']],
+  }],
   [/Choose a Data Adapter first/i, {
     title: 'Choose a data adapter',
     hint: 'The preview reads real records: pick a data adapter in Setup, or make one in the Data Adapters panel.',

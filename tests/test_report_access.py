@@ -217,9 +217,20 @@ def _collection_report(**parameter):
             "parameters": [{"name": "Branch", "type": "string"}, {"name": "Product", "type": "string", **parameter}]}
 
 
-def test_parameter_collection_requires_allowed_values():
+def test_parameter_collection_without_fixed_text_requires_allowed_values():
     with pytest.raises(ValueError, match="allowedValues"):
-        core._dynamic_report(_collection_report())
+        core._dynamic_report({**_collection_report(), "collection": "$P{Product}"})
+    with pytest.raises(ValueError, match="allowedValues"):
+        core._dynamic_report({**_collection_report(), "collection": "$P{Branch}_$P{Product}"})
+
+
+def test_parameter_collection_with_fixed_text_accepts_a_typed_value():
+    """Edith-$P{Product}-Plans: the user may type the product; the value can only fill the gap in that shape."""
+    definition = core._dynamic_report(_collection_report())
+    assert core.resolve_collection(definition.collection, {"Product": "CAR"}) == "Edith-CAR-Plans"
+    for bad in ["", "x.system", "../Users", "a b", "Users}", "$where", "x" * 65]:
+        with pytest.raises(ValueError, match="not valid in a collection name"):
+            core.resolve_collection(definition.collection, {"Product": bad})
 
 
 def test_parameter_collection_rejects_unsafe_allowed_values():
@@ -247,4 +258,5 @@ def test_jrxml_import_warns_about_collection_parameter():
     xml = MINI.replace("'collectionName' : $P{CollectionName}", "'collectionName' : 'Plans-$P{ProductCode}'")
     result = jrxml_import.import_jrxml(xml)
     assert result["report"]["collection"] == "Plans-$P{ProductCode}"
-    assert any("ProductCode" in warning and "allowedValues" in warning for warning in result["warnings"])
+    assert not any("allowedValues" in warning for warning in result["warnings"])   # fixed text around it: typing is safe
+    assert next(p for p in result["report"]["parameters"] if p["name"] == "ProductCode")["required"] is True
