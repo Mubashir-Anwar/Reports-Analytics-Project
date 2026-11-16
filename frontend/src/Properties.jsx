@@ -409,6 +409,14 @@ export default function Properties({ state, dispatch, notify, actions, onEditExp
           <label className="check-row"><input type="checkbox" checked={Boolean(page.summaryNewPage)} onChange={(e) => setPage({ summaryNewPage: e.target.checked })} /> Summary on a new page</label>
           <label className="check-row"><input type="checkbox" checked={Boolean(page.floatColumnFooter)} onChange={(e) => setPage({ floatColumnFooter: e.target.checked })} /> Float column footer (right under the last row)</label>
           <label className="check-row"><input type="checkbox" checked={Boolean(page.ignorePagination)} onChange={(e) => setPage({ ignorePagination: e.target.checked })} /> Ignore pagination (one long page)</label>
+          {page.ignorePagination
+            ? <p className="hint">All records on one tall page. Very long reports (over ~5 m) continue on a few more tall pages — a PDF page cannot be taller. Excel and CSV always give every record in one sheet.</p>
+            : page.height < 400 && (
+              <p className="hint warn">
+                The page is only {Math.round(page.height)} pt tall, so each page holds just a few rows. Tick “Ignore pagination” for all records on one page, or use a normal page size:{' '}
+                <button type="button" className="btn sm" onClick={() => setPage({ height: page.width > 842 ? 595 : 842 })}>{page.width > 842 ? 'Landscape height (595)' : 'A4 height (842)'}</button>
+              </p>
+            )}
         </>
       )}
 

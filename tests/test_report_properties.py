@@ -98,3 +98,19 @@ def test_validate_endpoint(client):
     assert refused.status_code == 422 and "invalid element type" in refused.json()["detail"]
     assert client.post("/api/admin/designer/validate", headers=token(), json={"definition": {**good, "id": "bad id"}}).status_code == 422
     assert client.post("/api/admin/designer/validate", headers=token(), json={"definition": "x"}).status_code == 422
+
+
+def test_ignore_pagination_with_more_than_one_tall_page_uses_tall_pages():
+    """Thousands of rows: one PDF page cannot hold them (14 400 pt max). They must continue on a few tall pages,
+    not on the design's own short page (a 200 pt page made ~400 pages in the KMBL report)."""
+    import re as _re
+    from backend.app.rendering import engine
+    design = engine.validate_design({
+        "page": {"width": 600, "height": 200, "ignorePagination": True, "margins": {"top": 10, "bottom": 10, "left": 10, "right": 10}},
+        "bands": {"columnHeader": {"height": 20, "elements": [{"type": "staticText", "x": 0, "y": 0, "width": 100, "height": 20, "text": "H"}]},
+                  "detail": {"height": 30, "elements": [{"type": "textField", "x": 0, "y": 0, "width": 100, "height": 30, "expression": "$F{A}"}]}},
+    }, ["A"], set())
+    pdf = engine.render_design_pdf(design, "T", ["A"], [{"A": i} for i in range(2000)], {})
+    pages = len(_re.findall(rb"/Type\s*/Page[^s]", pdf))
+    assert 4 <= pages <= 6, pages                           # ~60 000 pt of rows / 14 400 pt per page
+    assert _re.search(rb"/MediaBox \[ ?0 0 600 14400 ?\]", pdf)

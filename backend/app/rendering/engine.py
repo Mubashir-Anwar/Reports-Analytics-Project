@@ -1729,6 +1729,10 @@ def render_design_pdf(design: dict[str, Any], title: str, columns: list[str], ro
             extra = design["bands"]["columnFooter"]["height"] + footer["height"]
             height = min(14400, max(100, measure.content_end + extra + design["page"]["margins"]["bottom"]))
             design = {**design, "page": {**design["page"], "height": height}}
+        else:
+            # Taller than the largest PDF page (14 400 pt ≈ 5 m): continue on as few maximum-height pages as possible
+            # instead of falling back to the design's own (often very short) page height.
+            design = probe
     size = (design["page"]["width"], design["page"]["height"])
     total = 0
     final: dict[str, Any] = {}
