@@ -348,6 +348,25 @@ def pipeline_parameter_names(pipeline: Any) -> list[str]:
     return found
 
 
+def _unrecognised_query_message(language: str, text: str) -> str:
+    """Say what the query looks like and what to do, instead of only "wrong format"."""
+    stripped = text.strip()
+    if not stripped:
+        return "The query is empty: write the MongoDB pipeline, e.g. db.getCollection(\"Orders\").aggregate([ { \"$match\": {} } ])"
+    if re.match(r"(?is)(select|with)\b.*\bfrom\b|select\b", stripped):
+        return ("This looks like a SQL query, but the query language is MongoDB. Choose Query language \"SQL\" and a SQL "
+                "data adapter (PostgreSQL, MySQL, SQL Server or Oracle)")
+    if re.match(r"(?s)\s*db(\.getCollection\s*\([^)]*\)|\.[A-Za-z_][\w]*)\.find(One)?\s*\(", stripped):
+        return ("Reports use aggregate, not find: write db.getCollection(\"X\").aggregate([ { \"$match\": { … } } ]) — "
+                "the find filter goes into $match and the projection into $project")
+    if stripped.startswith("{"):
+        return "This is one stage, not a pipeline: put the stages in square brackets, e.g. [ { \"$match\": { … } } ]"
+    if language == "mongosh":
+        return ("The query is not in Mongo Shell form. Write db.getCollection(\"Orders\").aggregate([ … ]) or paste only "
+                "the pipeline [ … ]")
+    return "Write the pipeline as pipeline = [ … ] (or choose Query language \"Mongo Shell\" and paste [ … ])"
+
+
 def parse_query_source(language: str, source: str) -> list[dict[str, Any]]:
     """Convert supported data-only editor styles to a Mongo aggregation pipeline."""
     language = str(language or "aggregation-json").lower()
@@ -395,8 +414,7 @@ def parse_query_source(language: str, source: str) -> list[dict[str, Any]]:
                 literal = uncommented.strip()
                 remainder = ""
             elif not match:
-                expected = "db.collection.aggregate([...])" if language == "mongosh" else "pipeline = [...]"
-                raise ValueError(f"In {language} mode give the pipeline in the {expected} literal format")
+                raise ValueError(_unrecognised_query_message(language, uncommented))
             else:
                 array_start = uncommented.find("[", match.end())
                 if array_start < 0:

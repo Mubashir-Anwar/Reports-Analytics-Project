@@ -119,17 +119,17 @@ export default function DatasetsEditor({ state, dispatch, notify, initialName })
                 <AdapterOptions adapters={adapters} describe={(a) => `${a.name}${a.database ? ` · ${a.database}` : ''}`} />
               </select>
             </label>
-            {isSql ? <label>Query language<input value="SQL (read-only SELECT)" disabled /></label> : (
-              <>
-                <label>Collection<input value={dataset.collection} onChange={(e) => patch({ collection: e.target.value })} placeholder="Collection name" /></label>
-                <label>Query language
-                  <select value={dataset.queryLanguage} onChange={(e) => patch({ queryLanguage: e.target.value })}>
-                    <option value="mongosh">Mongo Shell</option><option value="aggregation-json">Aggregation JSON</option>
-                    <option value="javascript">JavaScript pipeline</option><option value="python">Python pipeline</option>
-                  </select>
-                </label>
-              </>
-            )}
+            <label>Query language
+              <select value={dataset.queryLanguage} onChange={(e) => patch({ queryLanguage: e.target.value, ...(e.target.value === 'sql' ? { collection: '' } : {}) })}>
+                <optgroup label="MongoDB">
+                  <option value="mongosh">Mongo Shell</option><option value="aggregation-json">Aggregation JSON</option>
+                  <option value="javascript">JavaScript pipeline</option><option value="python">Python pipeline</option>
+                </optgroup>
+                <optgroup label="SQL databases"><option value="sql">SQL — PostgreSQL, MySQL, SQL Server, Oracle</option></optgroup>
+              </select>
+              {adapter && ((adapter.type || 'mongodb') !== 'mongodb') !== isSql && <small className="err">{isSql ? 'Choose a SQL data adapter for a SQL query.' : 'This adapter is a SQL database: choose a MongoDB adapter or SQL.'}</small>}
+            </label>
+            {!isSql && <label>Collection<input value={dataset.collection} onChange={(e) => patch({ collection: e.target.value })} placeholder="Collection name" /></label>}
           </div>
           <label className="block">Query <small>{isSql ? '(one SELECT; $P{Name} are this dataset\'s parameters)' : '(aggregation; $P{Name} are this dataset\'s parameters)'}</small>
             <textarea className="code" rows={8} spellCheck={false} value={dataset.querySource} onChange={(e) => patch({ querySource: e.target.value })}

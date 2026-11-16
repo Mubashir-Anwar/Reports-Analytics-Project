@@ -47,6 +47,20 @@ export function QueryEditor({ state, dispatch, notify, refreshKey }) {
     if (adapter && sql !== isSql) notify(sql ? 'This adapter is a SQL database: write the query in SQL (SELECT …)' : 'This adapter is MongoDB: write an aggregation query', 'ok');
   };
 
+  const adapterIsSql = Boolean(selected && selected.type && selected.type !== 'mongodb');
+  const kindMismatch = Boolean(selected) && adapterIsSql !== isSql;
+  /** Picking SQL keeps the adapter if it is a SQL one; otherwise it suggests the first SQL adapter. */
+  const chooseLanguage = (language) => {
+    const toSql = language === 'sql';
+    const patch = { queryLanguage: language, ...(toSql ? { collection: '' } : {}) };
+    const fits = (a) => ((a.type || 'mongodb') !== 'mongodb') === toSql;
+    if (selected && !fits(selected)) {
+      const other = (adapters || []).find((a) => fits(a) && a.configured) || (adapters || []).find(fits);
+      if (other) { patch.connectionId = other.id; notify(`Data adapter switched to “${other.name}” (${toSql ? 'SQL' : 'MongoDB'}) to match the query language`, 'ok'); }
+    }
+    set(patch);
+  };
+
   const readSqlFields = async () => {
     setBusy(true);
     try {
@@ -100,20 +114,22 @@ export function QueryEditor({ state, dispatch, notify, refreshKey }) {
           {selected && !selected.configured && <small className="err">This adapter has no saved connection URL yet. Add it in the Data Adapters tab or on /admin → Data sources.</small>}
           {adapters !== null && report.connectionId && !known && <small className="err">This adapter ID is not registered on this server. Choose one from the list.</small>}
         </label>
-        {isSql ? (
-          <label>Query language<input value="SQL (read-only SELECT)" disabled /></label>
-        ) : (
-          <>
-            <label>Collection name <small>(only the name, e.g. Orders; filled in from a Jasper runCommand query)</small>
-              <input value={report.collection} onChange={(e) => set({ collection: e.target.value })} onBlur={(e) => { const clean = cleanCollection(e.target.value); if (clean !== e.target.value) set({ collection: clean }); }} placeholder="Collection name" />
-            </label>
-            <label>Query language
-              <select value={report.queryLanguage} onChange={(e) => set({ queryLanguage: e.target.value })}>
-                <option value="mongosh">Mongo Shell</option><option value="aggregation-json">Aggregation JSON</option>
-                <option value="javascript">JavaScript pipeline</option><option value="python">Python pipeline</option>
-              </select>
-            </label>
-          </>
+        <label>Query language
+          <select value={report.queryLanguage} onChange={(e) => chooseLanguage(e.target.value)}>
+            <optgroup label="MongoDB">
+              <option value="mongosh">Mongo Shell</option><option value="aggregation-json">Aggregation JSON</option>
+              <option value="javascript">JavaScript pipeline</option><option value="python">Python pipeline</option>
+            </optgroup>
+            <optgroup label="SQL databases">
+              <option value="sql">SQL — PostgreSQL, MySQL, SQL Server, Oracle</option>
+            </optgroup>
+          </select>
+          {kindMismatch && <small className="err">{isSql ? 'This is a SQL query: choose a SQL data adapter above (PostgreSQL, MySQL, SQL Server or Oracle).' : 'This adapter is a SQL database: choose a MongoDB adapter, or Query language SQL.'}</small>}
+        </label>
+        {!isSql && (
+          <label>Collection name <small>(only the name, e.g. Orders; filled in from a Jasper runCommand query)</small>
+            <input value={report.collection} onChange={(e) => set({ collection: e.target.value })} onBlur={(e) => { const clean = cleanCollection(e.target.value); if (clean !== e.target.value) set({ collection: clean }); }} placeholder="Collection name" />
+          </label>
         )}
       </div>
       {isSql ? (
@@ -188,8 +204,20 @@ export default function SetupForm({ state, dispatch, notify, onTemplates, refres
             </span>
           </label>
           <label>Workspace folder <small>(where Save keeps it in the designer; the server folder is chosen when you publish)</small>
-            <input list="folder-choices" value={report.folder} onChange={(e) => set({ folder: e.target.value })} placeholder="General" />
-            <datalist id="folder-choices">{folders.map((f) => <option key={f} value={f} />)}</datalist>
+            <select value={report.folder || 'General'} onChange={(e) => {
+              if (e.target.value !== '__new__') { set({ folder: e.target.value }); return; }
+              const name = window.prompt('Name of the new folder (use / for a subfolder, e.g. Finance/Monthly)', report.folder && report.folder !== 'General' ? `${report.folder}/` : '');
+              const clean = String(name || '').trim().replace(/\\/g, '/').replace(/^\/+|\/+$/g, '');
+              if (!clean) return;
+              if (!/^[A-Za-z0-9][A-Za-z0-9 _-]{0,63}(\/[A-Za-z0-9][A-Za-z0-9 _-]{0,63})*$/.test(clean)) { window.alert('Use letters, numbers, spaces, _ and - (each folder name starts with a letter or number).'); return; }
+              setFolders((list) => [...new Set([...list, clean])].sort((a, b) => a.localeCompare(b)));
+              set({ folder: clean });
+            }}>
+              {[...new Set(['General', ...folders, report.folder || 'General'])].sort((a, b) => (a === 'General' ? -1 : b === 'General' ? 1 : a.localeCompare(b))).map((f) => (
+                <option key={f} value={f}>{f.split('/').join(' / ')}</option>
+              ))}
+              <option value="__new__">＋ New folder…</option>
+            </select>
           </label>
           <label className="wide">Description<input value={report.description} onChange={(e) => set({ description: e.target.value })} /></label>
         </div>

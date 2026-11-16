@@ -9,6 +9,7 @@ import Properties from './Properties.jsx';
 import SetupForm from './SetupForm.jsx';
 import DatasetQueryDialog from './DatasetQueryDialog.jsx';
 import SourceView from './SourceView.jsx';
+import ErrorDialog from './ErrorDialog.jsx';
 import TableEditor from './TableEditor.jsx';
 import AppSwitcher from './shared/AppSwitcher.jsx';
 import ThemeToggle from './shared/ThemeToggle.jsx';
@@ -48,7 +49,11 @@ export default function App() {
   const [refreshKey, setRefreshKey] = useState(0);
   const [importInfo, setImportInfo] = useState(null);
 
-  const notify = useCallback((text, kind = '') => setMessage({ text, kind }), []);
+  const [errorPopup, setErrorPopup] = useState(''); // errors open a popup with a hint (and stay in the status line)
+  const notify = useCallback((text, kind = '') => {
+    setMessage({ text, kind });
+    if (kind === 'error' && text) setErrorPopup(String(text));
+  }, []);
 
   // Canvas view options (grid, snap, smart guides, rulers) are kept per browser, like Studio's preferences.
   const [canvasPrefs, setCanvasPrefs] = useState(() => {
@@ -363,6 +368,19 @@ export default function App() {
   if (needToken) return <Login hint="On your own computer the token is picked up automatically. On a deployed server enter REPORTING_ADMIN_TOKEN or REPORTING_DESIGNER_TOKEN." onDone={connect} />;
   if (!ready) return <div className="login"><p>Connecting to the server…</p></div>;
 
+  /** The fix buttons of the error popup. */
+  const errorAction = (id) => {
+    const language = { 'use-sql': 'sql', 'use-json': 'aggregation-json', 'use-mongosh': 'mongosh' }[id];
+    if (language) {
+      dispatch({ type: 'REPORT', patch: { queryLanguage: language, ...(language === 'sql' ? { collection: '' } : {}) } });
+      setQueryTab(null);
+      setTab('setup');
+      notify(language === 'sql' ? 'Query language: SQL — choose a SQL data adapter and write a SELECT' : `Query language: ${language === 'mongosh' ? 'Mongo Shell' : 'Aggregation JSON'}`, 'ok');
+    } else if (id === 'setup') { setQueryTab(null); setTab('setup'); }
+    else if (id === 'adapters') { setLeftTab('adapters'); setDrawer('left'); }
+    else if (id === 'parameters') setQueryTab('parameters');
+  };
+
   const { report, design, selection, tool, past, future, dirty } = state;
   return (
     <div className="app">
@@ -430,6 +448,7 @@ export default function App() {
         </aside>
       </div>
       <footer className={`status ${message.kind}`}>{message.text}</footer>
+      {errorPopup && <ErrorDialog message={errorPopup} onClose={() => setErrorPopup('')} onAction={errorAction} />}
       <ContextMenu menu={menu} onClose={closeMenu} />
       {percent && (
         <div className="modal-back" onMouseDown={(e) => e.target === e.currentTarget && setPercent(null)}>

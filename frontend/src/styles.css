@@ -535,3 +535,19 @@ label.btn { display: inline-block; }
   .dataset-modal { width: 100vw; }
   .datasets { min-height: 0; }
 }
+
+/* ---------- error popup (ErrorDialog.jsx) ---------- */
+.error-back { z-index: 300; }
+.error-dialog { width: min(520px, 94vw); background: var(--panel); color: var(--text); border: 1px solid var(--line); border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-lg); padding: 18px 20px; display: grid; gap: 10px; animation: rise-in .18s var(--ease); }
+@keyframes rise-in { from { opacity: 0; transform: translateY(8px); } }
+.error-head { display: flex; gap: 12px; align-items: center; }
+.error-icon { display: grid; place-items: center; width: 34px; height: 34px; flex: none; border-radius: 50%; background: var(--danger-soft); color: var(--danger); font-weight: 900; font-size: 18px; }
+.error-head h3 { margin: 0; font-size: 16px; }
+.error-where { margin: 0 0 2px; font-size: 11px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); font-weight: 700; }
+.error-text { margin: 0; padding: 8px 10px; background: var(--soft); border-radius: 8px; font-family: var(--mono); font-size: 12px; line-height: 1.45; overflow-wrap: anywhere; max-height: 30vh; overflow: auto; }
+.error-hint { padding: 10px 12px; border-radius: 10px; background: var(--accent-soft); }
+.error-hint b { font-size: 12px; color: var(--accent); }
+.error-hint p { margin: 4px 0 0; line-height: 1.45; }
+.error-buttons { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+.error-buttons .grow { flex: 1; }
