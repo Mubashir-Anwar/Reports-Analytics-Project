@@ -86,6 +86,8 @@ export const api = {
   deleteApiKey: (id) => request(`/api/admin/api-keys/${encodeURIComponent(id)}`, { method: 'DELETE' }),
   logs: ({ lines, level, search }) => request(`/api/admin/logs?${new URLSearchParams({ lines, level, search })}`),
   audit: (limit) => request(`/api/admin/audit?limit=${encodeURIComponent(limit)}`),
+  auditEvents: (limit) => request(`/api/admin/audit-events?limit=${encodeURIComponent(limit)}`),
+  verifyAudit: () => request('/api/admin/audit-events/verify'),
   async logFile() { return (await request('/api/admin/logs/download', { raw: true })).blob(); },
   validateDesign: (definition) => request('/api/admin/designer/validate', { method: 'POST', body: { definition } }),
   /** Render the design as 'pdf' | 'xlsx' | 'csv' (body.format) and return the file as a Blob. */

@@ -10,15 +10,17 @@ then the root ("") are tried; the first folder with a rule for the user wins, an
 user wins over a rule for the role. With no rule at all the role decides, as before: viewer = run, designer =
 manage. A role caps what a rule can give (a viewer never gets manage). Administrators always have manage.
 
-The rules live in the store under folder-permissions.json, so every instance sees the same rules."""
+The rules live in rs_folder_permissions (one row per folder; the root is stored as "/"), so every instance sees
+the same rules."""
 from __future__ import annotations
 
 from typing import Any
 
 from backend.app.constants import USER_ROLES
-from backend.app.storage.store import get_store
+from backend.app.db.entities import FOLDER_PERMISSIONS, get_entities
 
-KEY = "folder-permissions.json"
+KEY = "folder-permissions.json"          # the older document; moved into rs_folder_permissions at start-up
+ROOT = "/"                               # how the root folder "" is stored (Oracle treats '' as NULL)
 NONE, RUN, MANAGE = 0, 1, 2
 LEVELS = {"none": NONE, "run": RUN, "manage": MANAGE}
 NAMES = {value: name for name, value in LEVELS.items()}
@@ -27,10 +29,8 @@ ROLE_DEFAULT = {"viewer": RUN, "designer": MANAGE, "admin": MANAGE}
 
 
 def load_rules() -> dict[str, dict[str, dict[str, str]]]:
-    raw = get_store().read_json(KEY) or {}
-    folders = raw.get("folders", {}) if isinstance(raw, dict) else {}
-    return {str(folder): {"users": dict(entry.get("users") or {}), "roles": dict(entry.get("roles") or {})}
-            for folder, entry in folders.items() if isinstance(entry, dict)}
+    return {("" if row["folder"] == ROOT else row["folder"]): {"users": dict(row.get("users") or {}), "roles": dict(row.get("roles") or {})}
+            for row in get_entities().find(FOLDER_PERMISSIONS)}
 
 
 def clean_entry(raw: Any) -> dict[str, dict[str, str]]:
@@ -52,22 +52,18 @@ def clean_entry(raw: Any) -> dict[str, dict[str, str]]:
 
 
 def save_rules_for(folder: str, entry: dict[str, dict[str, str]]) -> None:
-    raw = get_store().read_json(KEY) or {}
-    folders = raw.get("folders", {}) if isinstance(raw, dict) else {}
+    stored = folder or ROOT
     if entry["users"] or entry["roles"]:
-        folders[folder] = entry
+        get_entities().put(FOLDER_PERMISSIONS, {"folder": stored, "users": entry["users"], "roles": entry["roles"]})
     else:
-        folders.pop(folder, None)
-    get_store().write_json(KEY, {"folders": folders})
+        get_entities().delete(FOLDER_PERMISSIONS, stored)
 
 
 def remove_rules_under(folder: str) -> None:
     """A deleted folder takes its rules (and those of its subfolders) with it."""
-    raw = get_store().read_json(KEY) or {}
-    folders = raw.get("folders", {}) if isinstance(raw, dict) else {}
-    kept = {key: value for key, value in folders.items() if key != folder and not key.startswith(f"{folder}/")}
-    if kept != folders:
-        get_store().write_json(KEY, {"folders": kept})
+    for row in get_entities().find(FOLDER_PERMISSIONS):
+        if row["folder"] == folder or row["folder"].startswith(f"{folder}/"):
+            get_entities().delete(FOLDER_PERMISSIONS, row["folder"])
 
 
 def folder_chain(folder: str) -> list[str]:

@@ -93,7 +93,9 @@ def test_whole_service_on_the_postgresql_store(pg_schema_url, tmp_path, monkeypa
     assert login(app, "admin", ADMIN).status_code == 200
     versions = app.get("/api/server/reports/PGR/versions").json()["versions"]
     assert [v["version"] for v in versions] == [1] and versions[0]["action"] == "published"
-    assert store.lines("audit/report-executions.jsonl")
+    from backend.app.db import get_records
+    assert get_records().runs(reportId="PGR")[0]["status"] == "success"      # the run log is in PostgreSQL too
+    assert {e["action"] for e in get_records().events()} >= {"report.published", "auth.login"}
     assert not (tmp_path / "unused" / "reports" / "Sales").exists()
 
 
@@ -144,15 +146,17 @@ def test_migrate_the_data_directory_into_postgresql(client, pg_schema_url):
 
     from backend.app.storage.migrate import migrate
     assert login(client, "admin", ADMIN).status_code == 200
-    client.get("/generate/R1.csv", headers={"X-Admin-Token": ADMIN})  # one audit line
-    target = store_module.PostgresStore(pg_schema_url)
-    counts = migrate(target, out=io.StringIO())
-    assert counts["json"] >= 3 and counts["lines"] >= 1
+    client.get("/generate/R1.csv", headers={"X-Admin-Token": ADMIN})  # one run record
+    from backend.app.db.sql import SqlRecords
+    target, records = store_module.PostgresStore(pg_schema_url), SqlRecords(pg_schema_url)
+    counts = migrate(target, out=io.StringIO(), records=records)
+    assert counts["json"] >= 3 and counts["runs"] >= 1 and counts["events"] >= 1
+    assert records.runs(reportId="R1")[0]["status"] == "success" and records.verify_chain()["ok"]
     assert target.read_json("reports/General/R1.json")["id"] == "R1"
     assert target.read_json("private_secrets.json")["admin_token"] == ADMIN
     assert "General" in target.dirs("reports")
-    again = migrate(target, out=io.StringIO())
-    assert again["json"] == 0 and again["lines"] == 0 and again["skipped"] >= counts["json"]
+    again = migrate(target, out=io.StringIO(), records=records)
+    assert again["json"] == 0 and again["runs"] == 0 and again["events"] == 0 and again["skipped"] >= counts["json"]
 
 
 def test_security_headers_ready_and_size_limit(client, monkeypatch):

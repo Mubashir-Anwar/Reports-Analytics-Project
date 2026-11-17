@@ -24,6 +24,7 @@ from backend.app.routers import (
     users,
     workspace,
 )
+from backend.app.security import audit_trail
 from backend.app.security.access import client_address, enabled_areas, management_ip_allowed, path_area
 from backend.app.security.headers import add_security_headers, too_large
 
@@ -41,6 +42,13 @@ def make_app() -> FastAPI:
     )
     app.state.ctx = ctx  # tests and tools reach the shared context (e.g. the job runner) here
     app.mount("/assets", StaticFiles(directory=str(ui_directory)), name="assets")
+
+    def _audit_change(request: Request, body: bytes) -> None:
+        route = request.scope.get("route")
+        found = audit_trail.describe(request.method, getattr(route, "path", ""), dict(request.path_params), body)
+        if found:
+            action, target, details = found
+            ctx.audit_event(request, action, target, details)
 
     @app.middleware("http")
     async def access_policy_and_request_log(request: Request, call_next):
@@ -62,6 +70,9 @@ def make_app() -> FastAPI:
             blocked = too_large(request)
         if blocked is None and not path.startswith("/assets/"):
             ctx.refresh_if_changed()  # another instance may have published or deleted reports
+        audited_body = b""
+        if blocked is None and request.method in ("POST", "PUT", "DELETE") and path.startswith("/api/"):
+            audited_body = await request.body()      # kept for the audit target (folder path, report id); never stored whole
         if blocked is not None:
             response = blocked
         else:
@@ -70,6 +81,8 @@ def make_app() -> FastAPI:
             except Exception:
                 HTTP_LOG.exception("Unhandled error on %s %s", request.method, path)
                 raise
+            if response.status_code < 400 and request.method in ("POST", "PUT", "DELETE"):
+                _audit_change(request, audited_body)
         add_security_headers(request, response)
         duration = int((time.monotonic() - started) * 1000)
         if not path.startswith("/assets/") or response.status_code >= 400:

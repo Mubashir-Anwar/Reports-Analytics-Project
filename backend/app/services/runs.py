@@ -21,7 +21,6 @@ from backend.app.logs import LOG
 from backend.app.queries.mongo_query import resolve_collection
 from backend.app.rendering import engine as designer_render
 from backend.app.rendering.outputs import render_report_output
-from backend.app.storage import audit as audit_store
 
 __all__ = ['admin_parameters', 'run_report_rows', 'subreport_loader', 'dataset_loader', 'draft_definition', 'preview_definition', 'run_definition_file']
 
@@ -134,7 +133,25 @@ def draft_definition(ctx: SimpleNamespace, payload: Any) -> ReportDefinition:
         raise HTTPException(status_code=422, detail=f"The draft is not complete yet: {exc}") from None
 
 
-def preview_definition(ctx: SimpleNamespace, definition: ReportDefinition, payload: Any) -> dict[str, Any]:
+def preview_definition(ctx: SimpleNamespace, definition: ReportDefinition, payload: Any, request: Any = None) -> dict[str, Any]:
+    """Preview rows for the designer; every preview reads real data, so it is recorded in the run log too."""
+    started, clock = datetime.now(timezone.utc), time.monotonic()
+    actor, actor_type = ctx.caller_identity(request)
+    common = {"channel": "designer-preview", "actor": actor, "actor_type": actor_type, "started_at": started,
+              "definition": definition, "request": request,
+              "parameters": (payload or {}).get("parameters") if isinstance(payload, dict) and isinstance(payload.get("parameters"), dict) else {}}
+    try:
+        result = _preview_rows(ctx, definition, payload)
+    except HTTPException as exc:
+        ctx.log_run(status="failed", error_code=str(exc.status_code), error_message=str(exc.detail)[:300],
+                    duration_ms=int((time.monotonic() - clock) * 1000), **common)
+        raise
+    ctx.log_run(status="success", row_count=result["rowCount"], data_source=result["connectionId"],
+                duration_ms=int((time.monotonic() - clock) * 1000), **common)
+    return result
+
+
+def _preview_rows(ctx: SimpleNamespace, definition: ReportDefinition, payload: Any) -> dict[str, Any]:
     connection_id = definition.connection_id
     try:
         if not isinstance(payload, dict):
@@ -161,7 +178,8 @@ def preview_definition(ctx: SimpleNamespace, definition: ReportDefinition, paylo
 
 
 def run_definition_file(ctx: SimpleNamespace, definition: ReportDefinition, payload: Any, path: str, access: str, *,
-                        fixed_connection: bool = False, user: str = "", session: dict[str, Any] | None = None) -> Response:
+                        fixed_connection: bool = False, user: str = "", session: dict[str, Any] | None = None,
+                        request: Any = None) -> Response:
     """Run a report in full and return the file. fixed_connection=True (the /server portal)
     always uses the report's own data adapter and only its enabled formats."""
     started = time.monotonic()
@@ -170,6 +188,7 @@ def run_definition_file(ctx: SimpleNamespace, definition: ReportDefinition, payl
     if user:
         audit["GeneratedBy"] = user
     connection_id = definition.connection_id
+    body: bytes | None = None
     try:
         if not isinstance(payload, dict):
             raise ValueError("The request must be a JSON object")
@@ -211,7 +230,6 @@ def run_definition_file(ctx: SimpleNamespace, definition: ReportDefinition, payl
         raise HTTPException(status_code=503, detail="The MongoDB report query failed; see the service log (Logs tab)") from None
     finally:
         audit["durationMs"] = int((time.monotonic() - started) * 1000)
-        try:
-            audit_store._append_report_audit(audit)
-        except OSError:
-            LOG.exception("Admin run audit record could not be saved")
+        actor, actor_type = (user, "user") if user else ctx.caller_identity(request)
+        ctx.log_run_from_audit(audit, channel="server" if access == "server-session" else "designer-run",
+                               actor=actor, actor_type=actor_type, definition=definition, body=body, request=request)

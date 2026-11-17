@@ -263,13 +263,34 @@ lose ours. JRXML is supported **in** (import); `.mrd` is the native format, like
 
 ---
 
-## 6. Storage (`REPORTING_STORAGE`: `files` in `REPORTING_DATA_DIR`, or `postgresql`)
+## 6. Storage (`REPORTING_STORAGE`: `files`, `sql`, `mongodb` or `postgresql`)
 
-Everything below goes through `storage/store.py` (`get_store()`): with `files` each key is a file under the data
-directory (default `./data`); with `postgresql` (`REPORTING_STORAGE_URL`) each key is a row of
-`reporting_documents` (logs: `reporting_lines`). Several app instances can then share one repository; each
-instance reloads its report list when the repository revision changes (`services/versions.refresh_if_changed`).
-Move an existing data directory with `python -m backend.app.storage.migrate`.
+Two layers, both on the backend the client already has:
+
+* **Document store** — `storage/store.py` (`get_store()`): key → JSON document, binary file, folder or log line.
+  `files` = the data directory; `sql` = `storage/sql_store.py` (`rs_documents`, `rs_lines` on SQL Server, Oracle,
+  MySQL, PostgreSQL or SQLite through SQLAlchemy Core); `mongodb` = `storage/mongo_store.py` (`rs_documents`,
+  `rs_lines`, GridFS `rs_files` for files over 15 MB); `postgresql` = the older native tables.
+* **System database** — `backend/app/db/` (`get_records()`): typed records with the same fields everywhere
+  (`db/model.py`): `rs_report_runs` (one per execution) and `rs_audit_events` (append-only, hash chain).
+  Backends: `db/files.py` (JSON lines in `data/records/`), `db/sql.py` (numbered `MIGRATIONS`, `rs_schema_version`),
+  `db/mongo.py` (`$jsonSchema` validators, indexes, unique `seq`). `services/records.py` writes them
+  (`log_run`, `audit_event`).
+* **Typed entities** — `db/entities.py` (`get_entities()`): `rs_users`, `rs_api_keys`, `rs_folder_permissions`,
+  `rs_report_versions`, `rs_report_history` with real columns (composite keys, indexes; JSON kept as text so
+  `$match` keys survive; unknown fields in an `extra` column). `db/upgrade.py` moves the older JSON documents
+  into them at start-up (originals kept under `migrated/`). Still documents for now: reports, drafts, folders,
+  data adapters, schedules and job runs.
+  `security/audit_trail.py` maps changing routes to audit actions.
+
+Rules that keep the backends interchangeable: ids (time-ordered, 32 hex) and timestamps (UTC, milliseconds) are
+made by the app; no stored procedures, triggers or vendor-only types; organisation, masking and the hash chain are
+done in Python; one write touches one row/document. `tests/test_system_db.py` runs the same tests on files, SQLite,
+MongoDB, PostgreSQL, MySQL, SQL Server and Oracle (the last four in CI).
+
+Several app instances can share one repository; each instance reloads its report list when the repository
+revision changes (`services/versions.refresh_if_changed`). Move an existing data directory with
+`python -m backend.app.storage.migrate --url <database URL>`.
 
 | Key | Content | In git? |
 |---|---|---|
@@ -283,7 +304,9 @@ Move an existing data directory with `python -m backend.app.storage.migrate`.
 | `versions/<ID>/<n>.json` | Every saved version of a server report (last 50) | No |
 | `jobs/schedules.json`, `jobs/runs.json`, `jobs/output/` | Schedules, background/scheduled runs, their files | No |
 | `meta/…` | Repository revision, signed-out sessions, failed sign-ins | No |
-| `audit/`, `logs/` | Run history (`audit` in the store), service log (always a file) | No |
+| `api-keys.json` | API keys (SHA-256 of the secret only) | **Never** |
+| `records/` (files backend) | Run log and audit trail; in a database: `rs_report_runs`, `rs_audit_events` | No |
+| `audit/`, `logs/` | Older run history (read by the migration tool), service log (always a file) | No |
 
 Writes go through `_write_json_atomically` (temp file + rename), so a crash never leaves half a file.
 

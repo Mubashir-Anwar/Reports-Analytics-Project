@@ -88,6 +88,8 @@ def register(app: FastAPI, ctx: SimpleNamespace) -> None:
         record, full_key = api_keys.create_key(name, clean_folders(payload.get("folders")), clean_ips(payload.get("allowedIps")),
                                                clean_expiry(payload.get("expiresInDays")), request.state.actor)
         LOG.info("API key %s (%s) created by %s", record["id"], name, request.state.actor)
+        ctx.audit_event(request, "apikey.created", record["id"], {"name": name, "folders": record["folders"],
+                                                                  "allowedIps": record["allowedIps"], "expiresAt": record["expiresAt"]})
         return {"key": api_keys.key_view(record), "secret": full_key,
                 "note": "Copy this key now: it is shown only once. Keep it on the website's server, never in a browser."}
 
@@ -109,6 +111,7 @@ def register(app: FastAPI, ctx: SimpleNamespace) -> None:
             item["expiresAt"] = clean_expiry(payload["expiresInDays"])
         api_keys.save_keys(keys)
         LOG.info("API key %s changed by %s", key_id, request.state.actor)
+        ctx.audit_event(request, "apikey.changed", key_id, {name: payload[name] for name in ("disabled", "folders", "allowedIps", "expiresInDays") if name in payload})
         return {"key": api_keys.key_view(item)}
 
     @app.delete("/api/admin/api-keys/{key_id}")
@@ -120,6 +123,7 @@ def register(app: FastAPI, ctx: SimpleNamespace) -> None:
             raise HTTPException(status_code=404, detail="API key not found")
         api_keys.save_keys(remaining)
         LOG.info("API key %s deleted by %s", key_id, request.state.actor)
+        ctx.audit_event(request, "apikey.deleted", key_id)
         return {"status": "deleted", "id": key_id}
 
     @app.post("/api/v1/links")

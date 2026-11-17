@@ -143,7 +143,8 @@ def test_audit_required_blocks_release_when_audit_cannot_be_written(tmp_path, mo
     client = TestClient(app)
     assert client.post("/api/admin/reports", json=report, headers={"X-Admin-Token": "t"}).status_code in (200, 201)
     monkeypatch.setattr(core.mongodb, "_execute_report_pipeline", lambda *a, **k: [{"A": 1}])
-    monkeypatch.setattr(core.audit, "_append_report_audit", lambda audit: (_ for _ in ()).throw(OSError("disk")))
+    from backend.app.db.files import FileRecords
+    monkeypatch.setattr(FileRecords, "_insert_run", lambda self, run: (_ for _ in ()).throw(OSError("disk")))
 
     class FakeClient(dict):
         pass

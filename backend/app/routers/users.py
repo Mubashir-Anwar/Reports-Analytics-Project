@@ -83,6 +83,7 @@ def register(app: FastAPI, ctx: SimpleNamespace) -> None:
         save_users(users)
         LOG.info("User %s created by %s (rights %s%s)", username, getattr(request.state, "actor", "?"),
                  ",".join(new_user["rights"]), ", super admin" if new_user["superAdmin"] else "")
+        ctx.audit_event(request, "user.created", username, {"rights": new_user["rights"], "superAdmin": new_user["superAdmin"]})
         return {"user": user_view(users[-1])}
 
     @app.put("/api/admin/users/{username}")
@@ -105,6 +106,16 @@ def register(app: FastAPI, ctx: SimpleNamespace) -> None:
         user["sessionVersion"] = int(user.get("sessionVersion", 0)) + 1  # signs this user out everywhere
         save_users(users)
         LOG.info("User %s changed by %s", user["username"], getattr(request.state, "actor", "?"))
+        change: dict[str, Any] = {}
+        if sorted(user_rights(before)) != sorted(user_rights(user)):
+            change["rights"] = {"from": sorted(user_rights(before)), "to": sorted(user_rights(user))}
+        if is_super_admin(before) != is_super_admin(user):
+            change["superAdmin"] = is_super_admin(user)
+        if bool(before.get("disabled")) != bool(user.get("disabled")):
+            change["disabled"] = bool(user.get("disabled"))
+        if payload.get("password"):
+            change["passwordReset"] = True
+        ctx.audit_event(request, "user.changed", user["username"], change)
         return {"user": user_view(user)}
 
     @app.delete("/api/admin/users/{username}")
@@ -120,4 +131,5 @@ def register(app: FastAPI, ctx: SimpleNamespace) -> None:
             raise HTTPException(status_code=409, detail="Keep at least one active super admin")
         save_users(remaining)
         LOG.info("User %s deleted by %s", target["username"], getattr(request.state, "actor", "?"))
+        ctx.audit_event(request, "user.deleted", target["username"])
         return {"status": "deleted", "username": username}

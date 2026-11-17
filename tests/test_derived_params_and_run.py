@@ -155,10 +155,8 @@ def service(tmp_path, monkeypatch):
         return [{"Name": f"row{i}"} for i in range(30)]
 
     monkeypatch.setattr(core.mongodb, "_execute_report_pipeline", fake_execute)
-    audits = []
-    monkeypatch.setattr(core.audit, "_append_report_audit", audits.append)
     client = TestClient(core.make_app())
-    client.seen, client.audits = seen, audits
+    client.seen = seen
     return client
 
 
@@ -195,9 +193,10 @@ def test_run_report_returns_full_file_on_chosen_adapter(service, fmt, magic):
                             json={"parameters": ANSWERS, "connectionId": "telenor", "format": fmt})
     assert response.status_code == 200, response.text
     assert response.content.lstrip(b"\xef\xbb\xbf").startswith(magic)
-    audit = service.audits[-1]
-    assert audit["status"] == "success" and audit["connectionId"] == "telenor" and audit["access"] == "admin-run"
-    assert audit["rowCount"] == 30
+    from backend.app.db import get_records
+    run = get_records().runs(channel="designer-run")[0]
+    assert run["status"] == "success" and run["dataSource"] == "telenor" and run["actor"] == "admin token"
+    assert run["rowCount"] == 30 and run["format"] == fmt
 
 
 def test_run_report_excel_has_all_rows_on_one_sheet(service):

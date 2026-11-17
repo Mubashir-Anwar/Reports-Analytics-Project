@@ -1,5 +1,4 @@
 """Phase 4: /server resources — details, edit, copy / move, .mrd download and upload, history, roles."""
-import json
 import sys
 from pathlib import Path
 
@@ -101,7 +100,7 @@ def test_viewer_cannot_change_or_download_and_designer_cannot_delete(client):
     assert client.get("/api/server/reports/NOPE").status_code == 404
     login(client, "boss", "boss-pass-1")
     assert client.request("DELETE", "/api/server/reports/R1", json={}).status_code == 200
-    assert json.loads((Path(core.data_directory()) / "history" / "R1.json").read_text())[-1]["action"] == "deleted"
+    assert client.app.state.ctx.read_history("R1")[-1]["action"] == "deleted"          # kept in rs_report_history
 
 
 def test_upload_a_jasper_jrxml(client):

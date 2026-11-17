@@ -1,0 +1,360 @@
+"""The system database behaves the same on every backend: files, SQLite, PostgreSQL, MySQL and MongoDB.
+
+SQLite always runs. MongoDB runs when MONGO_TEST_URL is set (e.g. mongodb://127.0.0.1:27017), PostgreSQL with
+PG_TEST_URL, MySQL with MYSQL_TEST_URL, SQL Server with MSSQL_TEST_URL and Oracle with ORACLE_TEST_URL (CI starts
+them). Each test gets its own database or schema, or its tables are removed afterwards.
+"""
+import json
+import os
+import secrets
+import sys
+import threading
+from datetime import datetime, timedelta, timezone
+from pathlib import Path
+from urllib.parse import quote
+
+import pytest
+from fastapi.testclient import TestClient
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
+import reporting_core as core  # noqa: E402
+import test_storage  # noqa: E402
+from backend.app import db as db_package  # noqa: E402
+from backend.app.db import model  # noqa: E402
+from backend.app.storage import store as store_module  # noqa: E402
+from test_workspace_and_server import ADMIN, PUBLISHED, FakeMongoClient, login, token  # noqa: E402
+
+MONGO_URL = os.getenv("MONGO_TEST_URL", "")
+PG_URL = os.getenv("PG_TEST_URL", "")
+MYSQL_URL = os.getenv("MYSQL_TEST_URL", "")
+SHARED_SQL = {"mysql": MYSQL_URL, "sqlserver": os.getenv("MSSQL_TEST_URL", ""), "oracle": os.getenv("ORACLE_TEST_URL", "")}
+
+
+def _forget():
+    from backend.app.db import sql as sql_backend
+    from backend.app.db import entities
+    store_module._STORES.clear()
+    db_package.reset_cache()
+    entities.reset_cache()
+    for engine in sql_backend._ENGINES.values():
+        engine.dispose()
+    sql_backend._ENGINES.clear()
+
+
+@pytest.fixture(params=["files", "sqlite", "mongodb", "postgresql", "mysql", "sqlserver", "oracle"])
+def backend(request, tmp_path, monkeypatch):
+    """Point the service's storage at one backend; yields its name. Everything is removed afterwards."""
+    kind = request.param
+    monkeypatch.setenv("REPORTING_DATA_DIR", str(tmp_path / "data"))
+    cleanup = None
+    if kind == "files":
+        monkeypatch.setenv("REPORTING_STORAGE", "files")
+    elif kind == "sqlite":
+        monkeypatch.setenv("REPORTING_STORAGE", "sql")
+        monkeypatch.setenv("REPORTING_STORAGE_URL", f"sqlite:///{(tmp_path / 'system.db').as_posix()}")
+    elif kind == "mongodb":
+        if not MONGO_URL:
+            pytest.skip("set MONGO_TEST_URL to test the MongoDB backend")
+        name = f"rs_test_{secrets.token_hex(4)}"
+        monkeypatch.setenv("REPORTING_STORAGE", "mongodb")
+        monkeypatch.setenv("REPORTING_STORAGE_URL", f"{MONGO_URL.rstrip('/')}/{name}")
+
+        def cleanup():
+            from pymongo import MongoClient
+            MongoClient(MONGO_URL).drop_database(name)
+    elif kind == "postgresql":
+        if not PG_URL:
+            pytest.skip("set PG_TEST_URL to test PostgreSQL")
+        import psycopg
+        schema = f"rs_test_{secrets.token_hex(4)}"
+        with psycopg.connect(PG_URL, autocommit=True) as connection:
+            connection.execute(f"CREATE SCHEMA {schema}")
+        separator = "&" if "?" in PG_URL else "?"
+        monkeypatch.setenv("REPORTING_STORAGE", "sql")
+        monkeypatch.setenv("REPORTING_STORAGE_URL", f"{PG_URL}{separator}options={quote(f'-csearch_path={schema}')}")
+
+        def cleanup():
+            with psycopg.connect(PG_URL, autocommit=True) as connection:
+                connection.execute(f"DROP SCHEMA {schema} CASCADE")
+    else:
+        url = SHARED_SQL[kind]
+        if not url:
+            pytest.skip(f"set the {kind} test URL to test it")
+        monkeypatch.setenv("REPORTING_STORAGE", "sql")
+        monkeypatch.setenv("REPORTING_STORAGE_URL", url)
+
+        def cleanup():                     # one shared test database: remove our tables
+            from backend.app.db import sql as sql_backend
+            import backend.app.storage.sql_store  # noqa: F401 - registers rs_documents / rs_lines
+            sql_backend.metadata.drop_all(sql_backend.engine_for(url))
+        cleanup()
+    _forget()
+    yield kind
+    _forget()
+    if cleanup:
+        cleanup()
+
+
+def records():
+    return db_package.get_records()
+
+
+# ------------------------------------------------------------------ document store
+def test_document_store_contract(backend):
+    test_storage.test_documents_folders_lines_and_files(store_module.get_store())
+
+
+def test_large_files_are_kept_whole(backend):
+    store = store_module.get_store()
+    big = secrets.token_bytes(17 * 1024 * 1024) if backend == "mongodb" else secrets.token_bytes(300_000)  # MongoDB: GridFS
+    store.write_bytes("jobs/output/big.pdf", big)
+    assert store.read_bytes("jobs/output/big.pdf") == big
+    store.write_bytes("jobs/output/big.pdf", b"small now")
+    assert store.read_bytes("jobs/output/big.pdf") == b"small now"
+    assert store.delete("jobs/output/big.pdf") and store.read_bytes("jobs/output/big.pdf") is None
+
+
+# ------------------------------------------------------------------ report runs
+def run(**extra):
+    return {"startedAt": model.now(), "channel": "api", "actor": "site-a", "actorType": "api-key", "status": "success",
+            "reportId": "R1", "format": "pdf", "rowCount": 3, **extra}
+
+
+def test_runs_are_stored_and_filtered(backend):
+    rec = records()
+    assert rec.schema_version() == model.SCHEMA_VERSION
+    base = datetime(2026, 1, 1, 9, 0, 0, 123000, tzinfo=timezone.utc)
+    first = rec.add_run(run(startedAt=base, parameters={"Branch": "LHR", "Dates": ["2026-01-01"]}))
+    rec.add_run(run(startedAt=base + timedelta(minutes=1), status="failed", errorCode="503", reportId="R2", actor="ali", actorType="user"))
+    rec.add_run(run(startedAt=base + timedelta(minutes=2), channel="schedule", actor="ali", actorType="user"))
+    newest = rec.runs()
+    assert [r["startedAt"] for r in newest] == ["2026-01-01T09:02:00.123Z", "2026-01-01T09:01:00.123Z", "2026-01-01T09:00:00.123Z"]
+    assert [r["reportId"] for r in rec.runs(status="failed")] == ["R2"]
+    assert len(rec.runs(actor="ali")) == 2 and len(rec.runs(reportId="R1", channel="api")) == 1
+    assert len(rec.runs(since=base + timedelta(minutes=1))) == 2 and len(rec.runs(until=base + timedelta(minutes=1))) == 1
+    assert len(rec.runs(limit=1)) == 1
+    stored = next(r for r in newest if r["id"] == first["id"])
+    assert stored["parameters"] == {"Branch": "LHR", "Dates": ["2026-01-01"]} and stored["orgId"] == "default"
+    assert stored["rowCount"] == 3 and stored["errorCode"] is None
+
+
+def test_bad_runs_are_refused(backend):
+    rec = records()
+    with pytest.raises(ValueError):
+        rec.add_run(run(channel="somewhere"))
+    with pytest.raises(ValueError):
+        rec.add_run(run(actor=""))
+    with pytest.raises(ValueError):
+        rec.runs(password="x")
+    long = rec.add_run(run(errorMessage="x" * 2000, parameters={"$where": 1, "a.b": 2}))
+    assert len(long["errorMessage"]) == 500 and long["parameters"] == {"where": 1, "a_b": 2}
+
+
+# ------------------------------------------------------------------ audit events
+def test_audit_chain(backend):
+    rec = records()
+    for index in range(5):
+        rec.audit("user.changed", actor="boss", target=f"user{index}", details={"rights": {"to": ["designer"]}}, client_ip="10.0.0.1")
+    events = rec.events()
+    assert [e["seq"] for e in events] == [5, 4, 3, 2, 1]
+    assert events[-1]["prevHash"] is None and events[0]["prevHash"] == events[1]["hash"]
+    assert rec.events(target="user2")[0]["details"] == {"rights": {"to": ["designer"]}}
+    assert rec.verify_chain() == {"ok": True, "events": 5, "problems": []}
+
+
+def tamper(backend, seq, how):
+    """Change or remove one stored event behind the service's back."""
+    if backend == "files":
+        path = Path(os.environ["REPORTING_DATA_DIR"]) / "records" / "audit-events.jsonl"
+        lines = path.read_text(encoding="utf-8").splitlines()
+        kept = []
+        for line in lines:
+            event = json.loads(line)
+            if event["seq"] == seq:
+                if how == "remove":
+                    continue
+                event["actor"] = "someone else"
+            kept.append(json.dumps(event))
+        path.write_text("\n".join(kept) + "\n", encoding="utf-8")
+    elif backend == "mongodb":
+        events = records().events_collection
+        if how == "remove":
+            events.delete_one({"seq": seq})
+        else:
+            events.update_one({"seq": seq}, {"$set": {"actor": "someone else"}})
+    else:
+        from backend.app.db.sql import audit_events
+        with records().engine.begin() as connection:
+            if how == "remove":
+                connection.execute(audit_events.delete().where(audit_events.c.seq == seq))
+            else:
+                connection.execute(audit_events.update().where(audit_events.c.seq == seq).values(actor="someone else"))
+
+
+@pytest.mark.parametrize("how, problem", [("change", "event 2 was changed"), ("remove", "event 2 is missing")])
+def test_a_changed_or_removed_event_is_detected(backend, how, problem):
+    rec = records()
+    for _ in range(4):
+        rec.audit("auth.login", actor="ali")
+    tamper(backend, 2, how)
+    result = rec.verify_chain()
+    assert not result["ok"] and any(problem in item for item in result["problems"])
+
+
+def test_concurrent_audit_writes_keep_one_chain(backend):
+    rec = records()
+    errors = []
+
+    def write(worker):
+        try:
+            for index in range(8):
+                rec.audit("auth.login", actor=f"w{worker}", target=str(index))
+        except Exception as exc:  # noqa: BLE001
+            errors.append(exc)
+
+    threads = [threading.Thread(target=write, args=(n,)) for n in range(4)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+    assert not errors
+    assert sorted(e["seq"] for e in rec.events(limit=100)) == list(range(1, 33))
+    assert rec.verify_chain()["ok"]
+
+
+def test_migrations_can_run_again(backend):
+    rec = records()
+    rec.audit("auth.login", actor="ali")
+    rec.ensure_schema()
+    rec.ensure_schema()
+    assert rec.schema_version() == model.SCHEMA_VERSION and rec.verify_chain()["events"] == 1
+
+
+def test_masking():
+    assert model.mask("4220112345671") == "42*********71"
+    assert model.mask("123") == "***" and model.mask(["12345"]) == ["12*45"]
+    assert model.masked_parameters({"CNIC": "4220112345671", "Branch": "LHR"}, {"CNIC"}) == {"CNIC": "42*********71", "Branch": "LHR"}
+
+
+# ------------------------------------------------------------------ the whole service on each backend
+def test_whole_service_records_runs_and_audit(backend, monkeypatch):
+    monkeypatch.setenv("REPORTING_ADMIN_TOKEN", ADMIN)
+    store = store_module.get_store()
+    store.write_json("connections.json", {"connections": [{"id": "default", "name": "Main", "storage": "file", "database": "a"}]})
+    store.write_json("private_secrets.json", {"admin_token": ADMIN, "mongo_connections": {"default": {"uri": "mongodb://main/a", "database": "a"}}},
+                     private=True)
+    monkeypatch.setattr(core.mongodb, "MongoClient", FakeMongoClient)
+    monkeypatch.setattr(core.mongodb, "_execute_report_pipeline", lambda *_a, **_k: [{"Name": "a"}, {"Name": "b"}])
+    app = TestClient(core.make_app())
+    draft = {**PUBLISHED, "id": "SYS1", "folder": "Sales",
+             "parameters": [{"name": "CNIC", "type": "string", "sensitive": True}, {"name": "Branch", "type": "string"}]}
+    assert app.put("/api/admin/workspace/SYS1?create=true", headers=token(ADMIN), json=draft).status_code == 200
+    assert app.post("/api/admin/workspace/SYS1/publish", headers=token(ADMIN), json={}).status_code == 200
+    response = app.get("/generate/SYS1.csv?CNIC=4220112345671&Branch=LHR", headers={"X-Admin-Token": ADMIN})
+    assert response.status_code == 200
+    assert login(app, "admin", ADMIN).status_code == 200
+    assert app.get("/api/server/me").status_code == 200 and app.get("/admin").status_code == 200   # signed-in pages
+    assert login(app, "admin", "wrong").status_code == 401
+    assert app.post("/api/admin/users", headers=token(ADMIN), json={"username": "ali", "password": "Passw0rd-long-enough", "rights": ["runner"]}).status_code == 200
+
+    run_record = app.get("/api/admin/audit?reportId=SYS1", headers=token(ADMIN)).json()["records"][0]
+    assert run_record["parameters"] == {"CNIC": "42*********71", "Branch": "LHR"}       # sensitive value masked
+    assert run_record["rowCount"] == 2 and run_record["folder"] == "Sales" and run_record["outputBytes"] == len(response.content)
+    events = app.get("/api/admin/audit-events", headers=token(ADMIN)).json()["events"]
+    actions = [e["action"] for e in reversed(events)]
+    assert actions == ["report.published", "auth.login", "auth.login_failed", "user.created"]
+    assert events[0]["details"] == {"rights": ["runner"], "superAdmin": False} and events[0]["actor"] == "admin token"
+    assert app.get("/api/admin/audit-events/verify", headers=token(ADMIN)).json()["ok"] is True
+    assert app.get("/api/admin/audit-events", headers=token(ADMIN), params={"actor": "nobody"}).json()["events"] == []
+
+
+def test_migrate_a_data_folder_into_this_backend(backend, tmp_path, monkeypatch):
+    """A files installation (reports, users, run log, audit trail and the older run history) moved into a database."""
+    if backend == "files":
+        pytest.skip("the source is the files backend")
+    import io
+
+    from backend.app.storage import migrate as migrate_module
+    url = os.environ["REPORTING_STORAGE_URL"]
+    source_dir = tmp_path / "source"
+    monkeypatch.setenv("REPORTING_DATA_DIR", str(source_dir))
+    monkeypatch.setenv("REPORTING_STORAGE", "files")
+    _forget()
+    source = store_module.get_store()
+    source.write_json("reports/General/OLD.json", {"id": "OLD", "title": "Old"})
+    source.write_json("users.json", {"users": [{"username": "ali"}]}, private=True)
+    source.make_dir("reports/Empty")
+    source.append_line("audit/report-executions.jsonl", json.dumps({
+        "requestedAt": "2025-11-09 18:11:39.809860+00:00", "access": "admin-token", "reportId": "OLD", "format": "xlsx",
+        "status": "failed", "rowCount": 0, "errorCode": "503", "parameters": {"StartDate": "2025-01-09"}, "durationMs": 4}))
+    source.append_line("audit/report-executions.jsonl", "not json")
+    files = db_package.get_records()
+    files.add_run(run(reportId="OLD"))
+    files.audit("auth.login", actor="ali")
+    files.audit("user.created", actor="ali", target="sara")
+
+    _, store, rec = migrate_module.target_for(url)
+    counts = migrate_module.migrate(store, out=io.StringIO(), records=rec)
+    assert counts["runs"] == 1 and counts["legacyRuns"] == 1 and counts["recordsSkipped"] == 1 and counts["events"] == 2
+    assert store.read_json("reports/General/OLD.json")["id"] == "OLD" and "Empty" in store.dirs("reports")
+    legacy = rec.runs(status="failed")[0]
+    assert legacy["startedAt"] == "2025-11-09T18:11:39.809Z" and legacy["format"] == "xlsx" and legacy["actor"] == "admin-token"
+    assert rec.verify_chain() == {"ok": True, "events": 2, "problems": []}     # the copied chain is still intact
+    again = migrate_module.migrate(store, out=io.StringIO(), records=rec)
+    assert again["runs"] == again["legacyRuns"] == again["events"] == 0
+
+
+# ------------------------------------------------------------------ typed entities (accounts, keys, permissions, versions, history)
+def test_entities_contract(backend):
+    from backend.app.db import entities as ent
+    store = ent.get_entities()
+    user = {"username": "ali", "rights": ["designer", "server"], "superAdmin": False, "disabled": False, "salt": "ab", "hash": "cd",
+            "iterations": 600000, "sessionVersion": 0, "createdAt": "2026-01-01T10:00:00.000Z", "futureField": {"x": 1}}
+    store.put(ent.USERS, user)
+    stored = store.get(ent.USERS, "ali")
+    assert stored == user                                               # bool False, lists and unknown fields survive
+    store.put(ent.USERS, {**user, "disabled": True, "sessionVersion": 3})
+    assert store.get(ent.USERS, "ali")["disabled"] is True and len(store.find(ent.USERS)) == 1
+    store.replace_all(ent.USERS, [{"username": "sara", "role": "viewer"}])
+    assert [u["username"] for u in store.find(ent.USERS)] == ["sara"] and store.get(ent.USERS, "ali") is None
+    assert store.get(ent.USERS, "sara") == {"username": "sara", "role": "viewer"}   # older account: no rights field invented
+
+    definition = {"id": "R1", "querySource": '[{"$match": {"a.b": 1}}]', "pipeline": [{"$match": {"x.y": {"$gte": 2}}}]}
+    for number in (1, 2, 3):
+        store.put(ent.REPORT_VERSIONS, {"reportId": "R1", "version": number, "savedAt": model.now(), "definition": definition})
+    assert store.get(ent.REPORT_VERSIONS, "R1", 2)["definition"] == definition    # "$" and "." keys kept exactly
+    assert [v["version"] for v in store.find(ent.REPORT_VERSIONS, {"reportId": "R1"}, order=("version", True), limit=2)] == [3, 2]
+    assert store.delete(ent.REPORT_VERSIONS, "R1", 1) and not store.delete(ent.REPORT_VERSIONS, "R1", 1)
+    store.put(ent.FOLDER_PERMISSIONS, {"folder": "/", "users": {"ali": "none"}, "roles": {}})
+    store.put(ent.FOLDER_PERMISSIONS, {"folder": "Finance", "users": {}, "roles": {"viewer": "run"}})
+    assert store.delete_where(ent.FOLDER_PERMISSIONS, {"folder": "/"}) == 1
+    with pytest.raises(ValueError):
+        store.put(ent.USERS, {"username": ""})
+
+
+def test_older_documents_move_into_the_tables(backend):
+    """users.json, api-keys.json, folder-permissions.json, versions/ and history/ become rows once; originals kept."""
+    from backend.app.db import entities as ent
+    from backend.app.db.upgrade import move_documents
+    store = store_module.get_store()
+    store.write_json("users.json", {"users": [{"username": "boss", "role": "admin", "salt": "s", "hash": "h", "sessionVersion": 0}]}, private=True)
+    store.write_json("api-keys.json", {"keys": [{"id": "0123456789ab", "name": "Site", "hash": "f" * 64, "folders": [], "disabled": False}]}, private=True)
+    store.write_json("folder-permissions.json", {"folders": {"": {"users": {"ali": "run"}, "roles": {}}, "HR": {"users": {}, "roles": {"viewer": "none"}}}})
+    store.write_json("versions/R1/00001.json", {"version": 1, "savedAt": "2026-01-01T10:00:00+00:00", "action": "published", "user": "boss",
+                                                "folder": "General", "title": "R1", "definition": {"id": "R1", "q": [{"$match": {}}]}})
+    store.write_json("history/R1.json", [{"at": "2026-01-01T10:00:00+00:00", "action": "published", "user": "boss", "detail": "new"},
+                                         {"at": "2026-01-02T10:00:00+00:00", "action": "edited", "user": "boss", "detail": "title"}])
+    entities = ent.get_entities()
+    counts = move_documents(store, entities)
+    assert counts == {"users": 1, "apiKeys": 1, "permissions": 2, "versions": 1, "history": 2}
+    assert entities.get(ent.USERS, "boss")["role"] == "admin" and entities.get(ent.API_KEYS, "0123456789ab")["name"] == "Site"
+    assert {row["folder"] for row in entities.find(ent.FOLDER_PERMISSIONS)} == {"/", "HR"}
+    assert entities.get(ent.REPORT_VERSIONS, "R1", 1)["definition"] == {"id": "R1", "q": [{"$match": {}}]}
+    assert [row["action"] for row in entities.find(ent.REPORT_HISTORY, {"reportId": "R1"}, order=("id", False))] == ["published", "edited"]
+    assert store.read_json("users.json") is None and store.read_json("migrated/users.json")["users"][0]["username"] == "boss"
+    assert move_documents(store, entities) == {"users": 0, "apiKeys": 0, "permissions": 0, "versions": 0, "history": 0}
+
+    from backend.app.security import permissions
+    assert permissions.load_rules()[""] == {"users": {"ali": "run"}, "roles": {}}     # the root folder reads back as ""

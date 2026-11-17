@@ -1,8 +1,10 @@
-"""Where the service keeps its data: one small "document store" with two backends.
+"""Where the service keeps its data: one small "document store" with four backends.
 
 * files (default): the data directory (REPORTING_DATA_DIR), one JSON file per document, as before.
 * postgresql: REPORTING_STORAGE=postgresql and REPORTING_STORAGE_URL=postgresql://… — every document is a row, so
   several app instances can share one repository (put a load balancer in front of them).
+* sql: any SQL database the client already has — SQL Server, Oracle, MySQL, PostgreSQL (or SQLite) — see sql_store.py.
+* mongodb: a MongoDB database — see mongo_store.py. A client needs only the database they already run.
 
 Documents are addressed by keys that look like relative paths ("reports/General/R1.json", "users.json").
 Everything that used to read or write files in the data directory goes through get_store()."""
@@ -265,20 +267,43 @@ def _like(text: str) -> str:
     return text.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
 
 
-_STORES: dict[str, PostgresStore] = {}
+_STORES: dict[str, Any] = {}
 _STORES_LOCK = threading.Lock()
 
+BACKENDS = ("files", "postgresql", "sql", "mongodb")
 
-def get_store() -> FileStore | PostgresStore:
+
+def storage_settings() -> tuple[str, str]:
+    """(backend, url) from REPORTING_STORAGE and REPORTING_STORAGE_URL."""
     backend = os.getenv("REPORTING_STORAGE", "files").strip().lower() or "files"
-    if backend in ("files", "file"):
+    backend = {"file": "files", "postgres": "postgresql", "mongo": "mongodb"}.get(backend, backend)
+    if backend not in BACKENDS:
+        raise RuntimeError(f"REPORTING_STORAGE must be one of {', '.join(BACKENDS)}, not {backend!r}")
+    url = os.getenv("REPORTING_STORAGE_URL", "").strip()
+    if backend == "postgresql" and not url.startswith(("postgresql://", "postgres://")):
+        raise RuntimeError("REPORTING_STORAGE=postgresql needs REPORTING_STORAGE_URL=postgresql://user:password@host/database")
+    if backend == "sql" and not url:
+        raise RuntimeError("REPORTING_STORAGE=sql needs REPORTING_STORAGE_URL, e.g. sqlserver://user:password@host:1433/reporting, "
+                           "oracle://user:password@host:1521/?service_name=XEPDB1, mysql://… or postgresql://…")
+    if backend == "mongodb" and not url.startswith(("mongodb://", "mongodb+srv://")):
+        raise RuntimeError("REPORTING_STORAGE=mongodb needs REPORTING_STORAGE_URL=mongodb://user:password@host:27017/reporting_system")
+    return backend, url
+
+
+def get_store() -> Any:
+    """The document store for the configured backend (one shared instance per URL)."""
+    backend, url = storage_settings()
+    if backend == "files":
         return FileStore()
-    if backend in ("postgresql", "postgres"):
-        url = os.getenv("REPORTING_STORAGE_URL", "").strip()
-        if not url.startswith(("postgresql://", "postgres://")):
-            raise RuntimeError("REPORTING_STORAGE=postgresql needs REPORTING_STORAGE_URL=postgresql://user:password@host/database")
-        with _STORES_LOCK:
-            if url not in _STORES:
-                _STORES[url] = PostgresStore(url)
-            return _STORES[url]
-    raise RuntimeError(f"REPORTING_STORAGE must be files or postgresql, not {backend!r}")
+    with _STORES_LOCK:
+        cache_key = f"{backend}|{url}"
+        if cache_key not in _STORES:
+            if backend == "postgresql":
+                _STORES[cache_key] = PostgresStore(url)
+            elif backend == "sql":
+                from backend.app.storage.sql_store import SqlStore  # noqa: PLC0415 - optional backend
+                _STORES[cache_key] = SqlStore(url)
+            else:
+                from backend.app.storage.mongo_store import MongoStore  # noqa: PLC0415 - optional backend
+                _STORES[cache_key] = MongoStore(url)
+        return _STORES[cache_key]

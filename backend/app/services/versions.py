@@ -10,6 +10,7 @@ from types import SimpleNamespace
 from typing import Any
 
 from backend.app.constants import REPORT_ID_PATTERN
+from backend.app.db.entities import REPORT_VERSIONS, get_entities
 from backend.app.definitions import discover_reports
 from backend.app.logs import LOG
 from backend.app.storage.store import get_store
@@ -21,29 +22,25 @@ REVISION_KEY = "meta/repository-revision.json"
 REFRESH_EVERY_SECONDS = 3.0
 
 
-def _version_keys(report_id: str) -> list[tuple[int, str]]:
-    found = []
-    for key in get_store().keys(f"versions/{report_id}", ".json"):
-        stem = key.rsplit("/", 1)[-1][:-5]
-        if stem.isdigit():
-            found.append((int(stem), key))
-    return sorted(found)
+def _versions(report_id: str) -> list[dict[str, Any]]:
+    """Versions of a report from rs_report_versions, oldest first."""
+    return get_entities().find(REPORT_VERSIONS, {"reportId": report_id}, order=("version", False))
 
 
 def save_version(ctx: SimpleNamespace, report_id: str, config: dict[str, Any], action: str = "saved", user: str = "") -> int:
     """Keep this state of the report as a new version (the last MAX_VERSIONS are kept)."""
     if not REPORT_ID_PATTERN.fullmatch(report_id):
         return 0
-    store = get_store()
+    entities = get_entities()
     try:
-        existing = _version_keys(report_id)
-        number = existing[-1][0] + 1 if existing else 1
-        store.write_json(f"versions/{report_id}/{number:05d}.json", {
-            "version": number, "savedAt": ctx.now_iso(), "action": action, "user": user,
-            "folder": config.get("folder", "General"), "title": config.get("title", report_id), "definition": config,
+        existing = [item["version"] for item in _versions(report_id)]
+        number = existing[-1] + 1 if existing else 1
+        entities.put(REPORT_VERSIONS, {
+            "reportId": report_id, "version": number, "savedAt": ctx.now_iso(), "action": action[:32], "user": user[:128],
+            "folder": config.get("folder", "General"), "title": str(config.get("title", report_id))[:200], "definition": config,
         })
-        for _, old in existing[:max(0, len(existing) + 1 - MAX_VERSIONS)]:
-            store.delete(old)
+        for old in existing[:max(0, len(existing) + 1 - MAX_VERSIONS)]:
+            entities.delete(REPORT_VERSIONS, report_id, old)
         return number
     except (OSError, ValueError):
         LOG.warning("A version of %s could not be saved", report_id)
@@ -51,16 +48,11 @@ def save_version(ctx: SimpleNamespace, report_id: str, config: dict[str, Any], a
 
 
 def list_versions(ctx: SimpleNamespace, report_id: str) -> list[dict[str, Any]]:
-    store = get_store()
-    items = []
-    for _, key in reversed(_version_keys(report_id)):
-        data = store.read_json(key) or {}
-        items.append({k: data.get(k) for k in ("version", "savedAt", "action", "user", "folder", "title")})
-    return items
+    return [{k: item.get(k) for k in ("version", "savedAt", "action", "user", "folder", "title")} for item in reversed(_versions(report_id))]
 
 
 def get_version(ctx: SimpleNamespace, report_id: str, number: int) -> dict[str, Any] | None:
-    return get_store().read_json(f"versions/{report_id}/{int(number):05d}.json")
+    return get_entities().get(REPORT_VERSIONS, report_id, int(number))
 
 
 def bump_revision(ctx: SimpleNamespace) -> None:

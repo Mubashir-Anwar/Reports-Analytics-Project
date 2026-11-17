@@ -10,9 +10,21 @@ from fastapi.responses import JSONResponse, Response
 
 from backend.app.connectors.profiles import load_connection_profiles
 from backend.app.constants import SERVICE_VERSION
+from backend.app.db import get_records
 from backend.app.logs import _FILE_HANDLER, LOG_LEVELS, log_file_path, read_log_entries
 from backend.app.security.access import enabled_areas
-from backend.app.storage.audit import read_audit_records
+
+
+def storage_label() -> str:
+    """Where the service keeps its data, for the status page (no passwords)."""
+    from backend.app.db.urls import dialect_label  # noqa: PLC0415
+    from backend.app.storage.store import storage_settings  # noqa: PLC0415
+    backend, url = storage_settings()
+    if backend == "files":
+        return "Files in the data folder (one instance)"
+    if backend == "mongodb":
+        return "MongoDB (shared, several instances)"
+    return f"{dialect_label(url)} (shared, several instances)"
 
 
 def register(app: FastAPI, ctx: SimpleNamespace) -> None:
@@ -56,9 +68,9 @@ def register(app: FastAPI, ctx: SimpleNamespace) -> None:
         secrets_raw = store.read_json("private_secrets.json") or {}
         env = os.environ
         checks = [
-            {"id": "storage", "ok": store.backend == "postgresql", "label": "Storage",
-             "value": "PostgreSQL (shared, several instances)" if store.backend == "postgresql" else "Files in the data folder (one instance)",
-             "hint": "REPORTING_STORAGE=postgresql for several instances and database backups"},
+            {"id": "storage", "ok": store.backend != "files", "label": "Storage",
+             "value": storage_label(),
+             "hint": "REPORTING_STORAGE=sql (SQL Server, Oracle, MySQL, PostgreSQL) or mongodb, for several instances and backups"},
             {"id": "secrets", "ok": secrets_raw.get("format") == "fernet-v1", "label": "Adapter passwords",
              "value": "encrypted" if secrets_raw.get("format") == "fernet-v1" else "plain text in a private file",
              "hint": "Set REPORTING_SECRETS_KEY to encrypt them"},
@@ -124,6 +136,30 @@ def register(app: FastAPI, ctx: SimpleNamespace) -> None:
                         headers={"Content-Disposition": f'attachment; filename="{path.name}"'})
 
     @app.get("/api/admin/audit")
-    def admin_audit(request: Request, limit: int = 200) -> dict[str, Any]:
+    def admin_audit(request: Request, limit: int = 200, reportId: str = "", actor: str = "", channel: str = "",  # noqa: N803
+                    status: str = "", since: str = "", until: str = "") -> dict[str, Any]:
+        """Report runs from the system database, newest first (filters are optional)."""
         require_admin(request)
-        return {"records": read_audit_records(limit)}
+        try:
+            records = get_records().runs(limit=limit, since=since or None, until=until or None, reportId=reportId,
+                                         actor=actor, channel=channel, status=status)
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from None
+        return {"records": records}
+
+    @app.get("/api/admin/audit-events")
+    def admin_audit_events(request: Request, limit: int = 200, action: str = "", actor: str = "", target: str = "",
+                           since: str = "", until: str = "") -> dict[str, Any]:
+        """The audit trail (sign-ins, accounts, rights, API keys, publishing, deletes, permissions), newest first."""
+        require_admin(request)
+        try:
+            events = get_records().events(limit=limit, since=since or None, until=until or None, action=action, actor=actor, target=target)
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from None
+        return {"events": events}
+
+    @app.get("/api/admin/audit-events/verify")
+    def admin_verify_audit(request: Request) -> dict[str, Any]:
+        """Re-check the hash chain: a changed or removed event shows up here."""
+        require_admin(request)
+        return get_records().verify_chain()

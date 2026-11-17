@@ -78,6 +78,8 @@ def register(app: FastAPI, ctx: SimpleNamespace) -> None:
         if not session_user:
             shared_state.record_failure(client)
             LOG.warning("Failed /server sign-in for user %r from %s", username[:64], client)
+            ctx.audit_event(request, "auth.login_failed", username[:64], {"reason": "wrong username or password"},
+                            actor=username[:64] or "?", actor_type="anonymous")
             raise HTTPException(status_code=401, detail="Wrong username or password")
         shared_state.clear_failures(client)
         if user is not None and not bootstrap:
@@ -92,6 +94,8 @@ def register(app: FastAPI, ctx: SimpleNamespace) -> None:
         super_admin = bootstrap or is_super_admin(user)
         role = derived_role(set(rights), super_admin)
         LOG.info("User %s signed in (%s)", session_user, ", ".join(rights) or "no rights")
+        ctx.audit_event(request, "auth.login", session_user, {"firstSetup": bootstrap, "rights": rights},
+                        actor=session_user, actor_type="user")
         response = JSONResponse({"username": session_user, "role": role, "bootstrap": bootstrap, "rights": rights,
                                  "superAdmin": super_admin})
         secure = request.url.scheme == "https" or os.getenv("REPORTING_SECURE_COOKIES", "false").strip().lower() == "true"
@@ -105,6 +109,7 @@ def register(app: FastAPI, ctx: SimpleNamespace) -> None:
         if session is not None:
             shared_state.revoke_session(session["nonce"], session_lifetime_seconds())  # on every instance
             LOG.info("User %s signed out of /server", session["username"])
+            ctx.audit_event(request, "auth.logout", session["username"], actor=session["username"], actor_type="user")
         response = JSONResponse({"status": "signed-out"})
         response.delete_cookie(SESSION_COOKIE, path="/")
         return response
@@ -143,7 +148,7 @@ def register(app: FastAPI, ctx: SimpleNamespace) -> None:
         definition = ctx.require_report(session, report_id, permissions.RUN)
         payload = await json_body(request)
         return run_definition_file(definition, payload, request.url.path, "server-session",
-                                   fixed_connection=True, user=session["username"], session=session)
+                                   fixed_connection=True, user=session["username"], session=session, request=request)
 
     @app.post("/api/server/folders")
     async def server_create_folder(request: Request) -> dict[str, Any]:

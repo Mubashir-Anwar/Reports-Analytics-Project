@@ -178,6 +178,10 @@ Server report ki har save (publish, edit, copy, move, upload, restore) ek **vers
 ## Production: PostgreSQL storage, kai instances, HTTPS
 
 - `REPORTING_STORAGE=postgresql` + `REPORTING_STORAGE_URL=postgresql://…` — reports, users, versions, schedules, outputs, audit sab database mein; kai instances ek saath chal sakte hain (logout aur login limit bhi sab par lagti hai).
+- **Client ke paas jo database ho wohi**: `REPORTING_STORAGE=sql` ke saath `sqlserver://…`, `oracle://…?service_name=…`, `mysql://…` ya `postgresql://…`; ya `REPORTING_STORAGE=mongodb` ke saath `mongodb://host:27017/reporting_system`. Sab tables/collections `rs_` se shuru hoti hain aur service khud banati hai.
+- **Har report run ka record** (`rs_report_runs`): kis ne, kahan se (runner, server, designer, schedule, API, signed link), kaun si report, kaun sa data source, parameters, rows, waqt, file ka size aur hash. Jis parameter par designer mein **Sensitive** tick ho (CNIC, account number) us ki value masked rehti hai (`42*********71`). Report ka data khud kabhi save nahi hota.
+- **Audit trail** (`rs_audit_events`): sign-in (ghalat bhi), sign-out, users aur rights, API keys, publish, delete, permissions, data sources, schedules. Har event pichle event ka hash rakhta hai; Admin → Logs → Audit trail → **Verify chain** se pata chalta hai ke kisi ne record badla ya mitaya to nahi.
+- Purana `data/` folder database mein: `REPORTING_DATA_DIR=./data python -m backend.app.storage.migrate --url sqlserver://user:pw@host:1433/reporting`.
 - Purana `data/` folder copy karna: `python -m backend.app.storage.migrate` (DEPLOYMENT.md dekhein).
 - Tayyar setup: `deploy/docker-compose.yml` (PostgreSQL + 2 app instances + nginx HTTPS). `deploy/.env.example` ko `deploy/.env` bana kar secrets bharein — yeh file git mein kabhi na daalein.
 - `/ready` load balancer ke liye; pages par CSP/HSTS jaise security headers khud lagte hain.

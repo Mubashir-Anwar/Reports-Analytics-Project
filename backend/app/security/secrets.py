@@ -83,7 +83,12 @@ def ensure_admin_token() -> str:
 
 
 def load_local_env_file() -> None:
-    """Load simple KEY=VALUE settings without requiring python-dotenv."""
+    """Load simple KEY=VALUE settings without requiring python-dotenv.
+
+    REPORTING_SKIP_ENV_FILE=1 skips it: the test suite sets this, so tests never pick up a developer's real
+    storage database, secrets key or tokens from .env."""
+    if os.getenv("REPORTING_SKIP_ENV_FILE", "").strip() == "1":
+        return
     env_path = PROJECT_ROOT / ".env"
     if not env_path.exists():
         return

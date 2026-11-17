@@ -162,7 +162,7 @@ def register(app: FastAPI, ctx: SimpleNamespace) -> None:
             payload = await request.json()
         except Exception:
             raise HTTPException(status_code=400, detail="Send a valid JSON body") from None
-        return preview_definition(definition, payload)
+        return preview_definition(definition, payload, request)
 
     @app.post("/api/admin/reports/{report_id}/run")
     async def admin_run_report(report_id: str, request: Request) -> Response:
@@ -176,4 +176,4 @@ def register(app: FastAPI, ctx: SimpleNamespace) -> None:
             payload = await request.json()
         except Exception:
             raise HTTPException(status_code=400, detail="Send a valid JSON body") from None
-        return run_definition_file(definition, payload, request.url.path, "admin-run")
+        return run_definition_file(definition, payload, request.url.path, "admin-run", request=request)

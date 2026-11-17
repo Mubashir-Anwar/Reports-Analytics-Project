@@ -191,7 +191,7 @@ export function ParametersEditor({ state, dispatch }) {
         </p>
       )}
       <table className="grid">
-        <thead><tr><th>Name (URL key)</th><th>Type</th><th>Label</th><th>Allowed values</th><th>Required</th><th /></tr></thead>
+        <thead><tr><th>Name (URL key)</th><th>Type</th><th>Label</th><th>Allowed values</th><th>Required</th><th title="CNIC, account number…: kept masked (42*****71) in the run log">Sensitive</th><th /></tr></thead>
         <tbody>
           {report.parameters.map((p, i) => (
             // eslint-disable-next-line react/no-array-index-key -- a name can be edited, the position is the identity
@@ -204,6 +204,8 @@ export function ParametersEditor({ state, dispatch }) {
                   onChange={(list) => patchParam(i, list.length ? { allowedValues: list } : { allowedValues: undefined })} />
               )}</td>
               <td>{p.prompt === false ? <small title="Computed from other parameters">ƒ computed</small> : <input type="checkbox" checked={Boolean(p.required)} onChange={(e) => patchParam(i, { required: e.target.checked })} />}</td>
+              <td><input type="checkbox" aria-label={`${p.name} is sensitive`} title="Masked in the run log (e.g. 42*********71)" checked={p.sensitive === true}
+                onChange={(e) => patchParam(i, e.target.checked ? { sensitive: true } : { sensitive: undefined })} /></td>
               <td><button className="icon" onClick={() => set({ parameters: report.parameters.filter((_, j) => j !== i) })}>✕</button></td>
             </tr>
           ))}

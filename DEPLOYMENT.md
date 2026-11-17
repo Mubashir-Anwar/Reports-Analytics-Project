@@ -230,9 +230,47 @@ docker run -d --name reporting -p 8000:8000 -v reporting-data:/data --env-file .
 * The `default` data adapter comes from `MONGODB_URI` / `MONGODB_DATABASE`; add more on `/admin → Data sources`.
 * The container's health check only tests that the process answers (`backend/app/healthcheck.py`). Use the JSON of
   `GET /health` (status `ok` / `unavailable`) for readiness and alerting about MongoDB.
-* `GET /ready` answers 200 when the storage works (files or PostgreSQL) — use it for the load balancer.
-* With `REPORTING_STORAGE=files` keep one instance and `--workers 1`. For several instances use the PostgreSQL
-  storage (below).
+* `GET /ready` answers 200 when the storage works (files or a database) — use it for the load balancer.
+* With `REPORTING_STORAGE=files` keep one instance and `--workers 1`. For several instances use a database
+  (below): the one the client already runs.
+
+## Where the service keeps its own data: files, any SQL database or MongoDB
+
+The service's own data (reports, drafts, folders, users and rights, API keys, versions, schedules, outputs, the
+**run log** and the **audit trail**) can live in whichever database the client already has. Report data adapters
+are separate: they only read the client's business data.
+
+| `REPORTING_STORAGE` | `REPORTING_STORAGE_URL` | Notes |
+|---|---|---|
+| `files` (default) | — | The data folder. One instance. |
+| `sql` | `sqlserver://user:pw@host:1433/reporting` | SQL Server 2016+ |
+| `sql` | `oracle://user:pw@host:1521/?service_name=ORCLPDB1` | Oracle 12c+ |
+| `sql` | `mysql://user:pw@host:3306/reporting` | MySQL 8 / MariaDB |
+| `sql` | `postgresql://user:pw@host:5432/reporting` | PostgreSQL 12+ |
+| `mongodb` | `mongodb://user:pw@host:27017/reporting_system` (or `mongodb+srv://…/db`) | MongoDB 5+; a single server is enough |
+| `postgresql` | `postgresql://…` | The older PostgreSQL tables (`reporting_documents`); still supported |
+
+Every table or collection starts with `rs_`, so they can share a database with other applications. The service
+creates them at start-up and records the schema version in `rs_schema_version` (later versions add numbered
+steps; nothing is ever dropped). The database account needs to create tables/collections once, then read and
+write them. `/admin → Overview` shows which storage is in use.
+
+What is kept (and what is not):
+
+| Record | Where | Kept | Never kept |
+|---|---|---|---|
+| Report run: who, channel (runner, server, designer preview/run, schedule, API, signed link), report, data source, parameters, status, error, rows, duration, output size and SHA-256, client IP, the website's own user | `rs_report_runs` | every execution | report data rows; values of parameters marked **Sensitive** are stored masked (`42*********71`) |
+| Accounts, rights, API keys (hashes only), folder permissions, report versions and history | `rs_users`, `rs_api_keys`, `rs_folder_permissions`, `rs_report_versions`, `rs_report_history` | current state (versions: last 50 per report; history: last 200) | plain passwords or API keys |
+| Audit event: sign-ins (also failed), sign-outs, users and rights, API keys, publish, delete, move, upload, version restore, folder permissions, data sources, schedules | `rs_audit_events` | append-only, each with the hash of the one before (`/admin → Logs → Audit trail → Verify chain`) | passwords, tokens, API keys, database URLs; draft autosaves |
+
+Moving an existing data folder into a database (one time; the folder is not changed, and running it twice copies
+nothing twice):
+
+```bash
+REPORTING_DATA_DIR=./data python -m backend.app.storage.migrate --url sqlserver://user:pw@host:1433/reporting
+```
+
+Then start every instance with the `REPORTING_STORAGE` and `REPORTING_STORAGE_URL` it prints.
 
 ## Several instances: PostgreSQL storage, HTTPS and a load balancer (`deploy/`)
 
@@ -248,13 +286,14 @@ docker compose -f deploy/docker-compose.yml --env-file deploy/.env up -d --build
 Moving an existing `data/` folder into PostgreSQL (one time; the folder is not changed):
 
 ```bash
-REPORTING_DATA_DIR=./data REPORTING_STORAGE_URL=postgresql://reporting:PASSWORD@host:5432/reporting python -m backend.app.storage.migrate
+REPORTING_DATA_DIR=./data python -m backend.app.storage.migrate --url postgresql://reporting:PASSWORD@host:5432/reporting
 ```
 
 | Variable | Default | Meaning |
 |---|---|---|
-| `REPORTING_STORAGE` | `files` | `files` (the data directory) or `postgresql` |
-| `REPORTING_STORAGE_URL` | — | `postgresql://…` for the storage database (not a report data adapter) |
+| `REPORTING_STORAGE` | `files` | `files`, `sql`, `mongodb` or `postgresql` (see "Where the service keeps its own data") |
+| `REPORTING_STORAGE_URL` | — | The storage database (not a report data adapter) |
+| `REPORTING_ORG_ID` | `default` | Written on every run and audit record (one value per client installation) |
 | `REPORTING_SESSION_SECRET` | random per process | **Set it, the same in every instance**, or sign-ins only work on one |
 | `REPORTING_SCHEDULER` | `on` | Run the report scheduler here; set `off` on every instance but one |
 | `REPORTING_SCHEDULER_POLL` / `REPORTING_JOB_WORKERS` | `20` s / `2` | How often schedules are checked / reports made at the same time |

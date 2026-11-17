@@ -58,11 +58,14 @@ def service(tmp_path, monkeypatch):
     (report_dir / "SALES.json").write_text(json.dumps(REPORT), encoding="utf-8")
     monkeypatch.setattr(core.mongodb, "MongoClient", FakeMongoClient)
     monkeypatch.setattr(core.mongodb, "_execute_report_pipeline", lambda *_a, **_k: [{"Name": "=1+1"}, {"Name": "Ali"}])
-    audits = []
-    monkeypatch.setattr(core.audit, "_append_report_audit", audits.append)
     client = TestClient(core.make_app())
-    client.audits = audits
     return client
+
+
+def runs():
+    """Run records in the system database, oldest first."""
+    from backend.app.db import get_records
+    return list(reversed(get_records().runs()))
 
 
 def signed(path_and_query: str, secret: str = SECRET) -> str:
@@ -81,7 +84,7 @@ def test_no_credentials_is_refused_and_hides_report_ids(service):
     assert service.get("/generate/SALES.csv?Branch=LHR").status_code == 401
     unknown = service.get("/generate/DOES_NOT_EXIST.csv")
     assert unknown.status_code == 401  # not 404: existence is not revealed
-    assert service.audits == []  # unauthenticated calls do not fill the audit file
+    assert runs() == []  # unauthenticated calls do not fill the run log
 
 
 def test_open_mode_keeps_old_behaviour(service, monkeypatch):
@@ -101,7 +104,7 @@ def test_report_token_header(service, monkeypatch):
     assert service.get("/reports", headers={"X-Report-Token": SECRET}).status_code == 200
     response = service.get("/generate/SALES.csv?Branch=LHR", headers={"X-Report-Token": SECRET})
     assert response.status_code == 200
-    assert service.audits[-1]["access"] == "report-token"
+    assert runs()[-1]["actor"] == "report-token" and runs()[-1]["channel"] == "api" and runs()[-1]["actorType"] == "token"
     assert service.get("/reports", headers={"X-Report-Token": SECRET + "x"}).status_code == 401
 
 
@@ -113,7 +116,7 @@ def test_short_secret_is_refused(service, monkeypatch):
 def test_admin_token_works_without_access_secret(service):
     assert service.get("/reports", headers={"X-Admin-Token": ADMIN}).status_code == 200
     assert service.get("/generate/SALES.csv?Branch=LHR", headers={"X-Admin-Token": ADMIN}).status_code == 200
-    assert service.audits[-1]["access"] == "admin-token"
+    assert runs()[-1]["actor"] == "admin-token" and runs()[-1]["status"] == "success"
 
 
 # ---------------------------------------------------------------- signed links
@@ -121,10 +124,11 @@ def test_valid_signed_link_downloads_and_is_audited(service, monkeypatch):
     monkeypatch.setenv("REPORTING_ACCESS_SECRET", SECRET)
     response = service.get(signed(link(GeneratedBy="ali")))
     assert response.status_code == 200, response.text
-    audit = service.audits[-1]
-    assert audit["access"] == "signed-link"
-    assert audit["GeneratedBy"] == "ali"
-    assert "Signature" not in json.dumps(audit["parameters"]) and "Expires" not in audit["parameters"]
+    run = runs()[-1]
+    assert run["channel"] == "signed-link"
+    assert run["onBehalfOf"] == "ali"                       # the website's own user, sent as GeneratedBy
+    assert "Signature" not in json.dumps(run["parameters"]) and "Expires" not in run["parameters"]
+    assert run["outputBytes"] == len(response.content) and len(run["outputSha256"]) == 64
 
 
 @pytest.mark.parametrize("tamper", [

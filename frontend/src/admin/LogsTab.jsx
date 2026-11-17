@@ -15,6 +15,12 @@ function ServiceLog({ entries }) {
   );
 }
 
+const when = (iso) => String(iso || '').replace('T', ' ').slice(0, 19);
+const CHANNEL = { runner: 'Run reports', server: 'Report Server', 'designer-preview': 'Designer preview', 'designer-run': 'Designer run',
+  schedule: 'Schedule', api: 'API', 'signed-link': 'Signed link' };
+const paramText = (values) => Object.entries(values || {}).map(([k, v]) => `${k}=${Array.isArray(v) ? v.join(',') : v}`).join(' · ');
+
+/** One row per report execution (system database: rs_report_runs). */
 function RunHistory({ records, search }) {
   const needle = search.trim().toLowerCase();
   const rows = records.filter((r) => !needle || JSON.stringify(r).toLowerCase().includes(needle));
@@ -22,18 +28,50 @@ function RunHistory({ records, search }) {
   return (
     <div className="table-wrap" style={{ maxHeight: '62vh' }}>
       <table className="data">
-        <thead><tr>{['Time (UTC)', 'Report', 'Format', 'Status', 'Rows', 'Duration', 'Data adapter', 'Access', 'User', 'Error'].map((h) => <th key={h}>{h}</th>)}</tr></thead>
+        <thead><tr>{['Time (UTC)', 'Report', 'From', 'Who', 'Format', 'Status', 'Rows', 'Duration', 'Data source', 'Parameters', 'Error'].map((h) => <th key={h}>{h}</th>)}</tr></thead>
         <tbody>
-          {rows.map((r, index) => (
-            <tr key={`${r.requestedAt}-${index}`} className={r.status === 'success' ? '' : 'failed'}>
-              <td>{String(r.requestedAt || '').replace('T', ' ').slice(0, 19)}</td><td>{r.reportId}</td><td>{(r.format || '').toUpperCase()}</td><td>{r.status}</td>
-              <td>{r.rowCount}</td><td>{r.durationMs !== undefined ? `${r.durationMs} ms` : ''}</td><td>{r.connectionId || 'report default'}</td><td>{r.access}</td>
-              <td>{r.GeneratedBy || ''}</td><td>{r.errorMessage || r.errorCode || ''}</td>
+          {rows.map((r) => (
+            <tr key={r.id} className={r.status === 'success' ? '' : 'failed'}>
+              <td>{when(r.startedAt)}</td><td title={r.folder ? `/${r.folder}` : ''}>{r.reportId}</td><td>{CHANNEL[r.channel] || r.channel}</td>
+              <td title={r.actorType}>{r.actor}{r.onBehalfOf ? <small> for {r.onBehalfOf}</small> : null}</td>
+              <td>{(r.format || '').toUpperCase()}</td><td>{r.status}</td><td>{r.rowCount ?? ''}</td>
+              <td>{r.durationMs != null ? `${r.durationMs} ms` : ''}</td><td>{r.dataSource || ''}</td>
+              <td className="mono">{paramText(r.parameters)}</td><td>{r.errorMessage || r.errorCode || ''}</td>
             </tr>
           ))}
         </tbody>
       </table>
     </div>
+  );
+}
+
+/** Append-only audit trail (rs_audit_events): each event carries the hash of the one before it. */
+function AuditTrail({ events, search, verify }) {
+  const needle = search.trim().toLowerCase();
+  const rows = events.filter((e) => !needle || JSON.stringify(e).toLowerCase().includes(needle));
+  return (
+    <>
+      {verify && (
+        <div className={`notice ${verify.ok ? 'ok' : 'error'}`} style={{ marginBottom: 10 }}>
+          {verify.ok ? `Chain intact: all ${verify.events} events are unchanged and in order.` : `The audit trail was changed: ${verify.problems.join('; ')}`}
+        </div>
+      )}
+      {!rows.length ? <div className="empty">No audit events yet.</div> : (
+        <div className="table-wrap" style={{ maxHeight: '62vh' }}>
+          <table className="data">
+            <thead><tr>{['#', 'Time (UTC)', 'Action', 'Who', 'What', 'Details', 'From'].map((h) => <th key={h}>{h}</th>)}</tr></thead>
+            <tbody>
+              {rows.map((e) => (
+                <tr key={e.id} className={e.action.endsWith('failed') ? 'failed' : ''}>
+                  <td>{e.seq}</td><td>{when(e.at)}</td><td><code>{e.action}</code></td><td title={e.actorType}>{e.actor}</td><td>{e.target || ''}</td>
+                  <td className="mono">{e.details && Object.keys(e.details).length ? JSON.stringify(e.details) : ''}</td><td>{e.clientIp || ''}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </>
   );
 }
 
@@ -43,7 +81,8 @@ export default function LogsTab() {
   const [lines, setLines] = useState('300');
   const [search, setSearch] = useState('');
   const [auto, setAuto] = useState(false);
-  const [data, setData] = useState({ entries: [], records: [] });
+  const [data, setData] = useState({ entries: [], records: [], events: [] });
+  const [verify, setVerify] = useState(null);
   const [status, setStatus] = useState('');
 
   const load = useCallback(async () => {
@@ -55,6 +94,10 @@ export default function LogsTab() {
         setStatus(result.enabled
           ? `${result.entries.length} entries from ${result.file}, newest first · ${new Date().toLocaleTimeString()}`
           : 'Writing the log file is switched off (REPORTING_LOG_TO_FILE=false); logs go to the console only.');
+      } else if (view === 'events') {
+        const result = await api.auditEvents(lines);
+        setData((d) => ({ ...d, events: result.events }));
+        setStatus(`${result.events.length} most recent audit events, newest first · ${new Date().toLocaleTimeString()}`);
       } else {
         const result = await api.audit(lines);
         setData((d) => ({ ...d, records: result.records }));
@@ -76,13 +119,16 @@ export default function LogsTab() {
   return (
     <section className="card">
       <div className="card-head">
-        <div><p className="eyebrow">Monitoring</p><h2>Logs</h2><p className="muted">Service log (requests, sign-ins, publishing, warnings, errors) and the report run history. Query strings, tokens, passwords and MongoDB URLs are never written to the log.</p></div>
-        <div className="row"><button className="btn" onClick={load}>Refresh</button><button className="btn quiet" onClick={download}>Download log file</button></div>
+        <div><p className="eyebrow">Monitoring</p><h2>Logs</h2><p className="muted">Service log (requests, warnings, errors), every report run (who, from where, rows, time; sensitive parameters masked) and the tamper-evident audit trail (sign-ins, users and rights, API keys, publishing, deletes, permissions, data sources). Tokens, passwords and database URLs are never recorded.</p></div>
+        <div className="row"><button className="btn" onClick={load}>Refresh</button>
+          {view === 'events' && <button className="btn" onClick={async () => { try { setVerify(await api.verifyAudit()); } catch (error) { setStatus(error.message); } }}>Verify chain</button>}
+          <button className="btn quiet" onClick={download}>Download log file</button></div>
       </div>
       <div className="log-toolbar">
         <div className="segmented" role="tablist">
           <button className={view === 'service' ? 'on' : ''} onClick={() => setView('service')}>Service log</button>
           <button className={view === 'audit' ? 'on' : ''} onClick={() => setView('audit')}>Report runs</button>
+          <button className={view === 'events' ? 'on' : ''} onClick={() => setView('events')}>Audit trail</button>
         </div>
         <label className="field"><span>Level</span>
           <select value={level} disabled={view !== 'service'} onChange={(e) => setLevel(e.target.value)}>
@@ -94,7 +140,9 @@ export default function LogsTab() {
         <label className="check"><input type="checkbox" checked={auto} onChange={(e) => setAuto(e.target.checked)} /> Auto-refresh (10 s)</label>
       </div>
       <p className="muted" style={{ marginBottom: 10 }}>{status}</p>
-      {view === 'service' ? <ServiceLog entries={data.entries} /> : <RunHistory records={data.records} search={search} />}
+      {view === 'service' && <ServiceLog entries={data.entries} />}
+      {view === 'audit' && <RunHistory records={data.records} search={search} />}
+      {view === 'events' && <AuditTrail events={data.events} search={search} verify={verify} />}
     </section>
   );
 }

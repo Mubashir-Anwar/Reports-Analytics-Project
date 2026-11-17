@@ -35,6 +35,8 @@ def create_context() -> SimpleNamespace:
     log_path = configure_file_logging()
     LOG.info("Reporting service %s starting; data directory %s; log file %s", SERVICE_VERSION, data_directory(), log_path or "off")
     ensure_admin_token()
+    from backend.app.db.upgrade import upgrade_storage  # noqa: PLC0415
+    upgrade_storage()          # older JSON documents (users, keys, permissions, versions, history) -> typed tables
     designer_token = os.getenv("REPORTING_DESIGNER_TOKEN", "").strip()
     if designer_token and len(designer_token) < ROLE_TOKEN_MIN_LENGTH:
         LOG.warning("REPORTING_DESIGNER_TOKEN is ignored: it must be at least %d characters", ROLE_TOKEN_MIN_LENGTH)

@@ -18,9 +18,8 @@ from datetime import datetime, timezone
 from typing import Any
 
 from backend.app.security.access import _in_networks, _parse_networks
-from backend.app.storage.store import get_store
 
-KEY = "api-keys.json"
+KEY = "api-keys.json"          # the older document; moved into rs_api_keys at start-up
 TOKEN_PATTERN = re.compile(r"^mrk_([a-f0-9]{12})_([A-Za-z0-9_-]{30,64})$")
 ID_PATTERN = re.compile(r"^[a-f0-9]{12}$")
 _TOUCH_SECONDS = 60
@@ -36,13 +35,15 @@ def _digest(secret: str) -> str:
 
 
 def load_keys() -> list[dict[str, Any]]:
-    raw = get_store().read_json(KEY)
-    items = raw.get("keys", []) if isinstance(raw, dict) else []
-    return [item for item in items if isinstance(item, dict) and ID_PATTERN.fullmatch(str(item.get("id", "")))]
+    """API keys from rs_api_keys (files: data/records/entities/api_keys.json), oldest first."""
+    from backend.app.db.entities import API_KEYS, get_entities  # noqa: PLC0415
+    items = get_entities().find(API_KEYS)
+    return sorted((item for item in items if ID_PATTERN.fullmatch(str(item.get("id", "")))), key=lambda item: item.get("createdAt") or "")
 
 
 def save_keys(keys: list[dict[str, Any]]) -> None:
-    get_store().write_json(KEY, {"keys": keys}, private=True)
+    from backend.app.db.entities import API_KEYS, get_entities  # noqa: PLC0415
+    get_entities().replace_all(API_KEYS, keys)
 
 
 def key_view(item: dict[str, Any]) -> dict[str, Any]:
@@ -82,11 +83,8 @@ def _touch(item: dict[str, Any]) -> None:
     if time.monotonic() - _last_touch.get(item["id"], -_TOUCH_SECONDS) < _TOUCH_SECONDS:
         return
     _last_touch[item["id"]] = time.monotonic()
-    keys = load_keys()
-    for stored in keys:
-        if stored["id"] == item["id"]:
-            stored["lastUsedAt"] = _now()
-    save_keys(keys)
+    from backend.app.db.entities import API_KEYS, get_entities  # noqa: PLC0415
+    get_entities().put(API_KEYS, {**item, "lastUsedAt": _now()})
 
 
 def key_from_token(token: str, client_ip: str) -> dict[str, Any] | None:

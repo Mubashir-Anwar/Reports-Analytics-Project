@@ -11,7 +11,6 @@ import time
 from typing import Any
 
 from backend.app.constants import LEGACY_PASSWORD_ITERATIONS, PASSWORD_ITERATIONS, USER_RIGHTS, USER_ROLES
-from backend.app.storage.store import get_store
 
 
 # ----------------------------------------------------------------- server users and login sessions
@@ -32,13 +31,15 @@ def password_needs_upgrade(user: dict[str, Any]) -> bool:
 
 
 def load_users() -> list[dict[str, Any]]:
-    raw = get_store().read_json("users.json")
-    items = raw.get("users", []) if isinstance(raw, dict) else []
-    return [item for item in items if isinstance(item, dict) and item.get("username")]
+    """Accounts from rs_users (files: data/records/entities/users.json), oldest first."""
+    from backend.app.db.entities import USERS, get_entities  # noqa: PLC0415
+    items = get_entities().find(USERS)
+    return sorted((item for item in items if item.get("username")), key=lambda item: (item.get("createdAt") or "", item["username"]))
 
 
 def save_users(users: list[dict[str, Any]]) -> None:
-    get_store().write_json("users.json", {"users": users}, private=True)
+    from backend.app.db.entities import USERS, get_entities  # noqa: PLC0415
+    get_entities().replace_all(USERS, users)
 
 
 def find_user(username: str) -> dict[str, Any] | None:

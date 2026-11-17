@@ -16,7 +16,6 @@ from backend.app.constants import METADATA_KEYS, OUTPUT_FORMATS, REPORT_PATH, SI
 from backend.app.definitions import ReportDefinition, validate_parameters
 from backend.app.logs import LOG
 from backend.app.rendering.outputs import render_report_output
-from backend.app.storage import audit as audit_store
 
 
 def register(app: FastAPI, ctx: SimpleNamespace) -> None:
@@ -59,6 +58,7 @@ def register(app: FastAPI, ctx: SimpleNamespace) -> None:
             if key in query_map:
                 audit[key] = query_map[key]
         definition: ReportDefinition | None = None
+        body: bytes | None = None
         audit_saved = False
         try:
             match = REPORT_PATH.fullmatch(report_file)
@@ -83,14 +83,10 @@ def register(app: FastAPI, ctx: SimpleNamespace) -> None:
                                                     dataset_loader(definition.connection_id, definition.report_id))
             audit.update({"status": "success", "rowCount": len(rows)})
             if settings.audit_required:
-                # Fail closed: the report is released only after its audit record is stored.
+                # Fail closed: the report is released only after its run record is stored.
                 audit["durationMs"] = int((time.monotonic() - started) * 1000)
-                try:
-                    audit_store._append_report_audit(audit)
-                    audit_saved = True
-                except OSError:
-                    LOG.exception("Required audit record could not be saved")
-                    raise HTTPException(status_code=503, detail="The audit record could not be saved; because AUDIT_REQUIRED is on, the report was not released") from None
+                ctx.log_run_from_audit(audit, definition=definition, body=body, request=request, required=True)
+                audit_saved = True
             filename = f"{definition.report_id}.{output_format}"
             return Response(body, media_type=media_type, headers={"Content-Disposition": f'attachment; filename="{filename}"'})
         except HTTPException as exc:
@@ -131,10 +127,7 @@ def register(app: FastAPI, ctx: SimpleNamespace) -> None:
         finally:
             audit["durationMs"] = int((time.monotonic() - started) * 1000)
             if audit.get("reportId") and not audit_saved:
-                try:
-                    audit_store._append_report_audit(audit)
-                except OSError:
-                    LOG.exception("Local report audit record could not be saved")
+                ctx.log_run_from_audit(audit, definition=definition, body=body, request=request)
                 if settings.audit_to_mongodb and settings.audit_database:
                     try:
                         audit_client, _ = get_connection("default")

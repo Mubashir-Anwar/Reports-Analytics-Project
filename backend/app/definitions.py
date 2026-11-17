@@ -55,6 +55,8 @@ class ParameterSpec:
     # Jasper isForPrompting=false + defaultValueExpression: never asked, computed from other parameters.
     prompt: bool = True
     expression: str = ""
+    # CNIC, account number…: the run log stores the value masked (12****89).
+    sensitive: bool = False
 
 
 @dataclass(frozen=True)
@@ -154,6 +156,7 @@ def _dynamic_report(payload: dict[str, Any], source_path: Path | None = None) ->
             max_length=min(max(int(raw.get("maxLength", 200)), 1), 2000),
             prompt=prompt,
             expression=expression[:2000] if not prompt else "",
+            sensitive=raw.get("sensitive") is True,
         ))
 
     parameters = _order_computed(parameters)
@@ -358,6 +361,7 @@ def _dynamic_report(payload: dict[str, Any], source_path: Path | None = None) ->
                 **({"allowedValues": list(item.allowed_values)} if item.allowed_values else {}),
                 "maxLength": item.max_length,
                 **({"prompt": False, "expression": item.expression} if not item.prompt else {}),
+                **({"sensitive": True} if item.sensitive else {}),
             }
             for item in parameters
         ],

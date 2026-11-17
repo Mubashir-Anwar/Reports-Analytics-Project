@@ -81,7 +81,7 @@ def register(app: FastAPI, ctx: SimpleNamespace) -> None:
             payload = await request.json()
         except Exception:
             raise HTTPException(status_code=400, detail="Send a valid JSON body") from None
-        return preview_definition(draft_definition(payload), payload)
+        return preview_definition(draft_definition(payload), payload, request)
 
     @app.post("/api/admin/drafts/run")
     async def admin_run_draft(request: Request) -> Response:
@@ -90,7 +90,7 @@ def register(app: FastAPI, ctx: SimpleNamespace) -> None:
             payload = await request.json()
         except Exception:
             raise HTTPException(status_code=400, detail="Send a valid JSON body") from None
-        return run_definition_file(draft_definition(payload), payload, request.url.path, "designer-draft")
+        return run_definition_file(draft_definition(payload), payload, request.url.path, "designer-draft", request=request)
 
     @app.post("/api/admin/jrxml/import")
     async def admin_import_jrxml(request: Request) -> dict[str, Any]:

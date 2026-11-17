@@ -22,7 +22,6 @@ from backend.app.jobs import mailer, schedule, store
 from backend.app.logs import LOG
 from backend.app.rendering.outputs import render_report_output
 from backend.app.security import permissions
-from backend.app.storage import audit as audit_store
 
 
 def _now() -> datetime:
@@ -169,10 +168,8 @@ class JobRunner:
         finally:
             run["finishedAt"] = _iso(_now())
             audit["durationMs"] = int((time.monotonic() - started) * 1000)
-            try:
-                audit_store._append_report_audit(audit)
-            except OSError:
-                LOG.exception("Job audit record could not be saved")
+            ctx.log_run_from_audit(audit, channel="schedule" if run.get("jobId") else "server", actor=run["owner"],
+                                   actor_type="user", definition=ctx.reports_by_id.get(run["reportId"]), body=body or None)
         if job and job.get("email", {}).get("to"):
             run["email"] = self._mail(job, run, body)
         store.save_run(run, keep_for_job=job.get("keep", 10) if job else None)
