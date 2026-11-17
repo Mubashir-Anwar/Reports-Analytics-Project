@@ -290,6 +290,10 @@ def test_migrate_a_data_folder_into_this_backend(backend, tmp_path, monkeypatch)
         "requestedAt": "2025-11-09 18:11:39.809860+00:00", "access": "admin-token", "reportId": "OLD", "format": "xlsx",
         "status": "failed", "rowCount": 0, "errorCode": "503", "parameters": {"StartDate": "2025-01-09"}, "durationMs": 4}))
     source.append_line("audit/report-executions.jsonl", "not json")
+    from backend.app.db import entities as ent
+    ent.get_entities().put(ent.USERS, {"username": "boss", "superAdmin": True, "salt": "s", "hash": "h"})   # a typed row
+    ent.get_entities().put(ent.JOB_SCHEDULES, {"id": "job-20260101000000-0123abcd", "reportId": "OLD", "format": "pdf",
+                                               "recurrence": {"type": "daily", "at": "08:00"}, "owner": "boss"})
     files = db_package.get_records()
     files.add_run(run(reportId="OLD"))
     files.audit("auth.login", actor="ali")
@@ -299,6 +303,9 @@ def test_migrate_a_data_folder_into_this_backend(backend, tmp_path, monkeypatch)
     counts = migrate_module.migrate(store, out=io.StringIO(), records=rec)
     assert counts["runs"] == 1 and counts["legacyRuns"] == 1 and counts["recordsSkipped"] == 1 and counts["events"] == 2
     assert store.read_json("reports/General/OLD.json")["id"] == "OLD" and "Empty" in store.dirs("reports")
+    target_entities = migrate_module.entities_for(rec)
+    assert counts["typedRows"] == 2 and target_entities.get(ent.USERS, "boss")["superAdmin"] is True
+    assert target_entities.get(ent.JOB_SCHEDULES, "job-20260101000000-0123abcd")["recurrence"] == {"type": "daily", "at": "08:00"}
     legacy = rec.runs(status="failed")[0]
     assert legacy["startedAt"] == "2025-11-09T18:11:39.809Z" and legacy["format"] == "xlsx" and legacy["actor"] == "admin-token"
     assert rec.verify_chain() == {"ok": True, "events": 2, "problems": []}     # the copied chain is still intact
@@ -348,13 +355,13 @@ def test_older_documents_move_into_the_tables(backend):
                                          {"at": "2026-01-02T10:00:00+00:00", "action": "edited", "user": "boss", "detail": "title"}])
     entities = ent.get_entities()
     counts = move_documents(store, entities)
-    assert counts == {"users": 1, "apiKeys": 1, "permissions": 2, "versions": 1, "history": 2}
+    assert counts == {"users": 1, "apiKeys": 1, "permissions": 2, "versions": 1, "history": 2, "schedules": 0, "jobRuns": 0}
     assert entities.get(ent.USERS, "boss")["role"] == "admin" and entities.get(ent.API_KEYS, "0123456789ab")["name"] == "Site"
     assert {row["folder"] for row in entities.find(ent.FOLDER_PERMISSIONS)} == {"/", "HR"}
     assert entities.get(ent.REPORT_VERSIONS, "R1", 1)["definition"] == {"id": "R1", "q": [{"$match": {}}]}
     assert [row["action"] for row in entities.find(ent.REPORT_HISTORY, {"reportId": "R1"}, order=("id", False))] == ["published", "edited"]
     assert store.read_json("users.json") is None and store.read_json("migrated/users.json")["users"][0]["username"] == "boss"
-    assert move_documents(store, entities) == {"users": 0, "apiKeys": 0, "permissions": 0, "versions": 0, "history": 0}
+    assert not any(move_documents(store, entities).values())
 
     from backend.app.security import permissions
     assert permissions.load_rules()[""] == {"users": {"ali": "run"}, "roles": {}}     # the root folder reads back as ""

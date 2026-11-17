@@ -116,7 +116,8 @@ class MongoRecords(RecordsBackend):
         if since or until:
             query[time_field] = {**({"$gte": since} if since else {}), **({"$lt": until} if until else {})}
         direction = DESCENDING if newest_first else ASCENDING
-        cursor = collection.find(query).sort([(time_field, direction), ("_id", direction)]).limit(limit)
+        tie = "seq" if kind == "events" else "_id"            # same millisecond: the chain order, not the id's random end
+        cursor = collection.find(query).sort([(time_field, direction), (tie, direction)]).limit(limit)
         return [self._from_doc(doc, fields) for doc in cursor]
 
     def _last_event(self) -> dict[str, Any] | None:

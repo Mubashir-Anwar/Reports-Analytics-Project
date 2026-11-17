@@ -277,10 +277,10 @@ Two layers, both on the backend the client already has:
   `db/mongo.py` (`$jsonSchema` validators, indexes, unique `seq`). `services/records.py` writes them
   (`log_run`, `audit_event`).
 * **Typed entities** — `db/entities.py` (`get_entities()`): `rs_users`, `rs_api_keys`, `rs_folder_permissions`,
-  `rs_report_versions`, `rs_report_history` with real columns (composite keys, indexes; JSON kept as text so
+  `rs_report_versions`, `rs_report_history`, `rs_job_schedules`, `rs_job_runs` with real columns (composite keys, indexes; JSON kept as text so
   `$match` keys survive; unknown fields in an `extra` column). `db/upgrade.py` moves the older JSON documents
   into them at start-up (originals kept under `migrated/`). Still documents for now: reports, drafts, folders,
-  data adapters, schedules and job runs.
+  data adapters and the output files of runs (`jobs/output/`).
   `security/audit_trail.py` maps changing routes to audit actions.
 
 Rules that keep the backends interchangeable: ids (time-ordered, 32 hex) and timestamps (UTC, milliseconds) are

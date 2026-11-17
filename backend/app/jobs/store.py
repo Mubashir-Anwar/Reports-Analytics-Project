@@ -1,5 +1,6 @@
-"""Where schedules, runs and their output files are kept: <data>/jobs/schedules.json, runs.json and output/.
+"""Where schedules, runs and their output files are kept: rs_job_schedules, rs_job_runs and the store's jobs/output/.
 
+(Older installations kept them in jobs/schedules.json and jobs/runs.json; db/upgrade.py moves those at start-up.)
 All reads and writes go through one lock, because the scheduler thread and the web requests both change them."""
 from __future__ import annotations
 
@@ -7,35 +8,41 @@ import re
 import threading
 from typing import Any
 
+from backend.app.db.entities import JOB_RUNS, JOB_SCHEDULES, get_entities
 from backend.app.storage.store import get_store
 
 MAX_RUNS = 500
 RUN_ID_RE = re.compile(r"^[a-z]+-\d{14}-[0-9a-f]{8}$")
 LOCK = threading.RLock()
 
-
 OUTPUT_PREFIX = "jobs/output"
 
+# What a run or schedule holds when a field is empty (the table leaves empty fields out).
+RUN_DEFAULTS = {"jobId": "", "jobLabel": "", "startedAt": "", "finishedAt": "", "rowCount": 0, "error": "", "file": "", "size": 0,
+                "email": "", "parameters": {}}
+SCHEDULE_DEFAULTS = {"nextRunAt": "", "lastRun": None, "parameters": {}, "enabled": False}
 
-def _read(name: str, key: str) -> list[dict[str, Any]]:
-    raw = get_store().read_json(f"jobs/{name}")
-    items = raw.get(key, []) if isinstance(raw, dict) else []
-    return [item for item in items if isinstance(item, dict)]
+
+def _with_defaults(item: dict[str, Any], defaults: dict[str, Any]) -> dict[str, Any]:
+    return {**defaults, **item}
 
 
 def load_schedules() -> list[dict[str, Any]]:
     with LOCK:
-        return _read("schedules.json", "schedules")
+        items = get_entities().find(JOB_SCHEDULES)
+        return sorted((_with_defaults(item, SCHEDULE_DEFAULTS) for item in items), key=lambda job: (job.get("createdAt") or "", job["id"]))
 
 
 def save_schedules(items: list[dict[str, Any]]) -> None:
     with LOCK:
-        get_store().write_json("jobs/schedules.json", {"schedules": items})
+        get_entities().replace_all(JOB_SCHEDULES, items)
 
 
 def load_runs() -> list[dict[str, Any]]:
+    """Newest first."""
     with LOCK:
-        return _read("runs.json", "runs")
+        runs = [_with_defaults(item, RUN_DEFAULTS) for item in get_entities().find(JOB_RUNS)]
+        return sorted(runs, key=lambda run: (run.get("queuedAt") or "", run["id"]), reverse=True)
 
 
 def output_key(run: dict[str, Any]) -> str | None:
@@ -65,32 +72,29 @@ def _remove_file(run: dict[str, Any]) -> None:
 
 
 def save_run(run: dict[str, Any], keep_for_job: int | None = None) -> None:
-    """Insert or replace a run (newest first). Old runs beyond MAX_RUNS, and output beyond a schedule's
-    `keep` count, are removed with their files."""
+    """Insert or replace a run. Old runs beyond MAX_RUNS, and output beyond a schedule's `keep` count, are
+    removed with their files."""
     with LOCK:
-        runs = [r for r in _read("runs.json", "runs") if r.get("id") != run["id"]]
-        runs.insert(0, run)
+        entities = get_entities()
+        entities.put(JOB_RUNS, run)
+        runs = load_runs()
         if keep_for_job is not None and run.get("jobId"):
             done = [r for r in runs if r.get("jobId") == run["jobId"] and r.get("file")]
             for old in done[keep_for_job:]:
                 _remove_file(old)
-                old["file"] = ""
-                old["size"] = 0
+                entities.put(JOB_RUNS, {**old, "file": "", "size": 0})
         for old in runs[MAX_RUNS:]:
             _remove_file(old)
-        get_store().write_json("jobs/runs.json", {"runs": runs[:MAX_RUNS]})
+            entities.delete(JOB_RUNS, old["id"])
 
 
 def delete_runs(predicate) -> int:
     with LOCK:
-        runs = _read("runs.json", "runs")
-        keep = []
+        entities = get_entities()
         removed = 0
-        for run in runs:
+        for run in load_runs():
             if predicate(run) and run.get("status") not in ("queued", "running"):
                 _remove_file(run)
+                entities.delete(JOB_RUNS, run["id"])
                 removed += 1
-            else:
-                keep.append(run)
-        get_store().write_json("jobs/runs.json", {"runs": keep})
         return removed

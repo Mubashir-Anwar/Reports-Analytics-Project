@@ -138,8 +138,17 @@ def migrate(target: Any, *, overwrite: bool = False, out=sys.stdout, records: Re
             counts["bytes"] += 1
     if records is not None:
         counts.update(copy_records(records, source, out=out))
+        from backend.app.db import entities as ent  # noqa: PLC0415
         from backend.app.db.upgrade import move_documents  # noqa: PLC0415
-        counts.update({f"typed_{name}": value for name, value in move_documents(target, entities_for(records)).items()})
+        target_entities = entities_for(records)
+        copied = 0
+        for entity in ent.ENTITIES:                   # the typed tables of a files installation (data/records/entities/)
+            for row in ent.FileEntities(source.root).find(entity):
+                if overwrite or target_entities.get(entity, *ent.key_of(entity, ent.encode(entity, row))) is None:
+                    target_entities.put(entity, row)
+                    copied += 1
+        counts["typedRows"] = copied
+        counts.update({f"typed_{name}": value for name, value in move_documents(target, target_entities).items()})
     print(json.dumps(counts), file=out)
     return counts
 

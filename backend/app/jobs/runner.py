@@ -29,7 +29,8 @@ def _now() -> datetime:
 
 
 def _iso(moment: datetime | None) -> str:
-    return moment.astimezone(timezone.utc).isoformat(timespec="seconds") if moment else ""
+    # milliseconds: runs queued in the same second still sort in the order they were queued
+    return moment.astimezone(timezone.utc).isoformat(timespec="milliseconds") if moment else ""
 
 
 class JobRunner:

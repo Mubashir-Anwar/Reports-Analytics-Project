@@ -88,6 +88,7 @@ def _create_entities(connection: Any) -> None:
 # Numbered schema steps for the typed entities (accounts, keys, permissions, versions, history).
 ENTITY_MIGRATIONS: list[tuple[int, str, Any]] = [
     (1, "users, API keys, folder permissions, report versions and history", _create_entities),
+    (2, "schedules and job runs", _create_entities),      # create_all only adds the tables that are missing
 ]
 
 _ENGINES: dict[str, sa.Engine] = {}
@@ -193,7 +194,7 @@ class SqlRecords(RecordsBackend):
             query = query.where(table.c[time_column] >= _db_time(since))
         if until:
             query = query.where(table.c[time_column] < _db_time(until))
-        order = [table.c[time_column], table.c.id]
+        order = [table.c[time_column], table.c.seq if kind == "events" else table.c.id]
         query = query.order_by(*[column.desc() if newest_first else column.asc() for column in order]).limit(limit)
         with self.engine.connect() as connection:
             return [self._from_row(row, fields) for row in connection.execute(query)]

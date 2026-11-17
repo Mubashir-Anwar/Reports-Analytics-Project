@@ -63,7 +63,23 @@ REPORT_HISTORY = Entity("report_history", {
     "action": ("str", 32, True), "user": ("str", 128, False), "detail": ("str", 300, False),
 }, key=("id",), indexes=(("reportId", "at"),))
 
-ENTITIES = (USERS, API_KEYS, FOLDER_PERMISSIONS, REPORT_VERSIONS, REPORT_HISTORY)
+JOB_SCHEDULES = Entity("job_schedules", {
+    "id": ("str", 40, True), "orgId": ("str", 64, True), "label": ("str", 120, False), "reportId": ("str", 80, True),
+    "format": ("str", 8, True), "parameters": ("json", None, False), "recurrence": ("json", None, True), "timezone": ("str", 64, False),
+    "enabled": ("bool", None, False), "keep": ("int", None, False), "email": ("json", None, False), "owner": ("str", 128, True),
+    "createdAt": ("time", None, False), "updatedAt": ("time", None, False), "nextRunAt": ("time", None, False),
+    "lastRun": ("json", None, False),
+}, key=("id",), indexes=(("owner",), ("nextRunAt",)))
+
+JOB_RUNS = Entity("job_runs", {
+    "id": ("str", 40, True), "orgId": ("str", 64, True), "jobId": ("str", 40, False), "jobLabel": ("str", 120, False),
+    "kind": ("str", 16, False), "reportId": ("str", 80, False), "title": ("str", 200, False), "format": ("str", 8, False),
+    "parameters": ("json", None, False), "owner": ("str", 128, True), "status": ("str", 16, True), "queuedAt": ("time", None, False),
+    "startedAt": ("time", None, False), "finishedAt": ("time", None, False), "rowCount": ("int", None, False),
+    "error": ("str", 500, False), "file": ("str", 64, False), "size": ("int", None, False), "email": ("str", 500, False),
+}, key=("id",), indexes=(("queuedAt",), ("jobId", "queuedAt"), ("owner", "status")))
+
+ENTITIES = (USERS, API_KEYS, FOLDER_PERMISSIONS, REPORT_VERSIONS, REPORT_HISTORY, JOB_SCHEDULES, JOB_RUNS)
 
 
 # ------------------------------------------------------------------ record <-> stored values
@@ -311,7 +327,7 @@ class MongoEntities(EntityBackend):
             collection = self.db[entity.table]
             for fields in ((entity.key,) if len(entity.key) > 1 else ()) + entity.indexes:
                 collection.create_index([(name, ASCENDING) for name in fields], name=f"ix_{entity.table}_{'_'.join(fields)}"[:120])
-        self.db["rs_schema_version"].update_one({"_id": "entities"}, {"$max": {"version": 1}, "$set": {"appliedAt": model.now()}}, upsert=True)
+        self.db["rs_schema_version"].update_one({"_id": "entities"}, {"$max": {"version": 2}, "$set": {"appliedAt": model.now()}}, upsert=True)
 
     @staticmethod
     def _id(key: tuple) -> str:

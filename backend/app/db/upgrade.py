@@ -5,6 +5,8 @@
     folder-permissions.json    -> rs_folder_permissions   (root folder "" stored as "/")
     versions/<ID>/<n>.json     -> rs_report_versions
     history/<ID>.json          -> rs_report_history
+    jobs/schedules.json        -> rs_job_schedules
+    jobs/runs.json             -> rs_job_runs           (the output files stay in jobs/output/)
 
 Every document is written into its table first and only then moved aside to migrated/<key> (kept, never
 deleted), so a crash half-way loses nothing and the next start finishes the job. Keys and ids are fixed by the
@@ -33,7 +35,7 @@ def _history_id(report_id: str, index: int, at: str) -> str:
 
 
 def move_documents(store: Any, entities: ent.EntityBackend) -> dict[str, int]:
-    counts = {"users": 0, "apiKeys": 0, "permissions": 0, "versions": 0, "history": 0}
+    counts = {"users": 0, "apiKeys": 0, "permissions": 0, "versions": 0, "history": 0, "schedules": 0, "jobRuns": 0}
 
     raw = store.read_json("users.json")
     if isinstance(raw, dict):
@@ -80,6 +82,22 @@ def move_documents(store: Any, entities: ent.EntityBackend) -> dict[str, int]:
                                                   "detail": str(item.get("detail") or "")[:300]})
                 counts["history"] += 1
         _archive(store, key, payload, False)
+
+    raw = store.read_json("jobs/schedules.json")
+    if isinstance(raw, dict):
+        for job in raw.get("schedules", []):
+            if isinstance(job, dict) and job.get("id"):
+                entities.put(ent.JOB_SCHEDULES, job)
+                counts["schedules"] += 1
+        _archive(store, "jobs/schedules.json", raw, False)
+
+    raw = store.read_json("jobs/runs.json")
+    if isinstance(raw, dict):
+        for run in raw.get("runs", []):
+            if isinstance(run, dict) and run.get("id") and run.get("queuedAt"):
+                entities.put(ent.JOB_RUNS, {**run, "error": str(run.get("error") or "")[:500], "email": str(run.get("email") or "")[:500]})
+                counts["jobRuns"] += 1
+        _archive(store, "jobs/runs.json", raw, False)
 
     if any(counts.values()):
         LOG.info("Moved older documents into the typed tables: %s", counts)
