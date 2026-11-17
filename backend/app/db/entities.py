@@ -79,7 +79,24 @@ JOB_RUNS = Entity("job_runs", {
     "error": ("str", 500, False), "file": ("str", 64, False), "size": ("int", None, False), "email": ("str", 500, False),
 }, key=("id",), indexes=(("queuedAt",), ("jobId", "queuedAt"), ("owner", "status")))
 
-ENTITIES = (USERS, API_KEYS, FOLDER_PERMISSIONS, REPORT_VERSIONS, REPORT_HISTORY, JOB_SCHEDULES, JOB_RUNS)
+_DEFINITION = {
+    "folder": ("str", 240, True), "reportId": ("str", 80, True), "orgId": ("str", 64, True), "title": ("str", 200, False),
+    "dataSource": ("str", 64, False), "queryLanguage": ("str", 32, False), "collection": ("str", 200, False),
+    "updatedAt": ("time", None, False), "definition": ("json", None, True),
+}
+# Published reports (the server repository) and designer drafts: one row per report, the full definition as JSON.
+REPORTS = Entity("reports", dict(_DEFINITION), key=("folder", "reportId"), indexes=(("reportId",),))
+DRAFTS = Entity("drafts", dict(_DEFINITION), key=("folder", "reportId"), indexes=(("reportId",),))
+# Folders that exist even when empty ("reports" and "workspace" areas; "list" = the saved folder list).
+FOLDERS = Entity("folders", {"area": ("str", 16, True), "path": ("str", 240, True), "orgId": ("str", 64, True)}, key=("area", "path"))
+# Data adapters (no secrets here: URLs and passwords stay in the private secrets document).
+DATA_SOURCES = Entity("data_sources", {
+    "id": ("str", 40, True), "orgId": ("str", 64, True), "position": ("int", None, True), "name": ("str", 120, True),
+    "type": ("str", 16, False), "storage": ("str", 8, False), "database": ("str", 128, False), "folder": ("str", 240, False),
+}, key=("id",))
+
+ENTITIES = (USERS, API_KEYS, FOLDER_PERMISSIONS, REPORT_VERSIONS, REPORT_HISTORY, JOB_SCHEDULES, JOB_RUNS,
+            REPORTS, DRAFTS, FOLDERS, DATA_SOURCES)
 
 
 # ------------------------------------------------------------------ record <-> stored values
@@ -327,7 +344,7 @@ class MongoEntities(EntityBackend):
             collection = self.db[entity.table]
             for fields in ((entity.key,) if len(entity.key) > 1 else ()) + entity.indexes:
                 collection.create_index([(name, ASCENDING) for name in fields], name=f"ix_{entity.table}_{'_'.join(fields)}"[:120])
-        self.db["rs_schema_version"].update_one({"_id": "entities"}, {"$max": {"version": 2}, "$set": {"appliedAt": model.now()}}, upsert=True)
+        self.db["rs_schema_version"].update_one({"_id": "entities"}, {"$max": {"version": 3}, "$set": {"appliedAt": model.now()}}, upsert=True)
 
     @staticmethod
     def _id(key: tuple) -> str:

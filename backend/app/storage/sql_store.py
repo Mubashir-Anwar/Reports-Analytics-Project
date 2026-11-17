@@ -12,6 +12,7 @@ import sqlalchemy as sa
 
 from backend.app.db import model
 from backend.app.db.sql import BINARY, TEXT, TIME, apply_migrations, engine_for, metadata
+from backend.app.storage.routed import RoutedStore
 from backend.app.storage.store import _clean_key, _prefix
 
 documents = sa.Table(
@@ -41,7 +42,7 @@ def _now():
     return model.now().replace(tzinfo=None)
 
 
-class SqlStore:
+class _SqlDocuments:
     backend = "sql"
 
     def __init__(self, url: str):
@@ -112,6 +113,9 @@ class SqlStore:
             found.update("/".join(parts[:i]) for i in range(1, len(parts) + 1))
         return sorted(item for item in found if item)
 
+    def has_dir(self, key: str) -> bool:
+        return self._one(sa.select(documents.c.doc_key).where(documents.c.doc_key == _clean_key(key) + "/")) is not None
+
     def make_dir(self, key: str) -> None:
         marker = _clean_key(key) + "/"
         if self._one(sa.select(documents.c.doc_key).where(documents.c.doc_key == marker)) is None:
@@ -146,3 +150,7 @@ class SqlStore:
     def read_bytes(self, key: str) -> bytes | None:
         row = self._one(sa.select(documents.c.data).where(documents.c.doc_key == _clean_key(key), documents.c.kind == "bytes"))
         return bytes(row[0]) if row and row[0] is not None else None
+
+
+class SqlStore(RoutedStore, _SqlDocuments):
+    """The document store on SQL, with reports, drafts, folders and data adapters in their own tables (routed.py)."""

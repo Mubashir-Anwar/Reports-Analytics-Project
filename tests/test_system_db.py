@@ -365,3 +365,58 @@ def test_older_documents_move_into_the_tables(backend):
 
     from backend.app.security import permissions
     assert permissions.load_rules()[""] == {"users": {"ali": "run"}, "roles": {}}     # the root folder reads back as ""
+
+
+# ------------------------------------------------------------------ reports, drafts, folders, data adapters in tables
+def test_reports_drafts_folders_and_adapters_are_rows(backend):
+    if backend == "files":
+        pytest.skip("files keep one document per report")
+    from backend.app.db import entities as ent
+    store = store_module.get_store()
+    definition = {"id": "R1", "title": "Sales", "connectionId": "main", "queryLanguage": "mongosh", "collection": "orders",
+                  "querySource": '[{"$match": {"a.b": 1}}]'}
+    store.write_json("reports/Sales/East/R1.json", definition)
+    store.write_json("workspace/Sales/R1.json", {**definition, "_workspace": {"createdAt": "x"}})
+    rows = store._entities().find(ent.REPORTS)
+    assert [(r["folder"], r["reportId"], r["title"], r["dataSource"], r["queryLanguage"], r["collection"]) for r in rows] == \
+        [("Sales/East", "R1", "Sales", "main", "mongosh", "orders")]
+    assert store.read_json("reports/Sales/East/R1.json") == definition and store.modified_at("reports/Sales/East/R1.json")
+    assert store.keys("reports") == ["reports/Sales/East/R1.json"] and store.keys("workspace") == ["workspace/Sales/R1.json"]
+    assert [key for key, _ in store.read_many("reports/Sales")] == ["reports/Sales/East/R1.json"]
+    assert not store.has_dir("workspace")
+    store.make_dir("workspace")
+    store.make_dir("reports/Empty")
+    assert store.has_dir("workspace") and {"Sales", "Sales/East", "Empty"} <= set(store.dirs("reports"))
+    assert store.remove_dir("reports/Sales") is False and store.remove_dir("reports/Sales", recursive=True) is True
+    assert store.keys("reports") == [] and "Sales" not in store.dirs("reports") and store.keys("workspace")   # drafts kept
+
+    store.write_json("connections.json", {"connections": [{"id": "main", "name": "Main", "type": "mongodb", "storage": "file", "database": "a"},
+                                                          {"id": "pg", "name": "PG", "type": "postgresql", "storage": "file", "uriExtra": "x"}]})
+    assert [r["id"] for r in sorted(store._entities().find(ent.DATA_SOURCES), key=lambda r: r["position"])] == ["main", "pg"]
+    assert store.read_json("connections.json")["connections"][1] == {"id": "pg", "name": "PG", "type": "postgresql", "storage": "file", "uriExtra": "x"}
+    store.write_json("connections.json", {"connections": []})
+    assert store.read_json("connections.json") == {"connections": []}            # emptied, not "never set up"
+    store.write_json("folders.json", {"folders": ["A", "A/B"]})
+    assert store.read_json("folders.json") == {"folders": ["A", "A/B"]}
+
+
+def test_documents_from_the_earlier_version_move_into_the_tables(backend):
+    if backend == "files":
+        pytest.skip("files keep one document per report")
+    from backend.app.db import entities as ent
+    from backend.app.storage.routed import RoutedStore
+    store = store_module.get_store()
+    plain = super(RoutedStore, store)              # the document layer underneath, as the earlier version wrote it
+    plain.write_json("reports/General/OLD.json", {"id": "OLD", "title": "Old one"})
+    plain.write_json("workspace/General/OLD.json", {"id": "OLD"})
+    plain.make_dir("reports/Empty")
+    plain.make_dir("workspace")
+    plain.write_json("connections.json", {"connections": [{"id": "default", "name": "Main", "storage": "file", "database": "a"}]})
+    plain.write_json("folders.json", {"folders": ["Finance"]})
+    counts = store.move_routed_documents()
+    assert counts["reports"] == 1 and counts["drafts"] == 1 and counts["dataSources"] == 1 and counts["folderList"] == 1
+    assert store._entities().get(ent.REPORTS, "General", "OLD")["title"] == "Old one" and plain.read_json("reports/General/OLD.json") is None
+    assert plain.read_json("migrated/reports/General/OLD.json") == {"id": "OLD", "title": "Old one"}          # original kept
+    assert "Empty" in store.dirs("reports") and store.has_dir("workspace")
+    assert store.read_json("connections.json")["connections"][0]["id"] == "default" and store.read_json("folders.json") == {"folders": ["Finance"]}
+    assert not any(store.move_routed_documents().values())                       # a second start changes nothing

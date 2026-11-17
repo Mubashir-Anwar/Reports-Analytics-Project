@@ -102,6 +102,9 @@ class FileStore:
             return []
         return sorted(p.relative_to(base).as_posix() for p in base.rglob("*") if p.is_dir())
 
+    def has_dir(self, key: str) -> bool:
+        return self.path(key).is_dir()
+
     def make_dir(self, key: str) -> None:
         self.path(key).mkdir(parents=True, exist_ok=True)
 
@@ -233,6 +236,9 @@ class PostgresStore:
             parts = parts if kind == "dir" else parts[:-1]
             found.update("/".join(parts[:i]) for i in range(1, len(parts) + 1))
         return sorted(found)
+
+    def has_dir(self, key: str) -> bool:
+        return self._execute("SELECT 1 FROM reporting_documents WHERE key = %s", (_clean_key(key) + "/",), "one") is not None
 
     def make_dir(self, key: str) -> None:
         self._execute("INSERT INTO reporting_documents (key, kind) VALUES (%s, 'dir') ON CONFLICT (key) DO NOTHING", (_clean_key(key) + "/",))

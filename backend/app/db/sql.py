@@ -100,6 +100,7 @@ def _create_entities(connection: Any) -> None:
 ENTITY_MIGRATIONS: list[tuple[int, str, Any]] = [
     (1, "users, API keys, folder permissions, report versions and history", _create_entities),
     (2, "schedules and job runs", _create_entities),      # create_all only adds the tables that are missing
+    (3, "reports, drafts, folders and data sources", _create_entities),
 ]
 
 _ENGINES: dict[str, sa.Engine] = {}

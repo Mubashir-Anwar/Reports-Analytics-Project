@@ -260,6 +260,7 @@ What is kept (and what is not):
 | Record | Where | Kept | Never kept |
 |---|---|---|---|
 | Report run: who, channel (runner, server, designer preview/run, schedule, API, signed link), report, data source, parameters, status, error, rows, duration, output size and SHA-256, client IP, the website's own user | `rs_report_runs` | every execution | report data rows; values of parameters marked **Sensitive** are stored masked (`42*********71`) |
+| Published reports and designer drafts (folder, ID, title, data source, query language, the definition), folders, data adapters (no passwords) | `rs_reports`, `rs_drafts`, `rs_folders`, `rs_data_sources` | current state | data adapter URLs and passwords (they stay in the private secrets, encrypted with `REPORTING_SECRETS_KEY`) |
 | Accounts, rights, API keys (hashes only), folder permissions, report versions and history, schedules and background/scheduled runs | `rs_users`, `rs_api_keys`, `rs_folder_permissions`, `rs_report_versions`, `rs_report_history`, `rs_job_schedules`, `rs_job_runs` | current state (versions: last 50 per report; history: last 200) | plain passwords or API keys |
 | Audit event: sign-ins (also failed), sign-outs, users and rights, API keys, publish, delete, move, upload, version restore, folder permissions, data sources, schedules | `rs_audit_events` | append-only, each with the hash of the one before (`/admin → Logs → Audit trail → Verify chain`) | passwords, tokens, API keys, database URLs; draft autosaves |
 

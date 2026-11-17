@@ -17,6 +17,7 @@ from pymongo.errors import DuplicateKeyError
 
 from backend.app.db import model
 from backend.app.db.mongo import database_for
+from backend.app.storage.routed import RoutedStore
 from backend.app.storage.store import _clean_key, _prefix
 
 
@@ -24,7 +25,7 @@ def _starts(prefix: str) -> dict[str, Any]:
     return {"$regex": "^" + re.escape(prefix)}
 
 
-class MongoStore:
+class _MongoDocuments:
     backend = "mongodb"
 
     INLINE_LIMIT = 15 * 1024 * 1024    # bigger files (large report outputs) go to GridFS: a document holds 16 MB
@@ -87,6 +88,9 @@ class MongoStore:
             found.update("/".join(parts[:i]) for i in range(1, len(parts) + 1))
         return sorted(item for item in found if item)
 
+    def has_dir(self, key: str) -> bool:
+        return self.documents.count_documents({"_id": _clean_key(key) + "/"}, limit=1) > 0
+
     def make_dir(self, key: str) -> None:
         try:
             self.documents.insert_one({"_id": _clean_key(key) + "/", "kind": "dir", "private": False, "updatedAt": model.now()})
@@ -125,3 +129,7 @@ class MongoStore:
         if doc.get("gridfsId") is not None:
             return self.files.open_download_stream(doc["gridfsId"]).read()
         return bytes(doc["data"]) if doc.get("data") is not None else None
+
+
+class MongoStore(RoutedStore, _MongoDocuments):
+    """The document store on MongoDB, with reports, drafts, folders and data adapters in their own collections."""

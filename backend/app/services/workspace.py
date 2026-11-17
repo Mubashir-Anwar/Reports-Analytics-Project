@@ -11,7 +11,7 @@ from typing import Any
 from backend.app.constants import REPORT_ID_PATTERN, WORKSPACE_META
 from backend.app.logs import LOG
 from backend.app.storage.files import normalize_folder_path, workspace_key
-from backend.app.storage.store import FileStore, get_store
+from backend.app.storage.store import get_store
 
 __all__ = ['now_iso', 'strip_workspace_meta', 'workspace_file', 'ensure_workspace', 'workspace_entries', 'find_workspace_entry', 'workspace_summary', 'workspace_folders', 'sync_workspace_copy']
 
@@ -33,7 +33,7 @@ def workspace_file(ctx: SimpleNamespace, report_id: str, folder: str) -> str:
 def ensure_workspace(ctx: SimpleNamespace) -> None:
     """First use: start the workspace with a copy of what is already on the server."""
     store = get_store()
-    started = store.path("workspace").is_dir() if isinstance(store, FileStore) else bool(store.keys("workspace") or store.dirs("workspace"))
+    started = store.has_dir("workspace") or bool(store.keys("workspace") or store.dirs("workspace"))
     if started:
         return
     store.make_dir("workspace")

@@ -107,4 +107,8 @@ def move_documents(store: Any, entities: ent.EntityBackend) -> dict[str, int]:
 def upgrade_storage() -> dict[str, int]:
     """Called once at start-up: tables exist, older documents are moved."""
     from backend.app.storage.store import get_store  # noqa: PLC0415
-    return move_documents(get_store(), ent.get_entities())
+    store = get_store()
+    counts = move_documents(store, ent.get_entities())
+    if hasattr(store, "move_routed_documents"):         # SQL / MongoDB: reports, drafts, folders, adapters -> tables
+        counts.update(store.move_routed_documents())
+    return counts

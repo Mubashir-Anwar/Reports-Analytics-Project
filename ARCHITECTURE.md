@@ -279,8 +279,11 @@ Two layers, both on the backend the client already has:
 * **Typed entities** — `db/entities.py` (`get_entities()`): `rs_users`, `rs_api_keys`, `rs_folder_permissions`,
   `rs_report_versions`, `rs_report_history`, `rs_job_schedules`, `rs_job_runs` with real columns (composite keys, indexes; JSON kept as text so
   `$match` keys survive; unknown fields in an `extra` column). `db/upgrade.py` moves the older JSON documents
-  into them at start-up (originals kept under `migrated/`). Still documents for now: reports, drafts, folders,
-  data adapters and the output files of runs (`jobs/output/`).
+  into them at start-up (originals kept under `migrated/`). On SQL and MongoDB, `storage/routed.py` also
+  sends the document keys of reports (`reports/<folder>/<ID>.json` → `rs_reports`), drafts (`workspace/…` →
+  `rs_drafts`), folders (`rs_folders`) and data adapters (`connections.json` → `rs_data_sources`) to tables, so the
+  callers keep their keys; it moves the earlier documents once (`move_routed_documents`). Still documents: private
+  secrets, the repository revision and sign-in state (`meta/`), and run output files (`jobs/output/`).
   `security/audit_trail.py` maps changing routes to audit actions.
 
 Rules that keep the backends interchangeable: ids (time-ordered, 32 hex) and timestamps (UTC, milliseconds) are
