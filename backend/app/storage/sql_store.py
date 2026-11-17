@@ -11,7 +11,7 @@ from typing import Any, Iterable
 import sqlalchemy as sa
 
 from backend.app.db import model
-from backend.app.db.sql import TEXT, TIME, apply_migrations, engine_for, metadata
+from backend.app.db.sql import BINARY, TEXT, TIME, apply_migrations, engine_for, metadata
 from backend.app.storage.store import _clean_key, _prefix
 
 documents = sa.Table(
@@ -19,7 +19,7 @@ documents = sa.Table(
     sa.Column("doc_key", sa.Unicode(400), primary_key=True),
     sa.Column("kind", sa.Unicode(8), nullable=False),          # json | bytes | dir
     sa.Column("body", TEXT),
-    sa.Column("data", sa.LargeBinary),
+    sa.Column("data", BINARY),
     sa.Column("private", sa.Boolean, nullable=False, default=False),
     sa.Column("updated_at", TIME, nullable=False),
 )

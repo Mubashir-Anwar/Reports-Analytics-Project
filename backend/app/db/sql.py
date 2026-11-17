@@ -23,7 +23,10 @@ TIME = (sa.DateTime()
         .with_variant(mysql.DATETIME(fsp=3), "mysql", "mariadb")
         .with_variant(mssql.DATETIME2(precision=3), "mssql")
         .with_variant(oracle.TIMESTAMP(), "oracle"))
-TEXT = sa.UnicodeText()          # NVARCHAR(MAX) on SQL Server, CLOB on Oracle, TEXT elsewhere
+# NVARCHAR(MAX) on SQL Server, CLOB on Oracle, LONGTEXT on MySQL (its TEXT stops at 64 KB), TEXT elsewhere
+TEXT = sa.UnicodeText().with_variant(mysql.LONGTEXT(), "mysql", "mariadb")
+# Files (report outputs): MySQL's BLOB also stops at 64 KB
+BINARY = sa.LargeBinary().with_variant(mysql.LONGBLOB(), "mysql", "mariadb")
 
 metadata = sa.MetaData()
 
