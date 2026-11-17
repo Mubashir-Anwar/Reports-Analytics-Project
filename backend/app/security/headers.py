@@ -48,7 +48,9 @@ def add_security_headers(request: Request, response: Response) -> Response:
     headers = response.headers
     headers.setdefault("X-Content-Type-Options", "nosniff")
     headers.setdefault("Referrer-Policy", "same-origin")
-    headers.setdefault("X-Frame-Options", "SAMEORIGIN")
+    own_policy = headers.get("Content-Security-Policy", "")
+    if "frame-ancestors" not in own_policy or "frame-ancestors 'self'" in own_policy:
+        headers.setdefault("X-Frame-Options", "SAMEORIGIN")
     headers.setdefault("Permissions-Policy", "camera=(), microphone=(), geolocation=(), payment=()")
     if response.headers.get("content-type", "").startswith("text/html") and not request.url.path.startswith(NO_CSP_PATHS):
         headers.setdefault("Content-Security-Policy", CSP)

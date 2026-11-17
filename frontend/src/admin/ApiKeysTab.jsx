@@ -41,6 +41,11 @@ export default function ApiKeysTab({ notify }) {
       notify(url.trim() && url.trim() !== 'https://' ? `Webhook of ${key.name} saved.` : `Webhook of ${key.name} removed.`);
     } catch (error) { notify(error.message, 'error'); }
   };
+  const setEmbedding = async (key) => {
+    const value = window.prompt(`Websites that may show embedded reports for "${key.name}" (e.g. https://portal.example.com), separated by commas. Empty = no embedding:`, (key.embedOrigins || []).join(', '));
+    if (value === null) return;
+    update(key, { embedOrigins: splitList(value) }, splitList(value).length ? `Embedding allowed for ${splitList(value).join(', ')}.` : `Embedding switched off for ${key.name}.`);
+  };
   const setRate = async (key) => {
     const value = window.prompt(`Requests per minute for "${key.name}" (empty = the server default):`, key.ratePerMinute || '');
     if (value === null) return;
@@ -77,8 +82,10 @@ export default function ApiKeysTab({ notify }) {
                 <small><code>{key.prefix}</code> · folders: {key.folders?.length ? key.folders.join(', ') : 'all'} · addresses: {key.allowedIps?.length ? key.allowedIps.join(', ') : 'any'}</small>
                 <small>Expires: {key.expiresAt ? formatWhen(key.expiresAt) : 'never'} · last used: {formatWhen(key.lastUsedAt)} · by {key.createdBy || '?'}</small>
                 <small>Webhook: {key.webhookUrl || 'none'} · {key.rateLimit ? `${key.rateLimit} requests/minute` : 'no rate limit'}</small>
+                <small>Embedding on: {key.embedOrigins?.length ? key.embedOrigins.join(', ') : 'no website'}</small>
               </div>
               <div className="row">
+                <button className="btn sm quiet" onClick={() => setEmbedding(key)}>Embedding</button>
                 <button className="btn sm quiet" onClick={() => setWebhook(key)}>Webhook</button>
                 <button className="btn sm quiet" onClick={() => setRate(key)}>Rate limit</button>
                 <button className="btn sm" onClick={() => update(key, { disabled: !key.disabled }, `${key.name} ${key.disabled ? 'enabled' : 'disabled'}.`)}>{key.disabled ? 'Enable' : 'Disable'}</button>
@@ -97,7 +104,10 @@ X-API-Key: mrk_…
 {"report": "KFS_FAL", "format": "pdf", "parameters": {"Identifier": "123"}, "expiresInSeconds": 300}
 → {"url": "/generate/KFS_FAL.pdf?Identifier=123&KeyId=…&Expires=…&Signature=…"}`}</pre>
           <p className="muted">3. Or the public API v1: <code>GET {origin}/api/v1/reports</code>, <code>POST {origin}/api/v1/reports/&lt;ID&gt;/run</code> with {'{"format": "pdf", "parameters": {…}}'}, or <code>/jobs</code> for big reports (webhook when done). Description: <a href="/api/v1/openapi.json" target="_blank" rel="noreferrer">/api/v1/openapi.json</a>.</p>
-          <p className="muted">4. Signed-in users with the Run reports right can also open <code>{origin}/generate/&lt;ID&gt;.pdf?…</code> directly.</p>
+          <p className="muted">4. Show a report inside the website's page: list the website under <b>Embedding</b>, let its server ask <code>POST {origin}/api/v1/embed-tokens</code> {'{"report": "<ID>", "parameters": {"Identifier": "123"}}'} and put this in the page:</p>
+          <pre>{`<script src="${origin}/assets/embed/sdk.js"></script>
+<mrs-report token="emb_…"></mrs-report>`}</pre>
+          <p className="muted">5. Signed-in users with the Run reports right can also open <code>{origin}/generate/&lt;ID&gt;.pdf?…</code> directly.</p>
         </details>
       </section>
       <form className="card stack" onSubmit={create}>

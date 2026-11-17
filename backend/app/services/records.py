@@ -66,7 +66,7 @@ def log_run_from_audit(ctx: SimpleNamespace, audit: dict[str, Any], *, channel: 
     access = str(audit.get("access", ""))
     if not channel or not actor_type:
         kind, _, who = access.partition(":")
-        guessed = {"api-key": ("api", "api-key"), "signed-link": ("signed-link", "api-key" if who else "token"),
+        guessed = {"api-key": ("api", "api-key"), "embed": ("embed", "api-key"), "signed-link": ("signed-link", "api-key" if who else "token"),
                    "user": ("runner", "user")}.get(kind) or _ACCESS.get(access, ("api", "token"))
         channel, actor_type = channel or guessed[0], actor_type or guessed[1]
         actor = actor or who or access or "?"

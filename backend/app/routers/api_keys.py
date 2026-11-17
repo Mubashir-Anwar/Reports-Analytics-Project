@@ -22,7 +22,7 @@ from fastapi import FastAPI, HTTPException, Request
 from backend.app.constants import OUTPUT_FORMATS, SIGNED_LINK_KEYS
 from backend.app.definitions import validate_parameters
 from backend.app.logs import LOG
-from backend.app.security import api_keys, webhooks
+from backend.app.security import api_keys, embed_tokens, webhooks
 from backend.app.storage.files import normalize_folder_path
 
 NAME_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9 ._@-]{1,63}$")
@@ -122,6 +122,15 @@ def register(app: FastAPI, ctx: SimpleNamespace) -> None:
             else:
                 item.pop("webhookUrl", None)
                 item.pop("webhookSecret", None)
+        if "embedOrigins" in payload:
+            try:
+                origins = embed_tokens.clean_origins(payload.get("embedOrigins"))
+            except ValueError as exc:
+                raise HTTPException(status_code=422, detail=str(exc)) from None
+            if origins:
+                item["embedOrigins"] = origins
+            else:
+                item.pop("embedOrigins", None)
         if "ratePerMinute" in payload:
             rate = payload.get("ratePerMinute")
             if rate in (None, "", 0):
@@ -132,7 +141,8 @@ def register(app: FastAPI, ctx: SimpleNamespace) -> None:
                 raise HTTPException(status_code=422, detail="ratePerMinute must be a whole number from 1 to 100000 (empty = the default)")
         api_keys.save_keys(keys)
         LOG.info("API key %s changed by %s", key_id, request.state.actor)
-        ctx.audit_event(request, "apikey.changed", key_id, {name: payload[name] for name in ("disabled", "folders", "allowedIps", "expiresInDays") if name in payload})
+        ctx.audit_event(request, "apikey.changed", key_id, {name: payload[name] for name in ("disabled", "folders", "allowedIps", "expiresInDays",
+                                                                              "embedOrigins", "ratePerMinute", "webhookUrl") if name in payload})
         result: dict[str, Any] = {"key": api_keys.key_view(item)}
         if new_secret:
             result["webhookSecret"] = new_secret

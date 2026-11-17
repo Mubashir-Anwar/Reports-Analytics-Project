@@ -2,7 +2,7 @@
 
 | File | What it is |
 |---|---|
-| `Reporting-Service.postman_collection.json` | 111 requests in 14 folders covering all 103 endpoints, in an order that runs end to end (create → use → clean up). Every request checks its status; IDs, the API key and links are passed on through environment variables. |
+| `Reporting-Service.postman_collection.json` | 119 requests in 15 folders covering all 108 endpoints (incl. the public API and embedding), in an order that runs end to end (create → use → clean up). Every request checks its status; IDs, the API key and links are passed on through environment variables. |
 | `Local.postman_environment.json` | The variables. Fill in `password` and `adminToken`; the rest has local defaults. |
 
 Regenerate both after changing the API: `python tools/postman/build_collection.py`.
@@ -17,7 +17,7 @@ Regenerate both after changing the API: `python tools/postman/build_collection.p
    * `mongoUri` — a MongoDB the server can reach (default `mongodb://127.0.0.1:27017`)
 3. Create the demo data once: `python tools/postman/seed_demo.py` (database `rs_postman_demo`, 5 orders).
 4. Run the whole collection (**Run collection**) or single requests. Everything it creates is named
-   `PM_…` / `pm_…` / `Postman` and is deleted in folder 14.
+   `PM_…` / `pm_…` / `Postman` and is deleted in the last folder ("Clean up").
 
 ## From the command line (Newman, the Postman runner)
 
@@ -25,7 +25,7 @@ Regenerate both after changing the API: `python tools/postman/build_collection.p
 npx newman run postman/Reporting-Service.postman_collection.json -e postman/Local.postman_environment.json --env-var password=… --env-var adminToken=…
 ```
 
-Last full run: 111 requests, 117 checks, 0 failures (about 12 s), and the same again on a second run.
+Last full run: 119 requests, 119 test scripts, 128 checks, 0 failures, and the same again on a second run.
 
 Note: `Health` may answer **503** when the server's default data adapter (`MONGODB_URI`) is not configured;
 the service itself is up. Do not run the collection against production: it creates and deletes reports, a user,

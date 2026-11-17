@@ -35,7 +35,7 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('Health: HTTP 200 or 503', function () { pm.expect([200, 503]).to.include(pm.response.code); });"
+                  "pm.test(\"Health: HTTP 200 or 503\", function () { pm.expect([200, 503]).to.include(pm.response.code); });"
                 ]
               }
             }
@@ -66,7 +66,7 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('Ready (load balancer): HTTP 200', function () { pm.expect([200]).to.include(pm.response.code); });"
+                  "pm.test(\"Ready (load balancer): HTTP 200\", function () { pm.expect([200]).to.include(pm.response.code); });"
                 ]
               }
             }
@@ -97,7 +97,7 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('Sign-in page: HTTP 200', function () { pm.expect([200]).to.include(pm.response.code); });"
+                  "pm.test(\"Sign-in page: HTTP 200\", function () { pm.expect([200]).to.include(pm.response.code); });"
                 ]
               }
             }
@@ -128,7 +128,7 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('Designer page sends a signed-out user to sign-in: HTTP 303', function () { pm.expect([303]).to.include(pm.response.code); });",
+                  "pm.test(\"Designer page sends a signed-out user to sign-in: HTTP 303\", function () { pm.expect([303]).to.include(pm.response.code); });",
                   "pm.test('redirects to /login', function () { pm.expect(pm.response.headers.get('Location')).to.include('/login'); });"
                 ]
               }
@@ -165,7 +165,7 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('Admin API refuses without sign-in: HTTP 401', function () { pm.expect([401]).to.include(pm.response.code); });"
+                  "pm.test(\"Admin API refuses without sign-in: HTTP 401\", function () { pm.expect([401]).to.include(pm.response.code); });"
                 ]
               }
             }
@@ -198,7 +198,7 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('Public API refuses without a key: HTTP 401', function () { pm.expect([401]).to.include(pm.response.code); });"
+                  "pm.test(\"Public API refuses without a key: HTTP 401\", function () { pm.expect([401]).to.include(pm.response.code); });"
                 ]
               }
             }
@@ -248,7 +248,7 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('Sign in: HTTP 200', function () { pm.expect([200]).to.include(pm.response.code); });",
+                  "pm.test(\"Sign in: HTTP 200\", function () { pm.expect([200]).to.include(pm.response.code); });",
                   "pm.test('has rights', function () { pm.expect(pm.response.json().rights).to.be.an('array'); });"
                 ]
               }
@@ -279,7 +279,7 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('Who am I (session): HTTP 200', function () { pm.expect([200]).to.include(pm.response.code); });"
+                  "pm.test(\"Who am I (session): HTTP 200\", function () { pm.expect([200]).to.include(pm.response.code); });"
                 ]
               }
             }
@@ -305,7 +305,7 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('Home sends to the first allowed page: HTTP 303', function () { pm.expect([303]).to.include(pm.response.code); });"
+                  "pm.test(\"Home sends to the first allowed page: HTTP 303\", function () { pm.expect([303]).to.include(pm.response.code); });"
                 ]
               }
             }
@@ -336,7 +336,7 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('Page /designer: HTTP 200', function () { pm.expect([200]).to.include(pm.response.code); });"
+                  "pm.test(\"Page /designer: HTTP 200\", function () { pm.expect([200]).to.include(pm.response.code); });"
                 ]
               }
             }
@@ -364,7 +364,7 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('Page /server: HTTP 200', function () { pm.expect([200]).to.include(pm.response.code); });"
+                  "pm.test(\"Page /server: HTTP 200\", function () { pm.expect([200]).to.include(pm.response.code); });"
                 ]
               }
             }
@@ -392,7 +392,7 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('Page /admin: HTTP 200', function () { pm.expect([200]).to.include(pm.response.code); });"
+                  "pm.test(\"Page /admin: HTTP 200\", function () { pm.expect([200]).to.include(pm.response.code); });"
                 ]
               }
             }
@@ -420,7 +420,7 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('Page /ui: HTTP 200', function () { pm.expect([200]).to.include(pm.response.code); });"
+                  "pm.test(\"Page /ui: HTTP 200\", function () { pm.expect([200]).to.include(pm.response.code); });"
                 ]
               }
             }
@@ -448,7 +448,7 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('Page /analytics: HTTP 200', function () { pm.expect([200]).to.include(pm.response.code); });"
+                  "pm.test(\"Page /analytics: HTTP 200\", function () { pm.expect([200]).to.include(pm.response.code); });"
                 ]
               }
             }
@@ -478,7 +478,7 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('Admin whoami: HTTP 200', function () { pm.expect([200]).to.include(pm.response.code); });"
+                  "pm.test(\"Admin whoami: HTTP 200\", function () { pm.expect([200]).to.include(pm.response.code); });"
                 ]
               }
             }
@@ -509,7 +509,7 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('System status and production checklist: HTTP 200', function () { pm.expect([200]).to.include(pm.response.code); });"
+                  "pm.test(\"System status and production checklist: HTTP 200\", function () { pm.expect([200]).to.include(pm.response.code); });"
                 ]
               }
             }
@@ -560,7 +560,7 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('Test a connection before saving: HTTP 200', function () { pm.expect([200]).to.include(pm.response.code); });"
+                  "pm.test(\"Test a connection before saving: HTTP 200\", function () { pm.expect([200]).to.include(pm.response.code); });"
                 ]
               }
             }
@@ -604,7 +604,7 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('Save data adapter pm_mongo: HTTP 200', function () { pm.expect([200]).to.include(pm.response.code); });"
+                  "pm.test(\"Save data adapter pm_mongo: HTTP 200\", function () { pm.expect([200]).to.include(pm.response.code); });"
                 ]
               }
             }
@@ -634,7 +634,7 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('List data adapters: HTTP 200', function () { pm.expect([200]).to.include(pm.response.code); });"
+                  "pm.test(\"List data adapters: HTTP 200\", function () { pm.expect([200]).to.include(pm.response.code); });"
                 ]
               }
             }
@@ -680,7 +680,7 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('Test saved adapter: HTTP 200', function () { pm.expect([200]).to.include(pm.response.code); });"
+                  "pm.test(\"Test saved adapter: HTTP 200\", function () { pm.expect([200]).to.include(pm.response.code); });"
                 ]
               }
             }
@@ -726,7 +726,7 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('Move adapter to a folder: HTTP 200', function () { pm.expect([200]).to.include(pm.response.code); });"
+                  "pm.test(\"Move adapter to a folder: HTTP 200\", function () { pm.expect([200]).to.include(pm.response.code); });"
                 ]
               }
             }
@@ -776,7 +776,7 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('Create folder Postman: HTTP 200', function () { pm.expect([200]).to.include(pm.response.code); });"
+                  "pm.test(\"Create folder Postman: HTTP 200\", function () { pm.expect([200]).to.include(pm.response.code); });"
                 ]
               }
             }
@@ -806,7 +806,7 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('List folders: HTTP 200', function () { pm.expect([200]).to.include(pm.response.code); });"
+                  "pm.test(\"List folders: HTTP 200\", function () { pm.expect([200]).to.include(pm.response.code); });"
                 ]
               }
             }
@@ -843,7 +843,7 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('Folder contents: HTTP 200', function () { pm.expect([200]).to.include(pm.response.code); });"
+                  "pm.test(\"Folder contents: HTTP 200\", function () { pm.expect([200]).to.include(pm.response.code); });"
                 ]
               }
             }
@@ -894,7 +894,7 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('Parse a query: HTTP 200', function () { pm.expect([200]).to.include(pm.response.code); });",
+                  "pm.test(\"Parse a query: HTTP 200\", function () { pm.expect([200]).to.include(pm.response.code); });",
                   "pm.test('two stages', function () { pm.expect(pm.response.json().stageCount).to.eql(2); });"
                 ]
               }
@@ -940,7 +940,7 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('Read SQL fields (needs a SQL adapter: refused for MongoDB): HTTP 422', function () { pm.expect([422]).to.include(pm.response.code); });"
+                  "pm.test(\"Read SQL fields (needs a SQL adapter: refused for MongoDB): HTTP 422\", function () { pm.expect([422]).to.include(pm.response.code); });"
                 ]
               }
             }
@@ -985,7 +985,7 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('Validate a definition: HTTP 200', function () { pm.expect([200]).to.include(pm.response.code); });"
+                  "pm.test(\"Validate a definition: HTTP 200\", function () { pm.expect([200]).to.include(pm.response.code); });"
                 ]
               }
             }
@@ -1030,7 +1030,7 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('Render a design to PDF: HTTP 200', function () { pm.expect([200]).to.include(pm.response.code); });"
+                  "pm.test(\"Render a design to PDF: HTTP 200\", function () { pm.expect([200]).to.include(pm.response.code); });"
                 ]
               }
             }
@@ -1075,7 +1075,7 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('Import a JRXML (Jaspersoft Studio): HTTP 200', function () { pm.expect([200]).to.include(pm.response.code); });"
+                  "pm.test(\"Import a JRXML (Jaspersoft Studio): HTTP 200\", function () { pm.expect([200]).to.include(pm.response.code); });"
                 ]
               }
             }
@@ -1119,7 +1119,52 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('Create workspace folder: HTTP 200', function () { pm.expect([200]).to.include(pm.response.code); });"
+                  "pm.test(\"Create workspace folder: HTTP 200\", function () { pm.expect([200]).to.include(pm.response.code); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Remove a draft left by an earlier run",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/admin/workspace/PM_ORDERS",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "admin",
+                "workspace",
+                "PM_ORDERS"
+              ]
+            },
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Remove a draft left by an earlier run: HTTP 200 or 404\", function () { pm.expect([200, 404]).to.include(pm.response.code); });"
                 ]
               }
             }
@@ -1170,7 +1215,7 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('Save draft PM_ORDERS: HTTP 200', function () { pm.expect([200]).to.include(pm.response.code); });"
+                  "pm.test(\"Save draft PM_ORDERS: HTTP 200\", function () { pm.expect([200]).to.include(pm.response.code); });"
                 ]
               }
             }
@@ -1200,7 +1245,7 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('List drafts: HTTP 200', function () { pm.expect([200]).to.include(pm.response.code); });"
+                  "pm.test(\"List drafts: HTTP 200\", function () { pm.expect([200]).to.include(pm.response.code); });"
                 ]
               }
             }
@@ -1231,7 +1276,7 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('Get draft: HTTP 200', function () { pm.expect([200]).to.include(pm.response.code); });"
+                  "pm.test(\"Get draft: HTTP 200\", function () { pm.expect([200]).to.include(pm.response.code); });"
                 ]
               }
             }
@@ -1276,7 +1321,7 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('Preview draft (20 rows): HTTP 200', function () { pm.expect([200]).to.include(pm.response.code); });",
+                  "pm.test(\"Preview draft (20 rows): HTTP 200\", function () { pm.expect([200]).to.include(pm.response.code); });",
                   "pm.test('two LHR rows', function () { pm.expect(pm.response.json().rowCount).to.eql(2); });"
                 ]
               }
@@ -1322,7 +1367,7 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('Run draft to CSV: HTTP 200', function () { pm.expect([200]).to.include(pm.response.code); });"
+                  "pm.test(\"Run draft to CSV: HTTP 200\", function () { pm.expect([200]).to.include(pm.response.code); });"
                 ]
               }
             }
@@ -1368,7 +1413,7 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('Publish draft to the server: HTTP 200', function () { pm.expect([200]).to.include(pm.response.code); });"
+                  "pm.test(\"Publish draft to the server: HTTP 200\", function () { pm.expect([200]).to.include(pm.response.code); });"
                 ]
               }
             }
@@ -1404,7 +1449,7 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('List published reports: HTTP 200', function () { pm.expect([200]).to.include(pm.response.code); });"
+                  "pm.test(\"List published reports: HTTP 200\", function () { pm.expect([200]).to.include(pm.response.code); });"
                 ]
               }
             }
@@ -1435,7 +1480,7 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('Get report: HTTP 200', function () { pm.expect([200]).to.include(pm.response.code); });"
+                  "pm.test(\"Get report: HTTP 200\", function () { pm.expect([200]).to.include(pm.response.code); });"
                 ]
               }
             }
@@ -1467,7 +1512,7 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('Report as .mrd (XML): HTTP 200', function () { pm.expect([200]).to.include(pm.response.code); });",
+                  "pm.test(\"Report as .mrd (XML): HTTP 200\", function () { pm.expect([200]).to.include(pm.response.code); });",
                   "try { pm.environment.set('mrdXml', JSON.stringify(pm.response.text())); } catch (e) { console.log('could not save mrdXml', e); }"
                 ]
               }
@@ -1514,7 +1559,7 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('Preview report: HTTP 200', function () { pm.expect([200]).to.include(pm.response.code); });"
+                  "pm.test(\"Preview report: HTTP 200\", function () { pm.expect([200]).to.include(pm.response.code); });"
                 ]
               }
             }
@@ -1560,7 +1605,7 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('Run report to Excel: HTTP 200', function () { pm.expect([200]).to.include(pm.response.code); });"
+                  "pm.test(\"Run report to Excel: HTTP 200\", function () { pm.expect([200]).to.include(pm.response.code); });"
                 ]
               }
             }
@@ -1605,7 +1650,7 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('Update report: HTTP 200', function () { pm.expect([200]).to.include(pm.response.code); });"
+                  "pm.test(\"Update report: HTTP 200\", function () { pm.expect([200]).to.include(pm.response.code); });"
                 ]
               }
             }
@@ -1649,7 +1694,7 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('Create report PM_ADMIN: HTTP 200', function () { pm.expect([200]).to.include(pm.response.code); });"
+                  "pm.test(\"Create report PM_ADMIN: HTTP 200\", function () { pm.expect([200]).to.include(pm.response.code); });"
                 ]
               }
             }
@@ -1694,7 +1739,7 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('Import .mrd: HTTP 200', function () { pm.expect([200]).to.include(pm.response.code); });"
+                  "pm.test(\"Import .mrd: HTTP 200\", function () { pm.expect([200]).to.include(pm.response.code); });"
                 ]
               }
             }
@@ -1744,7 +1789,7 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('Create user pm_runner: HTTP 200', function () { pm.expect([200]).to.include(pm.response.code); });"
+                  "pm.test(\"Create user pm_runner: HTTP 200\", function () { pm.expect([200]).to.include(pm.response.code); });"
                 ]
               }
             }
@@ -1774,7 +1819,7 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('List users: HTTP 200', function () { pm.expect([200]).to.include(pm.response.code); });"
+                  "pm.test(\"List users: HTTP 200\", function () { pm.expect([200]).to.include(pm.response.code); });"
                 ]
               }
             }
@@ -1819,7 +1864,7 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('Change rights: HTTP 200', function () { pm.expect([200]).to.include(pm.response.code); });"
+                  "pm.test(\"Change rights: HTTP 200\", function () { pm.expect([200]).to.include(pm.response.code); });"
                 ]
               }
             }
@@ -1855,7 +1900,7 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('Repository: HTTP 200', function () { pm.expect([200]).to.include(pm.response.code); });"
+                  "pm.test(\"Repository: HTTP 200\", function () { pm.expect([200]).to.include(pm.response.code); });"
                 ]
               }
             }
@@ -1892,7 +1937,7 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('Folder contents: HTTP 200', function () { pm.expect([200]).to.include(pm.response.code); });"
+                  "pm.test(\"Folder contents: HTTP 200\", function () { pm.expect([200]).to.include(pm.response.code); });"
                 ]
               }
             }
@@ -1936,7 +1981,7 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('Create subfolder: HTTP 200', function () { pm.expect([200]).to.include(pm.response.code); });"
+                  "pm.test(\"Create subfolder: HTTP 200\", function () { pm.expect([200]).to.include(pm.response.code); });"
                 ]
               }
             }
@@ -1967,7 +2012,7 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('Report details: HTTP 200', function () { pm.expect([200]).to.include(pm.response.code); });"
+                  "pm.test(\"Report details: HTTP 200\", function () { pm.expect([200]).to.include(pm.response.code); });"
                 ]
               }
             }
@@ -2012,7 +2057,7 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('Edit title: HTTP 200', function () { pm.expect([200]).to.include(pm.response.code); });"
+                  "pm.test(\"Edit title: HTTP 200\", function () { pm.expect([200]).to.include(pm.response.code); });"
                 ]
               }
             }
@@ -2044,7 +2089,7 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('Versions: HTTP 200', function () { pm.expect([200]).to.include(pm.response.code); });",
+                  "pm.test(\"Versions: HTTP 200\", function () { pm.expect([200]).to.include(pm.response.code); });",
                   "try { pm.environment.set('versionNumber', pm.response.json().versions[pm.response.json().versions.length - 1].version); } catch (e) { console.log('could not save versionNumber', e); }"
                 ]
               }
@@ -2078,7 +2123,7 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('One version: HTTP 200', function () { pm.expect([200]).to.include(pm.response.code); });"
+                  "pm.test(\"One version: HTTP 200\", function () { pm.expect([200]).to.include(pm.response.code); });"
                 ]
               }
             }
@@ -2126,7 +2171,7 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('Restore the first version: HTTP 200', function () { pm.expect([200]).to.include(pm.response.code); });"
+                  "pm.test(\"Restore the first version: HTTP 200\", function () { pm.expect([200]).to.include(pm.response.code); });"
                 ]
               }
             }
@@ -2172,7 +2217,7 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('Copy: HTTP 200', function () { pm.expect([200]).to.include(pm.response.code); });"
+                  "pm.test(\"Copy: HTTP 200\", function () { pm.expect([200]).to.include(pm.response.code); });"
                 ]
               }
             }
@@ -2218,7 +2263,7 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('Move the copy: HTTP 200', function () { pm.expect([200]).to.include(pm.response.code); });"
+                  "pm.test(\"Move the copy: HTTP 200\", function () { pm.expect([200]).to.include(pm.response.code); });"
                 ]
               }
             }
@@ -2250,7 +2295,7 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('Download .mrd: HTTP 200', function () { pm.expect([200]).to.include(pm.response.code); });"
+                  "pm.test(\"Download .mrd: HTTP 200\", function () { pm.expect([200]).to.include(pm.response.code); });"
                 ]
               }
             }
@@ -2294,7 +2339,7 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('Upload .mrd as a new report: HTTP 200', function () { pm.expect([200]).to.include(pm.response.code); });"
+                  "pm.test(\"Upload .mrd as a new report: HTTP 200\", function () { pm.expect([200]).to.include(pm.response.code); });"
                 ]
               }
             }
@@ -2340,7 +2385,7 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('Run now (PDF): HTTP 200', function () { pm.expect([200]).to.include(pm.response.code); });"
+                  "pm.test(\"Run now (PDF): HTTP 200\", function () { pm.expect([200]).to.include(pm.response.code); });"
                 ]
               }
             }
@@ -2386,7 +2431,7 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('Run in the background: HTTP 200', function () { pm.expect([200]).to.include(pm.response.code); });",
+                  "pm.test(\"Run in the background: HTTP 200\", function () { pm.expect([200]).to.include(pm.response.code); });",
                   "try { pm.environment.set('serverRunId', pm.response.json().run.id); } catch (e) { console.log('could not save serverRunId', e); }"
                 ]
               }
@@ -2417,7 +2462,7 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('Runs: HTTP 200', function () { pm.expect([200]).to.include(pm.response.code); });"
+                  "pm.test(\"Runs: HTTP 200\", function () { pm.expect([200]).to.include(pm.response.code); });"
                 ]
               }
             }
@@ -2448,7 +2493,7 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('One run: HTTP 200', function () { pm.expect([200]).to.include(pm.response.code); });"
+                  "pm.test(\"One run: HTTP 200\", function () { pm.expect([200]).to.include(pm.response.code); });"
                 ]
               }
             }
@@ -2480,7 +2525,7 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('Run file (ready, or still running): HTTP 200 or 409', function () { pm.expect([200, 409]).to.include(pm.response.code); });"
+                  "pm.test(\"Run file (ready, or still running): HTTP 200 or 409\", function () { pm.expect([200, 409]).to.include(pm.response.code); });"
                 ]
               }
             }
@@ -2510,7 +2555,7 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('Data adapters (server): HTTP 200', function () { pm.expect([200]).to.include(pm.response.code); });"
+                  "pm.test(\"Data adapters (server): HTTP 200\", function () { pm.expect([200]).to.include(pm.response.code); });"
                 ]
               }
             }
@@ -2556,7 +2601,7 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('Test adapter (server): HTTP 200', function () { pm.expect([200]).to.include(pm.response.code); });"
+                  "pm.test(\"Test adapter (server): HTTP 200\", function () { pm.expect([200]).to.include(pm.response.code); });"
                 ]
               }
             }
@@ -2592,7 +2637,7 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('Folder permissions: HTTP 200', function () { pm.expect([200]).to.include(pm.response.code); });"
+                  "pm.test(\"Folder permissions: HTTP 200\", function () { pm.expect([200]).to.include(pm.response.code); });"
                 ]
               }
             }
@@ -2636,7 +2681,7 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('Set folder permissions: HTTP 200', function () { pm.expect([200]).to.include(pm.response.code); });"
+                  "pm.test(\"Set folder permissions: HTTP 200\", function () { pm.expect([200]).to.include(pm.response.code); });"
                 ]
               }
             }
@@ -2673,7 +2718,7 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('Schedule options: HTTP 200', function () { pm.expect([200]).to.include(pm.response.code); });"
+                  "pm.test(\"Schedule options: HTTP 200\", function () { pm.expect([200]).to.include(pm.response.code); });"
                 ]
               }
             }
@@ -2717,7 +2762,7 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('Create schedule: HTTP 200', function () { pm.expect([200]).to.include(pm.response.code); });",
+                  "pm.test(\"Create schedule: HTTP 200\", function () { pm.expect([200]).to.include(pm.response.code); });",
                   "try { pm.environment.set('scheduleId', pm.response.json().schedule.id); } catch (e) { console.log('could not save scheduleId', e); }"
                 ]
               }
@@ -2748,7 +2793,7 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('List schedules: HTTP 200', function () { pm.expect([200]).to.include(pm.response.code); });"
+                  "pm.test(\"List schedules: HTTP 200\", function () { pm.expect([200]).to.include(pm.response.code); });"
                 ]
               }
             }
@@ -2793,7 +2838,7 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('Edit schedule: HTTP 200', function () { pm.expect([200]).to.include(pm.response.code); });"
+                  "pm.test(\"Edit schedule: HTTP 200\", function () { pm.expect([200]).to.include(pm.response.code); });"
                 ]
               }
             }
@@ -2839,7 +2884,7 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('Switch schedule off: HTTP 200', function () { pm.expect([200]).to.include(pm.response.code); });"
+                  "pm.test(\"Switch schedule off: HTTP 200\", function () { pm.expect([200]).to.include(pm.response.code); });"
                 ]
               }
             }
@@ -2885,7 +2930,7 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('Run schedule now: HTTP 200', function () { pm.expect([200]).to.include(pm.response.code); });"
+                  "pm.test(\"Run schedule now: HTTP 200\", function () { pm.expect([200]).to.include(pm.response.code); });"
                 ]
               }
             }
@@ -2935,7 +2980,7 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('Create API key: HTTP 200', function () { pm.expect([200]).to.include(pm.response.code); });",
+                  "pm.test(\"Create API key: HTTP 200\", function () { pm.expect([200]).to.include(pm.response.code); });",
                   "try { pm.environment.set('apiKey', pm.response.json().secret); } catch (e) { console.log('could not save apiKey', e); }",
                   "try { pm.environment.set('apiKeyId', pm.response.json().key.id); } catch (e) { console.log('could not save apiKeyId', e); }"
                 ]
@@ -2967,7 +3012,7 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('List API keys: HTTP 200', function () { pm.expect([200]).to.include(pm.response.code); });"
+                  "pm.test(\"List API keys: HTTP 200\", function () { pm.expect([200]).to.include(pm.response.code); });"
                 ]
               }
             }
@@ -3012,7 +3057,7 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('Set its rate limit: HTTP 200', function () { pm.expect([200]).to.include(pm.response.code); });"
+                  "pm.test(\"Set its rate limit: HTTP 200\", function () { pm.expect([200]).to.include(pm.response.code); });"
                 ]
               }
             }
@@ -3054,7 +3099,7 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('Reports (admin token): HTTP 200', function () { pm.expect([200]).to.include(pm.response.code); });"
+                  "pm.test(\"Reports (admin token): HTTP 200\", function () { pm.expect([200]).to.include(pm.response.code); });"
                 ]
               }
             }
@@ -3097,7 +3142,7 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('Generate CSV by URL (admin token): HTTP 200', function () { pm.expect([200]).to.include(pm.response.code); });"
+                  "pm.test(\"Generate CSV by URL (admin token): HTTP 200\", function () { pm.expect([200]).to.include(pm.response.code); });"
                 ]
               }
             }
@@ -3140,7 +3185,7 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('Generate PDF by URL (API key): HTTP 200', function () { pm.expect([200]).to.include(pm.response.code); });"
+                  "pm.test(\"Generate PDF by URL (API key): HTTP 200\", function () { pm.expect([200]).to.include(pm.response.code); });"
                 ]
               }
             }
@@ -3179,7 +3224,7 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('Adapter status for the runner: HTTP 200', function () { pm.expect([200]).to.include(pm.response.code); });"
+                  "pm.test(\"Adapter status for the runner: HTTP 200\", function () { pm.expect([200]).to.include(pm.response.code); });"
                 ]
               }
             }
@@ -3223,7 +3268,7 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('Who am I (key): HTTP 200', function () { pm.expect([200]).to.include(pm.response.code); });",
+                  "pm.test(\"Who am I (key): HTTP 200\", function () { pm.expect([200]).to.include(pm.response.code); });",
                   "pm.test('is the Postman key', function () { pm.expect(pm.response.json().name).to.eql('Postman site'); });"
                 ]
               }
@@ -3262,7 +3307,7 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('Reports the key may run: HTTP 200', function () { pm.expect([200]).to.include(pm.response.code); });"
+                  "pm.test(\"Reports the key may run: HTTP 200\", function () { pm.expect([200]).to.include(pm.response.code); });"
                 ]
               }
             }
@@ -3301,7 +3346,7 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('One report with parameters: HTTP 200', function () { pm.expect([200]).to.include(pm.response.code); });"
+                  "pm.test(\"One report with parameters: HTTP 200\", function () { pm.expect([200]).to.include(pm.response.code); });"
                 ]
               }
             }
@@ -3354,7 +3399,7 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('Run now (JSON in, file out): HTTP 200', function () { pm.expect([200]).to.include(pm.response.code); });"
+                  "pm.test(\"Run now (JSON in, file out): HTTP 200\", function () { pm.expect([200]).to.include(pm.response.code); });"
                 ]
               }
             }
@@ -3407,7 +3452,7 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('Wrong parameter value is refused: HTTP 422', function () { pm.expect([422]).to.include(pm.response.code); });"
+                  "pm.test(\"Wrong parameter value is refused: HTTP 422\", function () { pm.expect([422]).to.include(pm.response.code); });"
                 ]
               }
             }
@@ -3460,7 +3505,7 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('Start a background job: HTTP 202', function () { pm.expect([202]).to.include(pm.response.code); });",
+                  "pm.test(\"Start a background job: HTTP 202\", function () { pm.expect([202]).to.include(pm.response.code); });",
                   "try { pm.environment.set('jobId', pm.response.json().job.id); } catch (e) { console.log('could not save jobId', e); }"
                 ]
               }
@@ -3500,7 +3545,7 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('Job status: HTTP 200', function () { pm.expect([200]).to.include(pm.response.code); });"
+                  "pm.test(\"Job status: HTTP 200\", function () { pm.expect([200]).to.include(pm.response.code); });"
                 ]
               }
             }
@@ -3540,7 +3585,7 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('Job file (ready, or still running): HTTP 200 or 409', function () { pm.expect([200, 409]).to.include(pm.response.code); });"
+                  "pm.test(\"Job file (ready, or still running): HTTP 200 or 409\", function () { pm.expect([200, 409]).to.include(pm.response.code); });"
                 ]
               }
             }
@@ -3591,7 +3636,7 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('Signed link for a browser: HTTP 200', function () { pm.expect([200]).to.include(pm.response.code); });",
+                  "pm.test(\"Signed link for a browser: HTTP 200\", function () { pm.expect([200]).to.include(pm.response.code); });",
                   "try { pm.environment.set('signedLink', pm.response.json().url.substring(1)); } catch (e) { console.log('could not save signedLink', e); }"
                 ]
               }
@@ -3623,7 +3668,7 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('Open the signed link (no key): HTTP 200', function () { pm.expect([200]).to.include(pm.response.code); });"
+                  "pm.test(\"Open the signed link (no key): HTTP 200\", function () { pm.expect([200]).to.include(pm.response.code); });"
                 ]
               }
             }
@@ -3656,7 +3701,324 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('Public OpenAPI description: HTTP 200', function () { pm.expect([200]).to.include(pm.response.code); });"
+                  "pm.test(\"Public OpenAPI description: HTTP 200\", function () { pm.expect([200]).to.include(pm.response.code); });"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "12b Embedding (a report inside the website's page)",
+      "description": "",
+      "item": [
+        {
+          "name": "Allow a website to embed (Admin)",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/admin/api-keys/{{apiKeyId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "admin",
+                "api-keys",
+                "{{apiKeyId}}"
+              ]
+            },
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"embedOrigins\": [\n    \"https://portal.example.com\"\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Allow a website to embed (Admin): HTTP 200\", function () { pm.expect([200]).to.include(pm.response.code); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Embed token for the website's page (API key)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-API-Key",
+                "value": "{{apiKey}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/embed-tokens",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "embed-tokens"
+              ]
+            },
+            "description": "",
+            "auth": {
+              "type": "noauth"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"report\": \"PM_ORDERS\",\n  \"parameters\": {\n    \"Branch\": \"LHR\"\n  },\n  \"onBehalfOf\": \"postman-visitor\",\n  \"expiresInSeconds\": 600\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Embed token for the website's page (API key): HTTP 200\", function () { pm.expect([200]).to.include(pm.response.code); });",
+                  "try { pm.environment.set('embedToken', pm.response.json().token); } catch (e) { console.log('could not save embedToken', e); }"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Viewer page (framed only by the listed website)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/embed/view?token={{embedToken}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "embed",
+                "view"
+              ],
+              "query": [
+                {
+                  "key": "token",
+                  "value": "{{embedToken}}"
+                }
+              ]
+            },
+            "description": "",
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Viewer page (framed only by the listed website): HTTP 200\", function () { pm.expect([200]).to.include(pm.response.code); });",
+                  "pm.test('framing limited to the website', function () { pm.expect(pm.response.headers.get('Content-Security-Policy')).to.include('frame-ancestors https://portal.example.com'); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Viewer: report and its locked parameters",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Embed-Token",
+                "value": "{{embedToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/embed/report",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "embed",
+                "report"
+              ]
+            },
+            "description": "",
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Viewer: report and its locked parameters: HTTP 200\", function () { pm.expect([200]).to.include(pm.response.code); });",
+                  "pm.test('Branch is locked to LHR', function () { const b = pm.response.json().parameters.find(p => p.name === 'Branch'); pm.expect(b.locked).to.eql(true); pm.expect(b.value).to.eql('LHR'); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Viewer: preview (the fixed Branch cannot be changed)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "X-Embed-Token",
+                "value": "{{embedToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/embed/preview",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "embed",
+                "preview"
+              ]
+            },
+            "description": "",
+            "auth": {
+              "type": "noauth"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"parameters\": {\n    \"Branch\": \"KHI\"\n  }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Viewer: preview (the fixed Branch cannot be changed): HTTP 200\", function () { pm.expect([200]).to.include(pm.response.code); });",
+                  "pm.test('only LHR rows', function () { pm.response.json().rows.forEach(r => pm.expect(r.Branch).to.eql('LHR')); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Viewer: download Excel",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "X-Embed-Token",
+                "value": "{{embedToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/embed/run",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "embed",
+                "run"
+              ]
+            },
+            "description": "",
+            "auth": {
+              "type": "noauth"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"format\": \"xlsx\",\n  \"parameters\": {}\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Viewer: download Excel: HTTP 200\", function () { pm.expect([200]).to.include(pm.response.code); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "SDK script for the website",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/assets/embed/sdk.js",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "assets",
+                "embed",
+                "sdk.js"
+              ]
+            },
+            "description": "",
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"SDK script for the website: HTTP 200\", function () { pm.expect([200]).to.include(pm.response.code); });"
                 ]
               }
             }
@@ -3698,7 +4060,7 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('Service log: HTTP 200', function () { pm.expect([200]).to.include(pm.response.code); });"
+                  "pm.test(\"Service log: HTTP 200\", function () { pm.expect([200]).to.include(pm.response.code); });"
                 ]
               }
             }
@@ -3729,7 +4091,7 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('Download service log: HTTP 200', function () { pm.expect([200]).to.include(pm.response.code); });"
+                  "pm.test(\"Download service log: HTTP 200\", function () { pm.expect([200]).to.include(pm.response.code); });"
                 ]
               }
             }
@@ -3765,7 +4127,7 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('Report runs: HTTP 200', function () { pm.expect([200]).to.include(pm.response.code); });"
+                  "pm.test(\"Report runs: HTTP 200\", function () { pm.expect([200]).to.include(pm.response.code); });"
                 ]
               }
             }
@@ -3801,7 +4163,7 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('Audit trail: HTTP 200', function () { pm.expect([200]).to.include(pm.response.code); });"
+                  "pm.test(\"Audit trail: HTTP 200\", function () { pm.expect([200]).to.include(pm.response.code); });"
                 ]
               }
             }
@@ -3832,7 +4194,7 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('Verify the audit chain: HTTP 200', function () { pm.expect([200]).to.include(pm.response.code); });",
+                  "pm.test(\"Verify the audit chain: HTTP 200\", function () { pm.expect([200]).to.include(pm.response.code); });",
                   "pm.test('chain intact', function () { pm.expect(pm.response.json().ok).to.eql(true); });"
                 ]
               }
@@ -3884,7 +4246,7 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('Delete schedule: HTTP 200', function () { pm.expect([200]).to.include(pm.response.code); });"
+                  "pm.test(\"Delete schedule: HTTP 200\", function () { pm.expect([200]).to.include(pm.response.code); });"
                 ]
               }
             }
@@ -3929,7 +4291,7 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('Delete background run: HTTP 200 or 409', function () { pm.expect([200, 409]).to.include(pm.response.code); });"
+                  "pm.test(\"Delete background run: HTTP 200 or 409\", function () { pm.expect([200, 409]).to.include(pm.response.code); });"
                 ]
               }
             }
@@ -3974,7 +4336,7 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('Delete uploaded report: HTTP 200', function () { pm.expect([200]).to.include(pm.response.code); });"
+                  "pm.test(\"Delete uploaded report: HTTP 200\", function () { pm.expect([200]).to.include(pm.response.code); });"
                 ]
               }
             }
@@ -4019,7 +4381,7 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('Delete copied report: HTTP 200', function () { pm.expect([200]).to.include(pm.response.code); });"
+                  "pm.test(\"Delete copied report: HTTP 200\", function () { pm.expect([200]).to.include(pm.response.code); });"
                 ]
               }
             }
@@ -4064,7 +4426,7 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('Delete PM_ADMIN: HTTP 200', function () { pm.expect([200]).to.include(pm.response.code); });"
+                  "pm.test(\"Delete PM_ADMIN: HTTP 200\", function () { pm.expect([200]).to.include(pm.response.code); });"
                 ]
               }
             }
@@ -4109,7 +4471,7 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('Delete draft: HTTP 200', function () { pm.expect([200]).to.include(pm.response.code); });"
+                  "pm.test(\"Delete draft: HTTP 200\", function () { pm.expect([200]).to.include(pm.response.code); });"
                 ]
               }
             }
@@ -4153,7 +4515,7 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('Delete workspace folder: HTTP 200 or 409', function () { pm.expect([200, 409]).to.include(pm.response.code); });"
+                  "pm.test(\"Delete workspace folder: HTTP 200 or 409\", function () { pm.expect([200, 409]).to.include(pm.response.code); });"
                 ]
               }
             }
@@ -4199,7 +4561,7 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('Move the data adapter out of the folder: HTTP 200', function () { pm.expect([200]).to.include(pm.response.code); });"
+                  "pm.test(\"Move the data adapter out of the folder: HTTP 200\", function () { pm.expect([200]).to.include(pm.response.code); });"
                 ]
               }
             }
@@ -4243,7 +4605,7 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('Delete server folder with its reports: HTTP 200', function () { pm.expect([200]).to.include(pm.response.code); });"
+                  "pm.test(\"Delete server folder with its reports: HTTP 200\", function () { pm.expect([200]).to.include(pm.response.code); });"
                 ]
               }
             }
@@ -4287,7 +4649,7 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('Delete admin folder (already gone): HTTP 200 or 404', function () { pm.expect([200, 404]).to.include(pm.response.code); });"
+                  "pm.test(\"Delete admin folder (already gone): HTTP 200 or 404\", function () { pm.expect([200, 404]).to.include(pm.response.code); });"
                 ]
               }
             }
@@ -4332,7 +4694,7 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('Delete API key: HTTP 200', function () { pm.expect([200]).to.include(pm.response.code); });"
+                  "pm.test(\"Delete API key: HTTP 200\", function () { pm.expect([200]).to.include(pm.response.code); });"
                 ]
               }
             }
@@ -4377,7 +4739,7 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('Delete user: HTTP 200', function () { pm.expect([200]).to.include(pm.response.code); });"
+                  "pm.test(\"Delete user: HTTP 200\", function () { pm.expect([200]).to.include(pm.response.code); });"
                 ]
               }
             }
@@ -4422,7 +4784,7 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('Delete data adapter: HTTP 200', function () { pm.expect([200]).to.include(pm.response.code); });"
+                  "pm.test(\"Delete data adapter: HTTP 200\", function () { pm.expect([200]).to.include(pm.response.code); });"
                 ]
               }
             }
@@ -4466,7 +4828,7 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('Sign out: HTTP 200', function () { pm.expect([200]).to.include(pm.response.code); });"
+                  "pm.test(\"Sign out: HTTP 200\", function () { pm.expect([200]).to.include(pm.response.code); });"
                 ]
               }
             }

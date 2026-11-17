@@ -15,6 +15,7 @@ from backend.app.routers import (
     api_keys,
     connections,
     designer,
+    embed,
     generate,
     jobs,
     pages,
@@ -106,4 +107,5 @@ def make_app() -> FastAPI:
     system.register(app, ctx)
     generate.register(app, ctx)
     public_api.register(app, ctx)
+    embed.register(app, ctx)
     return app

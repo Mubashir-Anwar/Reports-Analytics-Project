@@ -68,7 +68,8 @@ def req(name: str, method: str, path: str, *, body=None, raw_body: str | None = 
         headers.append({"key": "Content-Type", "value": "application/json"})
     if raw_body is None and method in ("POST", "PUT", "DELETE"):
         raw_body = json.dumps(body if body is not None else {}, indent=2, ensure_ascii=False)
-    script = [f"pm.test('{name}: HTTP {' or '.join(map(str, expect))}', function () {{ pm.expect({list(expect)}).to.include(pm.response.code); }});"]
+    label = json.dumps(f"{name}: HTTP {' or '.join(map(str, expect))}")       # JSON quoting is valid JavaScript
+    script = [f"pm.test({label}, function () {{ pm.expect({list(expect)}).to.include(pm.response.code); }});"]
     for variable, expression in (save or {}).items():
         script.append(f"try {{ pm.environment.set('{variable}', {expression}); }} catch (e) {{ console.log('could not save {variable}', e); }}")
     if checks:
@@ -133,6 +134,7 @@ req("Render a design to PDF", "POST", "/api/admin/designer/render",
     body={"design": DESIGN, "columns": ["Name", "Amount"], "rows": [{"Name": "Ali", "Amount": 1}], "parameters": {}, "title": "Render", "format": "pdf"})
 req("Import a JRXML (Jaspersoft Studio)", "POST", "/api/admin/jrxml/import", body={"xml": JRXML})
 req("Create workspace folder", "POST", "/api/admin/workspace-folders", body={"path": "Postman"})
+req("Remove a draft left by an earlier run", "DELETE", f"/api/admin/workspace/{REPORT}", expect=(200, 404))
 req("Save draft PM_ORDERS", "PUT", f"/api/admin/workspace/{REPORT}?create=true", body=definition())
 req("List drafts", "GET", "/api/admin/workspace")
 req("Get draft", "GET", f"/api/admin/workspace/{REPORT}")
@@ -226,6 +228,25 @@ req("Signed link for a browser", "POST", "/api/v1/links", auth="key", body={"rep
     save={"signedLink": "pm.response.json().url.substring(1)"})          # the URL starts with "/"
 req("Open the signed link (no key)", "GET", "/{{signedLink}}", auth="none")
 req("Public OpenAPI description", "GET", "/api/v1/openapi.json", auth="none")
+
+folder("12b Embedding (a report inside the website's page)")
+req("Allow a website to embed (Admin)", "PUT", "/api/admin/api-keys/{{apiKeyId}}", body={"embedOrigins": ["https://portal.example.com"]})
+req("Embed token for the website's page (API key)", "POST", "/api/v1/embed-tokens", auth="key",
+    body={"report": REPORT, "parameters": {"Branch": "LHR"}, "onBehalfOf": "postman-visitor", "expiresInSeconds": 600},
+    save={"embedToken": "pm.response.json().token"})
+req("Viewer page (framed only by the listed website)", "GET", "/embed/view?token={{embedToken}}", auth="none",
+    checks="pm.test('framing limited to the website', function () { pm.expect(pm.response.headers.get('Content-Security-Policy')).to.include('frame-ancestors https://portal.example.com'); });")
+for title, method, path, body, expect in (
+        ("Viewer: report and its locked parameters", "GET", "/api/embed/report", None, (200,)),
+        ("Viewer: preview (the fixed Branch cannot be changed)", "POST", "/api/embed/preview", {"parameters": {"Branch": "KHI"}}, (200,)),
+        ("Viewer: download Excel", "POST", "/api/embed/run", {"format": "xlsx", "parameters": {}}, (200,))):
+    req(title, method, path, body=body, auth="none", expect=expect)
+    FOLDER[-1]["request"]["header"].append({"key": "X-Embed-Token", "value": "{{embedToken}}"})
+FOLDER[3]["event"][0]["script"]["exec"].append(
+    "pm.test('Branch is locked to LHR', function () { const b = pm.response.json().parameters.find(p => p.name === 'Branch'); pm.expect(b.locked).to.eql(true); pm.expect(b.value).to.eql('LHR'); });")
+FOLDER[4]["event"][0]["script"]["exec"].append(
+    "pm.test('only LHR rows', function () { pm.response.json().rows.forEach(r => pm.expect(r.Branch).to.eql('LHR')); });")
+req("SDK script for the website", "GET", "/assets/embed/sdk.js", auth="none")
 
 folder("13 Logs and audit (Admin)")
 req("Service log", "GET", "/api/admin/logs?lines=50")

@@ -1,0 +1,34 @@
+/* Embedded report viewer: neutral, compact, follows the visitor's light/dark setting. */
+:root {
+  color-scheme: light dark;
+  --bg: #ffffff; --panel: #f6f7fa; --ink: #16181f; --muted: #5d6475; --line: #e1e4ec; --accent: #3b5bdb; --accent-ink: #ffffff;
+  --ok: #1f7a4d; --bad: #b42335;
+}
+@media (prefers-color-scheme: dark) {
+  :root { --bg: #14161d; --panel: #1b1e27; --ink: #e8eaf1; --muted: #9ba2b4; --line: #2b3040; --accent: #8ea2ff; --accent-ink: #10131c; --ok: #6fd3a0; --bad: #ff8b97; }
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; background: var(--bg); color: var(--ink); font: 14px/1.5 system-ui, "Segoe UI", Roboto, sans-serif; }
+.mrs-main { padding: 16px; display: grid; gap: 12px; }
+.mrs-head h1, .mrs-empty h1 { font-size: 18px; margin: 0; }
+.mrs-muted { color: var(--muted); margin: 2px 0 0; }
+.mrs-form { display: flex; flex-wrap: wrap; gap: 10px 14px; align-items: flex-end; padding: 12px; background: var(--panel); border: 1px solid var(--line); border-radius: 10px; }
+.mrs-field { display: grid; gap: 4px; min-width: 160px; flex: 1 1 160px; }
+.mrs-field span { font-size: 12px; font-weight: 600; color: var(--muted); }
+.mrs-field small { color: var(--muted); font-size: 11px; }
+.mrs-field input, .mrs-field select { height: 36px; padding: 0 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--bg); color: var(--ink); font: inherit; }
+.mrs-locked { display: flex; align-items: center; height: 36px; padding: 0 10px; border: 1px dashed var(--line); border-radius: 8px; color: var(--muted); }
+.mrs-buttons { display: flex; flex-wrap: wrap; gap: 8px; }
+.mrs-buttons button { height: 36px; padding: 0 14px; border-radius: 8px; border: 1px solid var(--line); background: var(--bg); color: var(--ink); font: inherit; font-weight: 600; cursor: pointer; }
+.mrs-buttons button:hover { border-color: var(--accent); }
+.mrs-buttons .mrs-primary { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+.mrs-status { margin: 0; min-height: 1.5em; color: var(--muted); font-size: 13px; }
+.mrs-status.ok { color: var(--ok); } .mrs-status.error { color: var(--bad); }
+.mrs-table-wrap { overflow: auto; max-height: 70vh; border: 1px solid var(--line); border-radius: 10px; }
+.mrs-table { border-collapse: collapse; width: 100%; font-size: 13px; }
+.mrs-table th, .mrs-table td { padding: 7px 10px; border-bottom: 1px solid var(--line); text-align: left; white-space: nowrap; }
+.mrs-table th { position: sticky; top: 0; background: var(--panel); font-weight: 600; }
+.mrs-pdf { width: 100%; height: 75vh; border: 1px solid var(--line); border-radius: 10px; background: #fff; }
+.mrs-link { display: inline-block; margin-top: 6px; color: var(--accent); }
+.mrs-empty { padding: 24px 16px; } .mrs-empty p { color: var(--muted); }
+@media (max-width: 520px) { .mrs-main { padding: 10px; } .mrs-field { min-width: 100%; } }

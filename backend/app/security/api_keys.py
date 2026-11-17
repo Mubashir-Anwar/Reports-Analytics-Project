@@ -51,7 +51,7 @@ def save_keys(keys: list[dict[str, Any]]) -> None:
 def key_view(item: dict[str, Any]) -> dict[str, Any]:
     """What the admin page shows (never the hash)."""
     return {name: item.get(name) for name in ("id", "name", "folders", "allowedIps", "expiresAt", "disabled", "createdBy",
-                                               "createdAt", "lastUsedAt", "webhookUrl", "ratePerMinute")} | {
+                                               "createdAt", "lastUsedAt", "webhookUrl", "ratePerMinute", "embedOrigins")} | {
         "prefix": f"mrk_{item['id']}_…", "webhookSecretSet": bool(item.get("webhookSecret")), "rateLimit": rate_limit(item)}
 
 

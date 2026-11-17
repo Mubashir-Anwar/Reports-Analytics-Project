@@ -240,6 +240,31 @@ webhook URL and requests per minute). The key stays on the website's server: `X-
 * Every call is in the run log (channel `api`, actor = the key's name, `onBehalfOf` = the website's own user).
 * **Postman**: `postman/` has a collection for every endpoint and how to run it (see `postman/README.md`).
 
+## 7. Embedding: a report inside the client website's page
+
+1. **Admin → API keys → Embedding**: list the websites that may show reports for that key
+   (`https://portal.example.com`; scheme, host and port only).
+2. The website's **server** asks for a token for each page view (the API key never goes to a browser):
+   `POST /api/v1/embed-tokens` with `X-API-Key` and `{"report": "KFS_FAL", "parameters": {"Identifier": "123"},
+   "onBehalfOf": "customer-42", "expiresInSeconds": 900}` → `{"token": "emb_…"}`. The given parameters are
+   **fixed**: the viewer shows them locked and ignores other values for them. Tokens live 1 minute to 1 hour.
+3. The page shows it:
+
+   ```html
+   <script src="https://reports.example.com/assets/embed/sdk.js"></script>
+   <mrs-report token="emb_…"></mrs-report>
+   ```
+
+   (or an `<iframe src="https://reports.example.com/embed/view?token=emb_…">`). The viewer shows the open parameters,
+   a preview (first 200 rows), the PDF inline and Excel/CSV downloads; the frame follows its content's height.
+   Events on the element: `mrs-ready`, `mrs-ran`, `mrs-error`; methods `run("pdf")`, `preview()`, `setToken(…)`.
+   A complete example page: `tools/embed/example.html`.
+
+Safety: the viewer page may only be framed by the listed websites (`Content-Security-Policy: frame-ancestors …`;
+every other page of the service stays unframeable). Each use checks the key again (enabled, not expired, folders,
+requests per minute); changing or deleting the key ends its embedded reports at once. Every preview and download
+is in the run log with channel `embed`, the key's name and `onBehalfOf`; issuing a token is in the audit trail.
+
 ## Docker
 
 The image is built from a clean checkout; it builds the React pages itself and contains **no** `data/`

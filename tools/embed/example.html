@@ -1,0 +1,38 @@
+<!doctype html>
+<!--
+  Example: show a report from the reporting server inside a client website's page.
+
+  1. Admin → API keys: create a key for the website and, under "Embedding", list the website (e.g. https://portal.example.com).
+  2. On the WEBSITE'S SERVER (never in the browser — the API key must stay secret), ask for a token per page view:
+
+       POST https://reports.example.com/api/v1/embed-tokens
+       X-API-Key: mrk_…
+       {"report": "KFS_FAL", "parameters": {"Identifier": "123", "ProductCode": "CAR"}, "onBehalfOf": "customer-42", "expiresInSeconds": 900}
+       → {"token": "emb_…", "expiresAt": "…"}
+
+     The given parameters are fixed (the visitor sees them locked). Leave out the ones the visitor may choose.
+  3. Put the token in the page (below). Replace the two REPLACE_… values.
+-->
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>My report</title>
+  <script src="https://REPLACE_REPORTING_SERVER/assets/embed/sdk.js"></script>
+</head>
+<body>
+  <h1>Your letter</h1>
+
+  <mrs-report id="report" token="REPLACE_WITH_THE_TOKEN_FROM_YOUR_SERVER" height="600"></mrs-report>
+
+  <!-- Optional: your own buttons and the viewer's events -->
+  <button type="button" onclick="document.getElementById('report').run('pdf')">PDF</button>
+  <button type="button" onclick="document.getElementById('report').run('xlsx')">Excel</button>
+  <script>
+    const report = document.getElementById('report');
+    report.addEventListener('mrs-ready', (e) => console.log('report shown', e.detail));   // {reportId, title}
+    report.addEventListener('mrs-ran', (e) => console.log('ran', e.detail));               // {action, format, rows}
+    report.addEventListener('mrs-error', (e) => console.warn('report error', e.detail));   // {message}: e.g. the token expired → ask your server for a new one and call report.setToken(newToken)
+  </script>
+</body>
+</html>
