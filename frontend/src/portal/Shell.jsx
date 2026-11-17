@@ -1,24 +1,8 @@
-/** Top bar shared by the React /server and /admin pages. On phones the links fold into a menu button. */
-import { useState } from 'react';
-import { useAllowedApps } from '../shared/AppSwitcher.jsx';
-import ThemeToggle from '../shared/ThemeToggle.jsx';
+/** Top bar of the React /server and /admin pages: the shared Folio Reports navigation bar. */
+import NavBar from '../shared/NavBar.jsx';
 
-export function Topbar({ current, subtitle, children }) {
-  const [open, setOpen] = useState(false);
-  const { apps } = useAllowedApps(); // only the parts this account may open
-  const links = apps.map((app) => [app.href, app.href === '/server' ? 'Server' : app.label]);
-  return (
-    <header className={`topbar ${open ? 'open' : ''}`}>
-      <a className="brand" href="/"><span className="brand-mark">M</span><span>Mongo Reports<small>{subtitle}</small></span></a>
-      <button type="button" className="nav-toggle" aria-expanded={open} aria-controls="main-nav" aria-label="Menu" onClick={() => setOpen(!open)}>{open ? '✕' : '☰'}</button>
-      <nav className="nav" id="main-nav" aria-label="Main navigation">
-        {links.map(([href, label]) => (
-          <a key={href} href={href} className={href === current ? 'on' : ''} aria-current={href === current ? 'page' : undefined}>{label}</a>
-        ))}
-      </nav>
-      <div className="topbar-side">{children}<ThemeToggle /></div>
-    </header>
-  );
+export function Topbar({ current, children }) {
+  return <NavBar current={current}>{children}</NavBar>;
 }
 
 /** A status line: { text, kind: '' | 'ok' | 'error' | 'warn' } or null. */

@@ -12,8 +12,7 @@ import DatasetQueryDialog from './DatasetQueryDialog.jsx';
 import SourceView from './SourceView.jsx';
 import ErrorDialog from './ErrorDialog.jsx';
 import TableEditor from './TableEditor.jsx';
-import AppSwitcher from './shared/AppSwitcher.jsx';
-import ThemeToggle from './shared/ThemeToggle.jsx';
+import NavBar from './shared/NavBar.jsx';
 import TemplateGallery from './TemplateGallery.jsx';
 import { AdaptersPanel, Outline, Palette, ServerPanel, WorkspacePanel, publishState } from './panels.jsx';
 import { ZOOM_LIMITS, bandWidth, clampZoom, emptyDesign, findElement, getBand, setBand } from './designModel.js';
@@ -387,11 +386,10 @@ export default function App() {
   const { report, design, selection, tool, past, future, dirty } = state;
   return (
     <div className="app">
+      <NavBar current="/designer" />
       <header className="toolbar">
         <button type="button" className="btn drawer-btn" aria-label="Reports, adapters and outline" aria-expanded={drawer === 'left'} onClick={() => setDrawer(drawer === 'left' ? null : 'left')}>☰</button>
-        <span className="brand"><span className="brand-mark">M</span><span className="lbl">Report Designer</span></span>
-        <AppSwitcher current="/designer" />
-        <span className="doc-title" title={report.title || 'Untitled'}>{report.title || 'Untitled'}{dirty ? ' •' : ''}</span>
+        <span className="doc-title" title={`${report.title || 'Untitled'}${report.folder ? ` — ${report.folder}` : ''}`}>📄 {report.title || 'Untitled'}{dirty ? ' •' : ''}{report.folder && <small className="hide-narrow">in {report.folder}</small>}</span>
         <div className="spacer" />
         <label className="btn" title="Open a .mrd report file, or import a Jaspersoft Studio .jrxml">📂<span className="lbl"> Open file…</span>
           <input type="file" accept={MRD_ACCEPT} hidden onChange={(e) => { openFile(e.target.files[0]); e.target.value = ''; }} />
@@ -408,7 +406,6 @@ export default function App() {
         {(() => { const s = report.isNew ? { icon: '○', label: 'Not saved yet', cls: 'draft' } : publishState(report.status); return <span className={`pub-chip ${s.cls}`} title={s.label}>{s.icon} {report.isNew ? 'Not saved' : s.cls === 'published' ? 'Published' : s.cls === 'changed' ? 'Changed' : 'Draft'}</span>; })()}
         <button className="btn" onClick={save} title="Save in your designer workspace (Ctrl+S). The server is not changed.">Save</button>
         <button className="btn primary" onClick={startPublish} title="Copy this report to a folder on the report server">⇪<span className="lbl"> Publish</span></button>
-        <ThemeToggle />
         <button type="button" className="btn drawer-btn" aria-label="Palette and properties" aria-expanded={drawer === 'right'} onClick={() => setDrawer(drawer === 'right' ? null : 'right')}>⚙</button>
       </header>
 

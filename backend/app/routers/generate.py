@@ -73,7 +73,7 @@ def register(app: FastAPI, ctx: SimpleNamespace) -> None:
             definition = reports_by_id.get(report_id)
             if definition is None or not report_in_scope(request, definition):
                 definition = None                      # a report outside the caller's folders looks like a missing one
-                raise HTTPException(status_code=404, detail="Report ID is not registered")
+                raise ctx.unknown_report(request, report_id)
             enabled_formats = (definition.editor_config or {}).get("formats", sorted(OUTPUT_FORMATS))
             if output_format not in enabled_formats:
                 raise HTTPException(status_code=400, detail=f"The {output_format.upper()} format is not enabled for this report")

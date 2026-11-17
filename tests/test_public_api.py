@@ -102,3 +102,18 @@ def test_public_openapi(site):
     assert "/api/v1/reports/{report_id}/run" in spec["paths"] and "/generate/{report_file}" in spec["paths"]
     assert not any(path.startswith("/api/admin") for path in spec["paths"])
     assert spec["components"]["securitySchemes"]["ApiKey"]["name"] == "X-API-Key"
+
+
+def test_report_data_as_json(site):
+    """For a system that wants the records, not a file: pages of JSON rows."""
+    first = site.post("/api/v1/reports/P1/data", headers=site.key_headers, json={"parameters": {"Branch": "LHR"}, "limit": 1})
+    assert first.status_code == 200, first.text
+    body = first.json()
+    assert body["columns"] == ["Name"] and body["rows"] == [{"Name": "a"}] and body["total"] == 2 and body["more"] is True
+    second = site.post("/api/v1/reports/P1/data", headers=site.key_headers, json={"parameters": {"Branch": "LHR"}, "limit": 1, "offset": 1}).json()
+    assert second["rows"] == [{"Name": "b"}] and second["more"] is False
+    run = get_records().runs(reportId="P1")[0]
+    assert run["format"] == "json" and run["channel"] == "api" and run["actor"] == "Portal" and run["rowCount"] == 2
+    assert site.post("/api/v1/reports/P1/data", headers=site.key_headers, json={"parameters": {"Branch": "ISB"}}).status_code == 422
+    assert site.post("/api/v1/reports/P1/data", headers=site.key_headers, json={"parameters": {"Branch": "LHR"}, "limit": 0}).status_code == 422
+    assert site.post("/api/v1/reports/HR1/data", headers=site.key_headers, json={}).status_code == 404

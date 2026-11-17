@@ -12,6 +12,7 @@ from backend.app.constants import SERVICE_VERSION
 from backend.app.context import create_context
 from backend.app.logs import HTTP_LOG
 from backend.app.routers import (
+    admin_tools,
     api_keys,
     connections,
     designer,
@@ -108,4 +109,5 @@ def make_app() -> FastAPI:
     generate.register(app, ctx)
     public_api.register(app, ctx)
     embed.register(app, ctx)
+    admin_tools.register(app, ctx)
     return app

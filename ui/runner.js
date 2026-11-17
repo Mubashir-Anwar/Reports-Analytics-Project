@@ -48,7 +48,11 @@ function makeReportItem(report) {
   const detail = document.createElement('small');
   const parameterCount = (report.parameters || []).length;
   detail.textContent = `${parameterCount} question${parameterCount === 1 ? '' : 's'} · ${(report.formats || []).map((format) => format.toUpperCase()).join(', ') || 'CSV'}`;
-  content.append(title, detail);
+  const id = document.createElement('code');
+  id.className = 'report-item-id';
+  id.textContent = report.id;
+  id.title = 'Report ID: use it in links, e.g. /generate/' + report.id + '.pdf';
+  content.append(title, detail, id);
   const arrow = document.createElement('span');
   arrow.className = 'report-item-arrow';
   arrow.textContent = '›';
@@ -56,6 +60,16 @@ function makeReportItem(report) {
   button.append(icon, content, arrow);
   button.addEventListener('click', () => selectReport(report));
   return button;
+}
+
+function readClosedFolders() {
+  try { return JSON.parse(localStorage.getItem('runner-closed-folders') || '[]'); } catch { return []; }
+}
+
+function saveClosedFolder(folder, isClosed) {
+  const closed = new Set(readClosedFolders());
+  if (isClosed) closed.add(folder); else closed.delete(folder);
+  try { localStorage.setItem('runner-closed-folders', JSON.stringify([...closed])); } catch { /* private mode */ }
 }
 
 function renderCatalog() {
@@ -81,11 +95,21 @@ function renderCatalog() {
     grouped.get(folder).push(report);
   }
   const fragment = document.createDocumentFragment();
+  const closed = readClosedFolders();
   for (const [folder, items] of [...grouped.entries()].sort(([left], [right]) => left.localeCompare(right))) {
-    const section = document.createElement('section');
+    const section = document.createElement('details');
     section.className = 'runner-folder-group';
-    const heading = document.createElement('h3');
-    heading.textContent = folder.replaceAll('/', '  /  ');
+    section.open = Boolean(needle) || !closed.includes(folder);
+    const heading = document.createElement('summary');
+    heading.innerHTML = '<svg class="folder-icon" viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path d="M3 7.5A2.5 2.5 0 0 1 5.5 5H9l2 2h7.5A2.5 2.5 0 0 1 21 9.5v8A2.5 2.5 0 0 1 18.5 20h-13A2.5 2.5 0 0 1 3 17.5z" fill="currentColor"/></svg>';
+    const name = document.createElement('span');
+    name.className = 'folder-name';
+    name.textContent = folder.split('/').join(' / ');
+    const count = document.createElement('span');
+    count.className = 'folder-count';
+    count.textContent = String(items.length);
+    heading.append(name, count);
+    section.addEventListener('toggle', () => { if (!needle) saveClosedFolder(folder, !section.open); });
     section.append(heading, ...items.map(makeReportItem));
     fragment.append(section);
   }
@@ -304,6 +328,15 @@ fetch('/health', { headers: { Accept: 'application/json' }, cache: 'no-store' })
 
 loadReports();
 
+// Phone menu of the navigation bar; the account menu closes when clicking elsewhere.
+document.querySelector('[data-nav-toggle]')?.addEventListener('click', (event) => {
+  const open = document.getElementById('fx-nav').classList.toggle('open');
+  event.currentTarget.textContent = open ? '✕' : '☰';
+});
+document.addEventListener('click', (event) => {
+  document.querySelectorAll('details.fx-user[open]').forEach((menu) => { if (!menu.contains(event.target)) menu.open = false; });
+});
+
 // Show only the parts this account may open (the server refuses the others anyway).
 fetch('/api/server/me', { credentials: 'same-origin', cache: 'no-store' })
   .then((response) => (response.ok ? response.json() : null))
@@ -311,5 +344,9 @@ fetch('/api/server/me', { credentials: 'same-origin', cache: 'no-store' })
     if (!me) return;
     document.querySelectorAll('[data-right]').forEach((link) => { link.hidden = !me.rights.includes(link.dataset.right); });
     document.querySelectorAll('[data-signout]').forEach((button) => { button.hidden = false; });
+    const initials = me.username.split(/[\s._-]+/).filter(Boolean).slice(0, 2).map((part) => part[0]).join('').toUpperCase() || '?';
+    document.querySelectorAll('[data-initials]').forEach((node) => { node.textContent = initials; });
+    document.querySelectorAll('[data-username]').forEach((node) => { node.textContent = me.username; });
+    document.querySelectorAll('[data-user]').forEach((node) => { node.hidden = false; });
   })
   .catch(() => {});

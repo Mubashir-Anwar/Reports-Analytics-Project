@@ -1,3 +1,4 @@
+import { FolderIcon, NewFolderDialog } from './shared/folders.jsx';
 import { useEffect, useMemo, useState } from 'react';
 import { api } from './api.js';
 import { AdapterOptions, AdapterWizard, DbLogo } from './shared/adapters.jsx';
@@ -60,15 +61,13 @@ export function ServerPanel({ report, onOpenFromServer, notify, refreshKey, onCh
     return parent ? path.startsWith(`${parent}/`) && depth === parent.split('/').length + 1 : depth === 1;
   });
 
-  const createFolder = async (parent) => {
-    const name = window.prompt(parent ? `New folder inside ${parent}` : 'Name of the new top-level folder (for example cascade)');
-    if (!name) return;
-    const path = parent ? `${parent}/${name.trim()}` : name.trim();
-    try {
-      await api.createFolder(path);
-      if (parent && collapsed[parent]) toggle(parent);
-      await load(); notify(`Folder ${path} created`, 'ok');
-    } catch (error) { notify(error.message, 'error'); }
+  const [newFolder, setNewFolder] = useState(null); // parent while the New folder dialog is open
+  const createFolder = (parent) => setNewFolder(parent || '');
+  const saveNewFolder = async (path) => {
+    await api.createFolder(path);
+    const parent = path.split('/').slice(0, -1).join('/');
+    if (parent && collapsed[parent]) toggle(parent);
+    await load(); notify(`Folder /${path} created on the server`, 'ok');
   };
   const deleteFolder = async (path) => {
     try {
@@ -134,7 +133,7 @@ export function ServerPanel({ report, onOpenFromServer, notify, refreshKey, onCh
     return (
       <li key={path}>
         <div className="tree-row folder" style={{ paddingLeft: 6 + depth * 14 }} onClick={() => toggle(path)} onContextMenu={folderMenu(path)} title={`${path} — right-click for actions`}>
-          <span className="node-label"><span className="caret">{empty ? '' : isOpen ? '▾' : '▸'}</span>{isOpen && !empty ? '📂' : '📁'} {path.split('/').pop()}</span>
+          <span className="node-label"><span className="caret">{empty ? '' : isOpen ? '▾' : '▸'}</span><FolderIcon open={isOpen && !empty} /> {path.split('/').pop()}</span>
           <span className="node-actions" onClick={(e) => e.stopPropagation()}>
             <button className="icon" title="New…" onClick={(e) => { e.stopPropagation(); setMenu(menu === path ? '' : path); }}>＋</button>
             {path !== 'General' && <button className="icon" title="Delete folder" onClick={() => deleteFolder(path)}>✕</button>}
@@ -194,6 +193,7 @@ export function ServerPanel({ report, onOpenFromServer, notify, refreshKey, onCh
           )}
         </li>
       </ul>
+      {newFolder !== null && <NewFolderDialog folders={allFolders} parent={newFolder} onCreate={saveNewFolder} onClose={() => setNewFolder(null)} title="New folder on the server" />}
       <p className="hint">This is the report server: only published reports are here. Click a 🌐 report to open it in your workspace; publish changes with “Publish to server”. Click a data adapter to test it.</p>
     </div>
   );
@@ -232,12 +232,10 @@ export function WorkspacePanel({ report, onOpen, onNew, notify, refreshKey, onCh
     const depth = path.split('/').length;
     return parent ? path.startsWith(`${parent}/`) && depth === parent.split('/').length + 1 : depth === 1;
   });
-  const createFolder = async (parent) => {
-    const name = window.prompt(parent ? `New workspace folder inside ${parent}` : 'Name of the new workspace folder');
-    if (!name) return;
-    const path = parent ? `${parent}/${name.trim()}` : name.trim();
-    try { await api.createWorkspaceFolder(path); await load(); notify(`Folder ${path} created in your workspace`, 'ok'); } catch (error) { notify(error.message, 'error'); }
-  };
+  const [newFolder, setNewFolder] = useState(null);
+  const [find, setFind] = useState('');
+  const createFolder = (parent) => setNewFolder(parent || '');
+  const saveNewFolder = async (path) => { await api.createWorkspaceFolder(path); await load(); notify(`Folder /${path} created in your workspace`, 'ok'); };
   const deleteFolder = async (path) => {
     if (!window.confirm(`Delete the empty workspace folder '${path}'?`)) return;
     try { await api.deleteWorkspaceFolder(path); await load(); notify('Folder deleted', 'ok'); } catch (error) { notify(error.message, 'error'); }
@@ -250,13 +248,14 @@ export function WorkspacePanel({ report, onOpen, onNew, notify, refreshKey, onCh
 
   const folderNode = (path, depth) => {
     const subfolders = childrenOf(path);
-    const items = reports.filter((r) => (r.folder || 'General') === path);
+    const needle = find.trim().toLowerCase();
+    const items = reports.filter((r) => (r.folder || 'General') === path && (!needle || `${r.title} ${r.id}`.toLowerCase().includes(needle)));
     const empty = !subfolders.length && !items.length;
     const isOpen = !collapsed[path];
     return (
       <li key={path}>
         <div className="tree-row folder" style={{ paddingLeft: 6 + depth * 14 }} onClick={() => toggle(path)} title={path}>
-          <span className="node-label"><span className="caret">{empty ? '' : isOpen ? '▾' : '▸'}</span>{isOpen && !empty ? '📂' : '📁'} {path.split('/').pop()}</span>
+          <span className="node-label"><span className="caret">{empty ? '' : isOpen ? '▾' : '▸'}</span><FolderIcon open={isOpen && !empty} /> {path.split('/').pop()}</span>
           <span className="node-actions" onClick={(e) => e.stopPropagation()}>
             <button className="icon" title="New report in this folder" onClick={() => onNew(path)}>＋</button>
             <button className="icon" title="New subfolder" onClick={() => createFolder(path)}>📁</button>
@@ -288,7 +287,9 @@ export function WorkspacePanel({ report, onOpen, onNew, notify, refreshKey, onCh
         <button className="btn sm" onClick={() => createFolder('')}>+ Folder</button>
         <button className="btn sm" onClick={load} title="Refresh">↻</button>
       </div>
+      <input type="search" className="panel-find" placeholder="⌕  Find a report" value={find} onChange={(e) => setFind(e.target.value)} />
       <ul className="tree repo">{childrenOf('').map((path) => folderNode(path, 0))}</ul>
+      {newFolder !== null && <NewFolderDialog folders={allFolders} parent={newFolder} onCreate={saveNewFolder} onClose={() => setNewFolder(null)} title="New folder in my workspace" />}
       <p className="hint"><b>My workspace:</b> Save (Ctrl+S) keeps reports here only. <span className="pub draft">●</span> draft · <span className="pub published">✓</span> published · <span className="pub changed">✎</span> changed since publish. Use “Publish to server” to put a report on the server.</p>
     </div>
   );
@@ -382,7 +383,7 @@ export function AdaptersPanel({ notify, refreshKey, onChanged, openMenu }) {
               {groups.map((folder) => (
                 <li key={folder}>
                   <div className="tree-row folder" style={{ paddingLeft: 20 }} onClick={() => toggle(folder)} onContextMenu={menu(() => rootMenu(folder))} title={folder}>
-                    <span className="node-label"><span className="caret">{collapsed[folder] ? '▸' : '▾'}</span>{collapsed[folder] ? '📁' : '📂'} {folder.split('/').join(' / ')}</span>
+                    <span className="node-label"><span className="caret">{collapsed[folder] ? '▸' : '▾'}</span><FolderIcon open={!collapsed[folder]} /> {folder.split('/').join(' / ')}</span>
                   </div>
                   {!collapsed[folder] && <ul className="tree nested flat">{list.filter((a) => a.folder === folder).sort((a, b) => a.name.localeCompare(b.name)).map((item) => row(item, 2))}</ul>}
                 </li>

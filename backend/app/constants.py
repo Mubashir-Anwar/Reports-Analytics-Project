@@ -39,3 +39,6 @@ COLLECTION_PARAM_VALUE = re.compile(r"^[A-Za-z0-9_\-]{1,64}$")
 REPORT_ID_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]{0,79}$")
 CONNECTION_ID_PATTERN = re.compile(r"^[a-z0-9][a-z0-9_-]{0,39}$")
 ENV_KEY_PATTERN = re.compile(r"^[A-Z][A-Z0-9_]{0,63}$")
+
+# The product name shown on pages and in the Postman environment (frontend: src/shared/brand.js).
+BRAND_NAME = "Folio Reports"

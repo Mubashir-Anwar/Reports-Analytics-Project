@@ -2,6 +2,9 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import ContextMenu from '../ContextMenu.jsx';
 import { confirmFolderDelete } from '../folderDelete.js';
 import { Notice, Topbar, downloadBlob } from '../portal/Shell.jsx';
+import { BRAND } from '../shared/brand.js';
+import { Logo } from '../shared/NavBar.jsx';
+import { Breadcrumbs, FolderTree, NewFolderDialog, SubfolderTiles } from '../shared/folders.jsx';
 import PermissionsDialog from './PermissionsDialog.jsx';
 import ResourcePanel from './ResourcePanel.jsx';
 import { RunsList, SchedulesList } from './Schedules.jsx';
@@ -30,8 +33,8 @@ function LoginForm({ onSignedIn, message }) {
   return (
     <div className="login-wrap">
       <form className="card login" onSubmit={submit} autoComplete="on">
-        <span className="brand-mark" aria-hidden="true">M</span>
-        <div><p className="eyebrow">Mongo Reports</p><h1>Sign in</h1><p className="muted">One sign-in for the Designer, Report Server, Analytics, Run reports and Admin. You see the parts your account has rights for.</p></div>
+        <Logo size={52} className="login-logo" />
+        <div><p className="eyebrow">{BRAND.name}</p><h1>Sign in</h1><p className="muted">One sign-in for the Designer, Report Server, Analytics, Run reports and Admin. You see the parts your account has rights for.</p></div>
         <label className="field"><span>Username</span><input name="username" autoComplete="username" value={username} onChange={(e) => setUsername(e.target.value)} required autoFocus /></label>
         <label className="field"><span>Password</span><input name="password" type="password" autoComplete="current-password" value={password} onChange={(e) => setPassword(e.target.value)} required /></label>
         <Notice message={error} />
@@ -61,6 +64,7 @@ function Repository({ user, onUser }) {
   const [permFolder, setPermFolder] = useState(null); // folder whose Permissions dialog is open ('' = root)
   const [scheduleInfo, setScheduleInfo] = useState(null);
   const [runsVersion, setRunsVersion] = useState(0);
+  const [newFolder, setNewFolder] = useState(null); // parent path while the New folder dialog is open
   useEffect(() => { serverApi.scheduleInfo().then(setScheduleInfo).catch(() => setScheduleInfo(null)); }, []);
   const showMessage = useCallback((m) => setMessage(m), []);
   const designer = roleAtLeast(user, 'designer');
@@ -85,7 +89,8 @@ function Repository({ user, onUser }) {
   const inFolder = (r, path) => r.folder === path || r.folder.startsWith(`${path}/`);
   const visible = useMemo(() => {
     const needle = search.trim().toLowerCase();
-    return reports.filter((r) => (!folder || inFolder(r, folder)) && (!needle || `${r.title} ${r.id} ${r.description}`.toLowerCase().includes(needle)));
+    // a folder shows its own reports (subfolders are tiles); searching looks inside the subfolders too
+    return reports.filter((r) => (!folder || (needle ? inFolder(r, folder) : r.folder === folder)) && (!needle || `${r.title} ${r.id} ${r.description}`.toLowerCase().includes(needle)));
   }, [reports, folder, search]);
 
   const done = async (text, select) => {
@@ -102,12 +107,9 @@ function Repository({ user, onUser }) {
   };
 
   /* ---------- actions */
-  const createFolder = async (parent = folder) => {
-    const name = window.prompt(parent ? `New folder inside ${parent}` : 'Name of the new folder');
-    if (!name?.trim()) return;
-    const path = parent ? `${parent}/${name.trim()}` : name.trim();
-    try { await serverApi.createFolder(path); setFolder(path); await done(`Folder ${path} created.`); } catch (error) { fail(error); }
-  };
+  const createFolder = (parent = folder) => setNewFolder(parent);
+  const saveNewFolder = async (path) => { await serverApi.createFolder(path); setFolder(path); await done(`Folder /${path} created.`); };
+  const countIn = (path) => reports.filter((r) => inFolder(r, path)).length;
   const deleteFolder = async (path = folder) => {
     try {
       const answer = confirmFolderDelete(path, await serverApi.folderContents(path));
@@ -210,25 +212,34 @@ function Repository({ user, onUser }) {
         <aside className="card" onContextMenu={showMenu(folderMenu(''))}>
           <div className="card-head"><div><p className="eyebrow">Folders</p><h2>Repository</h2></div>{designer && <button className="btn sm quiet" onClick={() => createFolder()}>+ Folder</button>}</div>
           <input type="search" placeholder="⌕  Find a report" value={search} onChange={(e) => setSearch(e.target.value)} style={{ marginBottom: 10 }} />
-          <ul className="tree">
-            <li><button className={folder === '' ? 'on' : ''} onClick={() => setFolder('')} onContextMenu={showMenu(folderMenu(''))}>🗄 All reports<span className="count">{reports.length}</span></button></li>
-            {folders.map((path) => (
-              <li key={path}><button className={folder === path ? 'on' : ''} style={{ paddingLeft: 8 + path.split('/').length * 14 }} onClick={() => setFolder(path)} onContextMenu={showMenu(folderMenu(path))} title={path}>{folder === path ? '📂' : '📁'} {path.split('/').pop()}<span className="count">{reports.filter((r) => inFolder(r, path)).length}</span></button></li>
-            ))}
-          </ul>
+          <FolderTree folders={folders} selected={folder} onSelect={setFolder} count={countIn} rootCount={reports.length}
+            onMenu={(event, path) => showMenu(folderMenu(path))(event)} storageKey="server-folders-open" />
         </aside>
         <section className="card" onContextMenu={showMenu(folderMenu(folder))}>
           <div className="card-head">
-            <div><p className="eyebrow">/ {folder ? folder.split('/').join(' / ') : ''}</p><h2>{folder ? folder.split('/').pop() : 'All reports'}</h2></div>
+            <div><Breadcrumbs path={folder} onSelect={setFolder} /><h2>{folder ? folder.split('/').pop() : 'All reports'}</h2></div>
             <div className="row">
+              {designer && canManageFolder(folder) && <button className="btn sm" onClick={() => createFolder(folder)} title={folder ? `New folder inside /${folder}` : 'New top-level folder'}>+ Folder</button>}
               {designer && clipboard && <button className="btn sm" onClick={() => paste(folder)} title="Paste here">📋 Paste</button>}
               {admin && <button className="btn sm" onClick={() => setPermFolder(folder)} title="Who may see, run or change this folder">🔒 Permissions</button>}
               {admin && folder && folder !== 'General' && <button className="btn danger sm" onClick={() => deleteFolder()}>Delete folder</button>}
             </div>
           </div>
+          {!search.trim() && <SubfolderTiles folders={folders} parent={folder} count={countIn} onOpen={setFolder} onMenu={(event, path) => showMenu(folderMenu(path))(event)} />}
           <div className="stack">
             {loading && <div className="empty">Loading…</div>}
-            {!loading && !visible.length && <div className="empty">{reports.length ? 'No published reports here.' : 'Nothing is published yet. Open the Designer, save a report and use “Publish to server”, or Add Resource → upload a .mrd file.'}</div>}
+            {!loading && !visible.length && (
+              <div className="empty">
+                {!reports.length ? 'Nothing is published yet. Open the Designer, save a report and use “Publish to server”, or Add Resource → upload a .mrd file.'
+                  : search.trim() ? `No report matches “${search.trim()}”${folder ? ` in /${folder}` : ''}.` : folder ? 'No reports directly in this folder.' : 'No reports.'}
+                {designer && folder && !search.trim() && canManageFolder(folder) && (
+                  <div className="row" style={{ justifyContent: 'center', marginTop: 10 }}>
+                    <button className="btn sm" onClick={() => setUploading(true)}>⤒ Add a report here</button>
+                    <button className="btn sm" onClick={() => createFolder(folder)}>+ Subfolder</button>
+                  </div>
+                )}
+              </div>
+            )}
             {visible.map((r) => (
               <button
                 key={r.id}
@@ -251,6 +262,7 @@ function Repository({ user, onUser }) {
           : <section className="card resource hide-mobile" style={{ textAlign: 'center', padding: '48px 18px' }}><div style={{ fontSize: 30, opacity: 0.5 }}>▤</div><h2>Choose a report</h2><p className="muted">Run it, or check its parameters, data source, query and history. Right-click for more.</p></section>}
       </div>}
       <ContextMenu menu={menu} onClose={() => setMenu(null)} />
+      {newFolder !== null && <NewFolderDialog folders={folders} parent={newFolder} onCreate={saveNewFolder} onClose={() => setNewFolder(null)} title="New folder on the server" />}
       {permFolder !== null && <PermissionsDialog folder={permFolder} onClose={() => setPermFolder(null)} onSaved={load} />}
       {uploading && (
         <UploadDialog folders={folders} folder={folder} onClose={() => setUploading(false)}
@@ -284,16 +296,9 @@ export default function ServerApp() {
   }, []);
   const keepUser = useCallback((next) => setUser((current) => (current && next && current.username === next.username && current.role === next.role ? current : next)), []);
 
-  const logout = async () => {
-    try { await serverApi.logout(); } catch { /* signed out anyway */ }
-    window.location.assign('/login');
-  };
-
   return (
     <>
-      <Topbar current="/server" subtitle="Report Server">
-        {user && (<><span className="who">Signed in as <b>{user.username}</b> <span className="chip">{user.role}</span></span><button className="btn sm" onClick={logout} title={`Sign out ${user.username}`}>Sign out</button></>)}
-      </Topbar>
+      <Topbar current="/server" />
       {user === undefined && <div className="login-wrap"><p className="muted">Checking your session…</p></div>}
       {user === null && <LoginForm key={loginMessage?.text || 'login'} message={loginMessage} onSignedIn={(u) => { setLoginMessage(null); if (!leaveLogin(u)) setUser(u); }} />}
       {user && <Repository user={user} onUser={keepUser} />}

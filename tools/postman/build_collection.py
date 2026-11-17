@@ -215,9 +215,18 @@ folder("12 Public API v1 (API key)")
 req("Who am I (key)", "GET", "/api/v1/whoami", auth="key",
     checks="pm.test('is the Postman key', function () { pm.expect(pm.response.json().name).to.eql('Postman site'); });")
 req("Reports the key may run", "GET", "/api/v1/reports", auth="key")
+req("Wrong report ID: the answer names the right one", "GET", "/generate/ORDERS_PM.csv", auth="key", expect=(404,),
+    checks="pm.test('suggests PM_ORDERS', function () { pm.expect(pm.response.json().detail).to.include('Did you mean PM_ORDERS'); });")
 req("One report with parameters", "GET", f"/api/v1/reports/{REPORT}", auth="key")
 req("Run now (JSON in, file out)", "POST", f"/api/v1/reports/{REPORT}/run", auth="key",
     body={"format": "csv", "parameters": {"Branch": "LHR", "CNIC": "4220112345671"}, "onBehalfOf": "postman-user"})
+req("Report data as JSON (page 1)", "POST", f"/api/v1/reports/{REPORT}/data", auth="key",
+    body={"parameters": {"Branch": "KHI"}, "limit": 1, "offset": 0},
+    checks="pm.test('JSON rows with paging', function () { const b = pm.response.json(); pm.expect(b.columns).to.include('Name'); "
+           "pm.expect(b.rows.length).to.eql(1); pm.expect(b.total).to.eql(2); pm.expect(b.more).to.eql(true); pm.expect(b.rows[0].Branch).to.eql('KHI'); });")
+req("Report data as JSON (page 2)", "POST", f"/api/v1/reports/{REPORT}/data", auth="key",
+    body={"parameters": {"Branch": "KHI"}, "limit": 1, "offset": 1},
+    checks="pm.test('last page', function () { pm.expect(pm.response.json().more).to.eql(false); });")
 req("Wrong parameter value is refused", "POST", f"/api/v1/reports/{REPORT}/run", auth="key", body={"format": "csv", "parameters": {"Branch": "XYZ"}},
     expect=(422,))
 req("Start a background job", "POST", f"/api/v1/reports/{REPORT}/jobs", auth="key", body={"format": "xlsx", "parameters": {"Branch": "KHI"}},
@@ -248,7 +257,13 @@ FOLDER[4]["event"][0]["script"]["exec"].append(
     "pm.test('only LHR rows', function () { pm.response.json().rows.forEach(r => pm.expect(r.Branch).to.eql('LHR')); });")
 req("SDK script for the website", "GET", "/assets/embed/sdk.js", auth="none")
 
-folder("13 Logs and audit (Admin)")
+folder("13 Logs, audit and system (Admin)")
+req("System database (where the service keeps its data)", "GET", "/api/admin/system-db",
+    checks="pm.test('names the database', function () { pm.expect(pm.response.json().label).to.be.a('string'); });")
+req("System database: a wrong choice is refused", "POST", "/api/admin/system-db/test", body={"kind": "excel"}, expect=(422,))
+req("Postman collection for this server", "GET", "/api/admin/postman/collection.json")
+req("Postman environment for this server", "GET", "/api/admin/postman/environment.json",
+    checks="pm.test('base URL filled in', function () { pm.expect(pm.response.json().values.find(v => v.key === 'baseUrl').value).to.eql(pm.environment.get('baseUrl')); });")
 req("Service log", "GET", "/api/admin/logs?lines=50")
 req("Download service log", "GET", "/api/admin/logs/download")
 req("Report runs", "GET", "/api/admin/audit?limit=50")
@@ -276,12 +291,12 @@ req("Sign out", "POST", "/api/server/logout", body={})
 def main() -> None:
     OUT.mkdir(exist_ok=True)
     collection = {
-        "info": {"_postman_id": str(uuid.uuid5(uuid.NAMESPACE_URL, "mongo-reporting-service")), "name": "Reporting Service — all APIs",
+        "info": {"_postman_id": str(uuid.uuid5(uuid.NAMESPACE_URL, "mongo-reporting-service")), "name": "Folio Reports — all APIs",
                  "description": __doc__, "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"},
         "item": ITEMS,
     }
     (OUT / "Reporting-Service.postman_collection.json").write_text(json.dumps(collection, indent=2, ensure_ascii=False), encoding="utf-8")
-    environment = {"id": str(uuid.uuid5(uuid.NAMESPACE_URL, "mongo-reporting-local")), "name": "Reporting Service — local",
+    environment = {"id": str(uuid.uuid5(uuid.NAMESPACE_URL, "mongo-reporting-local")), "name": "Folio Reports — local",
                    "values": [{"key": key, "value": value, "type": kind, "enabled": True} for key, value, kind in (
                        ("baseUrl", "http://127.0.0.1:8000", "default"), ("username", "admin", "default"),
                        ("password", "", "secret"), ("adminToken", "", "secret"),

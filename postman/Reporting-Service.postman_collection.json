@@ -1,7 +1,7 @@
 {
   "info": {
     "_postman_id": "7c3800c9-feb4-5d0e-a94f-c5dbfd8485b1",
-    "name": "Reporting Service — all APIs",
+    "name": "Folio Reports — all APIs",
     "description": "Build the Postman collection and environment for every API of the reporting service.\n\n    python tools/postman/build_collection.py            -> postman/Reporting-Service.postman_collection.json\n                                                           postman/Local.postman_environment.json\n\nThe collection is a complete end-to-end run (create -> use -> clean up), so it can be run as a whole in Postman\n(\"Run collection\") or from the command line:\n\n    npx newman run postman/Reporting-Service.postman_collection.json -e postman/Local.postman_environment.json\n\nIt needs a data adapter it can read: by default a local MongoDB with the demo database rs_postman_demo\n(tools/postman/seed_demo.py creates it). Everything it creates is named PM_… / pm_… / \"Postman\" and removed at\nthe end. Fill in the environment: baseUrl, username/password (a super admin, or \"admin\" + the admin token during\nfirst setup), adminToken (for the token-based requests) and mongoUri.\n",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
@@ -3314,6 +3314,44 @@
           ]
         },
         {
+          "name": "Wrong report ID: the answer names the right one",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-API-Key",
+                "value": "{{apiKey}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/generate/ORDERS_PM.csv",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "generate",
+                "ORDERS_PM.csv"
+              ]
+            },
+            "description": "",
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Wrong report ID: the answer names the right one: HTTP 404\", function () { pm.expect([404]).to.include(pm.response.code); });",
+                  "pm.test('suggests PM_ORDERS', function () { pm.expect(pm.response.json().detail).to.include('Did you mean PM_ORDERS'); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
           "name": "One report with parameters",
           "request": {
             "method": "GET",
@@ -3400,6 +3438,114 @@
                 "type": "text/javascript",
                 "exec": [
                   "pm.test(\"Run now (JSON in, file out): HTTP 200\", function () { pm.expect([200]).to.include(pm.response.code); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Report data as JSON (page 1)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-API-Key",
+                "value": "{{apiKey}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/reports/PM_ORDERS/data",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "reports",
+                "PM_ORDERS",
+                "data"
+              ]
+            },
+            "description": "",
+            "auth": {
+              "type": "noauth"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"parameters\": {\n    \"Branch\": \"KHI\"\n  },\n  \"limit\": 1,\n  \"offset\": 0\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Report data as JSON (page 1): HTTP 200\", function () { pm.expect([200]).to.include(pm.response.code); });",
+                  "pm.test('JSON rows with paging', function () { const b = pm.response.json(); pm.expect(b.columns).to.include('Name'); pm.expect(b.rows.length).to.eql(1); pm.expect(b.total).to.eql(2); pm.expect(b.more).to.eql(true); pm.expect(b.rows[0].Branch).to.eql('KHI'); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Report data as JSON (page 2)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-API-Key",
+                "value": "{{apiKey}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/reports/PM_ORDERS/data",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "reports",
+                "PM_ORDERS",
+                "data"
+              ]
+            },
+            "description": "",
+            "auth": {
+              "type": "noauth"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"parameters\": {\n    \"Branch\": \"KHI\"\n  },\n  \"limit\": 1,\n  \"offset\": 1\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Report data as JSON (page 2): HTTP 200\", function () { pm.expect([200]).to.include(pm.response.code); });",
+                  "pm.test('last page', function () { pm.expect(pm.response.json().more).to.eql(false); });"
                 ]
               }
             }
@@ -4027,9 +4173,148 @@
       ]
     },
     {
-      "name": "13 Logs and audit (Admin)",
+      "name": "13 Logs, audit and system (Admin)",
       "description": "",
       "item": [
+        {
+          "name": "System database (where the service keeps its data)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/admin/system-db",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "admin",
+                "system-db"
+              ]
+            },
+            "description": ""
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"System database (where the service keeps its data): HTTP 200\", function () { pm.expect([200]).to.include(pm.response.code); });",
+                  "pm.test('names the database', function () { pm.expect(pm.response.json().label).to.be.a('string'); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "System database: a wrong choice is refused",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/admin/system-db/test",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "admin",
+                "system-db",
+                "test"
+              ]
+            },
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"kind\": \"excel\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"System database: a wrong choice is refused: HTTP 422\", function () { pm.expect([422]).to.include(pm.response.code); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Postman collection for this server",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/admin/postman/collection.json",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "admin",
+                "postman",
+                "collection.json"
+              ]
+            },
+            "description": ""
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Postman collection for this server: HTTP 200\", function () { pm.expect([200]).to.include(pm.response.code); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Postman environment for this server",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/admin/postman/environment.json",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "admin",
+                "postman",
+                "environment.json"
+              ]
+            },
+            "description": ""
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Postman environment for this server: HTTP 200\", function () { pm.expect([200]).to.include(pm.response.code); });",
+                  "pm.test('base URL filled in', function () { pm.expect(pm.response.json().values.find(v => v.key === 'baseUrl').value).to.eql(pm.environment.get('baseUrl')); });"
+                ]
+              }
+            }
+          ]
+        },
         {
           "name": "Service log",
           "request": {

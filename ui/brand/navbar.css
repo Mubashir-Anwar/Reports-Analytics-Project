@@ -1,0 +1,101 @@
+/* Folio Reports: the one navigation bar of every page (Designer, Server, Run reports, Admin, Analytics).
+   React pages import this file; the static Run reports page links it (/assets/brand/navbar.css).
+   The bar is dark in both themes; its menus follow the page theme. */
+.fx-nav {
+  --fx-bg: #0c1425; --fx-bg-2: #131f3a; --fx-text: #e4e9f3; --fx-muted: #93a3bd; --fx-line: rgb(255 255 255 / .09);
+  --fx-hover: rgb(255 255 255 / .07); --fx-on: rgb(255 255 255 / .12); --fx-accent: #818cf8; --fx-accent-2: #22d3ee;
+  --fx-menu: #ffffff; --fx-menu-text: #0f172a; --fx-menu-muted: #5b6b82; --fx-menu-line: #e5e8f0; --fx-menu-hover: #f3f5fa;
+  position: sticky; top: 0; z-index: 60; display: flex; align-items: center; gap: 14px;
+  height: 52px; padding: 0 14px; box-sizing: border-box;
+  background: linear-gradient(90deg, var(--fx-bg), var(--fx-bg-2));
+  color: var(--fx-text); border-bottom: 1px solid var(--fx-line);
+  font: 500 13px/1.2 Inter, "Segoe UI Variable", "Segoe UI", system-ui, -apple-system, Roboto, sans-serif;
+}
+:root[data-theme="dark"] .fx-nav { --fx-menu: #111a2b; --fx-menu-text: #e6ebf3; --fx-menu-muted: #93a4bd; --fx-menu-line: #23314a; --fx-menu-hover: #17233a; }
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) .fx-nav { --fx-menu: #111a2b; --fx-menu-text: #e6ebf3; --fx-menu-muted: #93a4bd; --fx-menu-line: #23314a; --fx-menu-hover: #17233a; }
+}
+.fx-nav *, .fx-nav *::before, .fx-nav *::after { box-sizing: border-box; }
+.fx-nav button { font: inherit; }
+
+/* brand */
+.fx-brand { display: flex; align-items: center; gap: 10px; color: var(--fx-text); text-decoration: none; flex: none; padding-right: 6px; }
+.fx-logo { width: 30px; height: 30px; flex: none; display: block; filter: drop-shadow(0 4px 10px rgb(79 70 229 / .35)); }
+.fx-name { display: flex; flex-direction: column; line-height: 1.05; }
+.fx-name b { font-size: 15px; font-weight: 800; letter-spacing: -.01em; }
+.fx-name b span { font-weight: 500; color: var(--fx-accent); margin-left: 3px; }
+.fx-name small { font-size: 10.5px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--fx-muted); margin-top: 3px; }
+.fx-divider { width: 1px; height: 24px; background: var(--fx-line); flex: none; }
+
+/* app links */
+.fx-links { display: flex; align-items: center; gap: 2px; min-width: 0; }
+.fx-link { position: relative; display: inline-flex; align-items: center; gap: 7px; height: 34px; padding: 0 11px; border-radius: 9px;
+  color: var(--fx-muted); text-decoration: none; font-weight: 600; white-space: nowrap; transition: background .15s, color .15s; }
+.fx-link svg { width: 16px; height: 16px; flex: none; opacity: .85; }
+.fx-link:hover { background: var(--fx-hover); color: var(--fx-text); }
+.fx-link.on { background: var(--fx-on); color: #fff; }
+.fx-link.on::after { content: ""; position: absolute; left: 12px; right: 12px; bottom: -9px; height: 2px; border-radius: 2px;
+  background: linear-gradient(90deg, var(--fx-accent), var(--fx-accent-2)); }
+.fx-link.on svg { opacity: 1; color: var(--fx-accent-2); }
+
+/* right side */
+.fx-actions { display: flex; align-items: center; gap: 8px; margin-left: auto; flex: none; }
+.fx-icon-btn, .fx-nav .theme-toggle { display: inline-grid; place-items: center; width: 34px; height: 34px; border-radius: 9px; border: 1px solid var(--fx-line);
+  background: transparent; color: var(--fx-text); cursor: pointer; font-size: 15px; }
+.fx-icon-btn:hover, .fx-nav .theme-toggle:hover { background: var(--fx-hover); }
+.fx-nav .btn { height: 32px; background: transparent; color: var(--fx-text); border: 1px solid var(--fx-line); border-radius: 8px; }
+.fx-nav .btn:hover:not(:disabled) { background: var(--fx-hover); }
+
+.fx-user { position: relative; }
+.fx-user-btn { display: inline-flex; align-items: center; gap: 8px; height: 36px; padding: 0 8px 0 4px; border-radius: 999px;
+  border: 1px solid var(--fx-line); background: transparent; color: var(--fx-text); cursor: pointer; }
+.fx-user-btn:hover { background: var(--fx-hover); }
+.fx-avatar { display: grid; place-items: center; width: 28px; height: 28px; border-radius: 50%; font-size: 11.5px; font-weight: 800; color: #fff;
+  background: linear-gradient(135deg, #6366f1, #06b6d4); }
+.fx-user-name { max-width: 120px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
+.fx-caret { font-size: 10px; color: var(--fx-muted); }
+
+.fx-menu { position: absolute; right: 0; top: calc(100% + 8px); z-index: 80; width: 280px; padding: 6px; border-radius: 12px;
+  background: var(--fx-menu); color: var(--fx-menu-text); border: 1px solid var(--fx-menu-line); box-shadow: 0 18px 48px rgb(15 23 42 / .25); }
+.fx-menu-head { display: flex; gap: 10px; align-items: center; padding: 10px; border-bottom: 1px solid var(--fx-menu-line); margin-bottom: 4px; }
+.fx-menu-head .fx-avatar { width: 36px; height: 36px; font-size: 13px; }
+.fx-menu-head b { display: block; font-size: 14px; }
+.fx-menu-head small { color: var(--fx-menu-muted); font-size: 12px; }
+.fx-badge { display: inline-block; margin-top: 3px; padding: 1px 7px; border-radius: 999px; font-size: 10.5px; font-weight: 700;
+  background: color-mix(in srgb, #6366f1 16%, transparent); color: #6366f1; }
+.fx-menu a, .fx-menu button { display: flex; align-items: center; gap: 10px; width: 100%; padding: 9px 10px; border: 0; border-radius: 8px; background: none;
+  color: inherit; text-decoration: none; text-align: left; cursor: pointer; font-size: 13px; }
+.fx-menu a:hover, .fx-menu button:hover { background: var(--fx-menu-hover); }
+.fx-menu svg { width: 16px; height: 16px; flex: none; color: var(--fx-menu-muted); }
+.fx-menu .fx-sep { height: 1px; background: var(--fx-menu-line); margin: 4px 0; }
+.fx-menu .fx-danger { color: #dc2626; }
+.fx-menu .fx-danger svg { color: #dc2626; }
+
+.fx-burger { display: none; }
+
+/* page-specific title next to the links (e.g. the report name in the Designer) */
+.fx-context { display: flex; align-items: center; gap: 8px; min-width: 0; color: var(--fx-muted); font-weight: 600; }
+.fx-context b { color: var(--fx-text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 280px; }
+
+@media (max-width: 980px) {
+  .fx-name small { display: none; }
+  .fx-link span { display: none; }
+  .fx-link { padding: 0 10px; }
+  .fx-user-name { display: none; }
+}
+@media (max-width: 640px) {
+  .fx-nav { gap: 8px; padding: 0 10px; height: 52px; }
+  .fx-divider, .fx-context { display: none; }
+  .fx-burger { display: inline-grid; }
+  .fx-links { display: none; position: absolute; top: 52px; left: 0; right: 0; flex-direction: column; align-items: stretch; gap: 2px; padding: 8px;
+    background: var(--fx-bg-2); border-bottom: 1px solid var(--fx-line); box-shadow: 0 18px 40px rgb(0 0 0 / .35); }
+  .fx-nav.open .fx-links { display: flex; }
+  .fx-link { height: 44px; padding: 0 14px; font-size: 15px; }
+  .fx-link span { display: inline; }
+  .fx-link.on::after { display: none; }
+  .fx-menu { position: fixed; top: 58px; right: 8px; left: 8px; width: auto; }
+}
+@media print { .fx-nav { display: none; } }
+/* the plain-HTML account menu (Run reports page) is a <details> */
+details.fx-user > summary { list-style: none; }
+details.fx-user > summary::-webkit-details-marker { display: none; }

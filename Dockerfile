@@ -25,7 +25,10 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY backend ./backend
 COPY app.py reporting_core.py designer_render.py jexpr.py jrxml_import.py ./
 COPY reports ./reports
-COPY ui/index.html ui/runner.css ui/runner.js ui/styles.css ./ui/
+COPY ui/index.html ui/runner.css ui/runner.js ui/styles.css ui/signout.js ./ui/
+COPY ui/embed ./ui/embed
+COPY ui/brand ./ui/brand
+COPY postman ./postman
 COPY --from=frontend /src/ui/app ./ui/app
 
 # API docs (/docs, /openapi.json) are off in the image; add "docs" to REPORTING_ENABLED_AREAS to show them.

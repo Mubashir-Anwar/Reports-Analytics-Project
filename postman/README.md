@@ -1,13 +1,17 @@
-# Postman: every API of the reporting service
+# Postman: every API of Folio Reports
 
 | File | What it is |
 |---|---|
-| `Reporting-Service.postman_collection.json` | 119 requests in 15 folders covering all 108 endpoints (incl. the public API and embedding), in an order that runs end to end (create → use → clean up). Every request checks its status; IDs, the API key and links are passed on through environment variables. |
+| `Reporting-Service.postman_collection.json` | 126 requests in 15 folders covering all 114 endpoints (incl. the public API and embedding), in an order that runs end to end (create → use → clean up). Every request checks its status; IDs, the API key and links are passed on through environment variables. |
 | `Local.postman_environment.json` | The variables. Fill in `password` and `adminToken`; the rest has local defaults. |
 
 Regenerate both after changing the API: `python tools/postman/build_collection.py`.
 
 ## In Postman
+
+Admins can also download both files from the running server: **Admin → API & Postman** (the environment comes with
+that server's address and their username filled in).
+
 
 1. **Import** both files (File → Import).
 2. Choose the environment **Reporting Service — local** and fill in:
@@ -25,7 +29,7 @@ Regenerate both after changing the API: `python tools/postman/build_collection.p
 npx newman run postman/Reporting-Service.postman_collection.json -e postman/Local.postman_environment.json --env-var password=… --env-var adminToken=…
 ```
 
-Last full run: 119 requests, 119 test scripts, 128 checks, 0 failures, and the same again on a second run.
+Last full run: 126 requests, 126 test scripts, 140 checks, 0 failures.
 
 Note: `Health` may answer **503** when the server's default data adapter (`MONGODB_URI`) is not configured;
 the service itself is up. Do not run the collection against production: it creates and deletes reports, a user,

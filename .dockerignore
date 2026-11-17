@@ -12,3 +12,4 @@ tests/
 data/
 frontend/node_modules/
 ui/app/
+.env.before-storage-*

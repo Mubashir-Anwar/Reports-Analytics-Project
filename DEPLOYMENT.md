@@ -227,6 +227,7 @@ webhook URL and requests per minute). The key stays on the website's server: `X-
 | `GET /api/v1/whoami` | Checks the key: name, folders, rate limit |
 | `GET /api/v1/reports`, `GET /api/v1/reports/{id}` | Reports the key may run, with their parameters (type, required, allowed values) |
 | `POST /api/v1/reports/{id}/run` | Runs now: `{"format": "pdf", "parameters": {"Identifier": "123"}, "onBehalfOf": "ali"}` → the file |
+| `POST /api/v1/reports/{id}/data` | The records as JSON: `{"parameters": {…}, "limit": 100, "offset": 0}` → `{"columns", "rows", "total", "more"}` |
 | `POST /api/v1/reports/{id}/jobs` | Runs in the background (202 + `Location`); at most 5 waiting/running per key |
 | `GET /api/v1/jobs/{id}`, `GET /api/v1/jobs/{id}/file` | Status, then the file |
 | `POST /api/v1/links` | A short-lived signed URL for a browser (parameters cannot be changed) |
@@ -320,6 +321,15 @@ REPORTING_DATA_DIR=./data python -m backend.app.storage.migrate --url sqlserver:
 ```
 
 Then start every instance with the `REPORTING_STORAGE` and `REPORTING_STORAGE_URL` it prints.
+
+**From the Admin page (no command line):** a super admin opens **Admin → System database**, chooses SQL Server,
+PostgreSQL, MySQL/MariaDB, Oracle, SQLite or MongoDB (fields or a pasted URL), presses **Test connection** (this
+creates the `rs_…` tables/collections) and then **Use …**. Any direction works (files → SQL, SQL Server → MongoDB,
+MongoDB → PostgreSQL…): the running service copies its data (documents, typed rows, run log, audit trail with its
+hash chain) into the new database, writes `REPORTING_STORAGE` / `REPORTING_STORAGE_URL` into `.env` (the old file is
+kept as `.env.before-storage-<time>`) and the change takes effect after a restart. The old database is not touched.
+When the setting comes from the real environment (Docker, a Windows service), the page says so and the setting is
+changed there instead. Every switch is in the audit trail (`storage.switched`).
 
 ## Several instances: PostgreSQL storage, HTTPS and a load balancer (`deploy/`)
 

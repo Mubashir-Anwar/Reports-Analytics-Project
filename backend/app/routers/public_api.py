@@ -4,6 +4,7 @@
     GET  /api/v1/reports                     reports this key may run, with their parameters
     GET  /api/v1/reports/{id}                one report
     POST /api/v1/reports/{id}/run            run now; JSON in ({"format", "parameters"}), the file out
+    POST /api/v1/reports/{id}/data           run now; the records as JSON (limit/offset pages)
     POST /api/v1/reports/{id}/jobs           run in the background (big reports); 202 with the job
     GET  /api/v1/jobs/{id}                   the job's status
     GET  /api/v1/jobs/{id}/file              the finished file
@@ -16,15 +17,19 @@ expiry and requests per minute; a run is recorded in the run log (channel "api")
 from __future__ import annotations
 
 import re
-from datetime import date
+import time
+from datetime import date, datetime, timezone
 from types import SimpleNamespace
 from typing import Any
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse, Response
+from pymongo.errors import PyMongoError
 
+from backend.app.connectors.errors import ConnectorQueryError, MongoReadAccessError
+from backend.app.connectors.mongo_fallback import _row_value
 from backend.app.constants import OUTPUT_FORMATS, SIGNED_LINK_KEYS
-from backend.app.definitions import validate_parameters
+from backend.app.definitions import _safe_value, validate_parameters
 from backend.app.jobs import store as job_store
 
 MEDIA = {"pdf": "application/pdf", "csv": "text/csv; charset=utf-8",
@@ -57,7 +62,7 @@ def register(app: FastAPI, ctx: SimpleNamespace) -> None:
     def visible_report(request: Request, report_id: str) -> Any:
         definition = reports_by_id.get(report_id)
         if definition is None or definition.editor_config is None or not report_in_scope(request, definition):
-            raise HTTPException(status_code=404, detail="Report ID is not registered")
+            raise ctx.unknown_report(request, report_id)
         return definition
 
     def run_request(payload: dict[str, Any], definition: Any) -> tuple[str, list[tuple[str, str]]]:
@@ -131,6 +136,45 @@ def register(app: FastAPI, ctx: SimpleNamespace) -> None:
         definition = visible_report(request, report_id)
         output_format, pairs = run_request(await json_body(request, optional=True), definition)
         return ctx.produce_report(request, f"{definition.report_id}.{output_format}", access, pairs)
+
+    @app.post("/api/v1/reports/{report_id}/data", tags=["Public API v1"])
+    async def v1_data(report_id: str, request: Request) -> dict[str, Any]:
+        """The report's records as JSON (for a system that wants data, not a file). Body:
+        {"parameters": {"Branch": "LHR"}, "limit": 100, "offset": 0}. At most REPORT_MAX_ROWS records are read;
+        "total" is how many there are (up to that limit), "rows" the requested page."""
+        access = require_report_access(request)
+        definition = visible_report(request, report_id)
+        payload = await json_body(request, optional=True)
+        _format, pairs = run_request({**payload, "format": "csv"}, definition)
+        try:
+            limit = int(payload.get("limit", 100))
+            offset = int(payload.get("offset", 0))
+        except (TypeError, ValueError):
+            raise HTTPException(status_code=422, detail="limit and offset must be whole numbers") from None
+        if not 1 <= limit <= 5000 or offset < 0:
+            raise HTTPException(status_code=422, detail="limit must be 1 to 5000 and offset 0 or more")
+        kind, _, name = access.partition(":")
+        started, clock = datetime.now(timezone.utc), time.monotonic()
+        common = {"channel": "api", "actor": name or access, "actor_type": {"api-key": "api-key", "user": "user"}.get(kind, "token"),
+                  "started_at": started, "definition": definition, "request": request, "output_format": "json",
+                  "on_behalf_of": next((value for name, value in pairs if name == "GeneratedBy"), "")}
+        try:
+            parameters, _ = validate_parameters(definition, [(n, v) for n, v in pairs if n != "GeneratedBy"])
+            rows = ctx.run_report_rows(definition, parameters, definition.connection_id, max_rows=ctx.settings.max_rows, limit_rows=False)
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from None
+        except HTTPException as exc:
+            ctx.log_run(status="failed", error_code=str(exc.status_code), error_message=str(exc.detail)[:300],
+                        duration_ms=int((time.monotonic() - clock) * 1000), parameters=dict(pairs), **common)
+            raise
+        except (ConnectorQueryError, MongoReadAccessError, PyMongoError):
+            ctx.log_run(status="failed", error_code="query_failed", duration_ms=int((time.monotonic() - clock) * 1000), parameters=dict(pairs), **common)
+            raise HTTPException(status_code=503, detail="The report's data source could not be read") from None
+        page = rows[offset:offset + limit]
+        data = [{column: _safe_value(_row_value(row, column)) for column in definition.columns} for row in page]
+        ctx.log_run(status="success", parameters=parameters, row_count=len(rows), duration_ms=int((time.monotonic() - clock) * 1000), **common)
+        return {"reportId": definition.report_id, "columns": list(definition.columns), "rows": data, "rowCount": len(data),
+                "total": len(rows), "offset": offset, "limit": limit, "more": offset + len(data) < len(rows)}
 
     @app.post("/api/v1/reports/{report_id}/jobs", status_code=202, tags=["Public API v1"])
     async def v1_start_job(report_id: str, request: Request) -> JSONResponse:

@@ -13,6 +13,7 @@ from backend.app.logs import LOG
 from backend.app.storage.store import get_store
 
 ENCRYPTED_FORMAT = "fernet-v1"
+ENV_FILE_KEYS: set[str] = set()   # settings that came from .env (not from the real environment)
 
 
 def _cipher():
@@ -101,4 +102,6 @@ def load_local_env_file() -> None:
         if len(value) >= 2 and value[0] == value[-1] and value[0] in {"'", '"'}:
             value = value[1:-1]
         if key:
+            if key not in os.environ:
+                ENV_FILE_KEYS.add(key)
             os.environ.setdefault(key, value)

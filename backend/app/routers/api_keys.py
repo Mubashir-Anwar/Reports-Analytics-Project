@@ -178,7 +178,7 @@ def register(app: FastAPI, ctx: SimpleNamespace) -> None:
         output_format = str(payload.get("format", "pdf")).strip().lower()
         definition = reports_by_id.get(report_id)
         if definition is None or not report_in_scope(request, definition):
-            raise HTTPException(status_code=404, detail="Report ID is not registered")
+            raise ctx.unknown_report(request, report_id)
         if output_format not in OUTPUT_FORMATS:
             raise HTTPException(status_code=422, detail="format must be pdf, xlsx or csv")
         parameters = payload.get("parameters") or {}

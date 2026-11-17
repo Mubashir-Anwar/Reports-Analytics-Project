@@ -36,7 +36,7 @@ from backend.app.security.users import (
     user_rights,
 )
 
-__all__ = ['_verify_signed_link', 'require_report_access', 'report_in_scope', 'require_admin', 'json_body', 'require_json_request',
+__all__ = ['_verify_signed_link', 'require_report_access', 'report_in_scope', 'unknown_report', 'require_admin', 'json_body', 'require_json_request',
            'current_session', 'require_session', 'require_right', 'session_view']
 
 
@@ -147,6 +147,26 @@ def report_in_scope(ctx: SimpleNamespace, request: Request, definition: Any) -> 
         return api_keys.folder_allowed(who, ctx.report_folder(definition))
     from backend.app.security import permissions  # noqa: PLC0415 - avoid an import cycle at start-up
     return ctx.report_level(who, definition) >= permissions.RUN
+
+
+def unknown_report(ctx: SimpleNamespace, request: Request, report_id: str) -> HTTPException:
+    """404 for a report ID that is not published (or outside the caller's folders), naming the closest IDs the
+    caller may run, e.g. "KFS_FAL" -> "Did you mean FAL_KFS?". Only IDs the caller could run anyway are named."""
+    import difflib  # noqa: PLC0415
+
+    visible = [rid for rid, item in ctx.reports_by_id.items() if report_in_scope(ctx, request, item)]
+    wanted = report_id.lower()
+    folded = {rid.lower(): rid for rid in visible}
+    close = difflib.get_close_matches(wanted, list(folded), n=3, cutoff=0.5)
+    same_words = [rid for rid in visible if sorted(filter(None, rid.lower().replace("-", "_").split("_")))
+                  == sorted(filter(None, wanted.replace("-", "_").split("_")))]
+    names = list(dict.fromkeys(same_words + [folded[item] for item in close]))[:3]
+    detail = f"Report ID '{report_id}' is not published"
+    if names:
+        detail += ". Did you mean " + " or ".join(names) + "?"
+    elif visible:
+        detail += " (the report IDs are on the Report Server and in GET /api/v1/reports)"
+    return HTTPException(status_code=404, detail=detail)
 
 
 def require_admin(ctx: SimpleNamespace, request: Request, role: str = "admin") -> str:

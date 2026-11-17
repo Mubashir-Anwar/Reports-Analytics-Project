@@ -13,7 +13,7 @@ from urllib.parse import quote
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import HTMLResponse, RedirectResponse, Response
 
-from backend.app.constants import RIGHT_LABELS
+from backend.app.constants import BRAND_NAME, RIGHT_LABELS
 
 # Which page each right opens, in the order the home page picks the first one.
 APP_PAGES = (("designer", "/designer"), ("server", "/server"), ("analytics", "/analytics"), ("runner", "/ui"), ("admin", "/admin"))
@@ -25,14 +25,17 @@ body{margin:0;font:15px/1.5 system-ui,Segoe UI,sans-serif;background:var(--bg);c
 .card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:28px;max-width:440px;width:100%}
 h1{font-size:20px;margin:0 0 6px}p{color:var(--muted);margin:0 0 16px}
 a.app{display:block;padding:10px 12px;border:1px solid var(--line);border-radius:10px;margin-bottom:8px;color:var(--ink);text-decoration:none}
-a.app:hover{border-color:var(--accent)}button{margin-top:8px;background:none;border:1px solid var(--line);color:var(--ink);border-radius:8px;padding:8px 12px;cursor:pointer}
+a.app:hover{border-color:var(--accent)}
+.brand{display:flex;align-items:center;gap:10px;margin-bottom:18px;color:var(--ink);text-decoration:none;font-weight:800;font-size:16px}.brand b{font-weight:500;color:var(--accent);margin-left:3px}button{margin-top:8px;background:none;border:1px solid var(--line);color:var(--ink);border-radius:8px;padding:8px 12px;cursor:pointer}
 """
 
 
 def _page(title: str, body: str, status: int = 200) -> HTMLResponse:
     return HTMLResponse(
         f"<!doctype html><html lang='en'><head><meta charset='utf-8'><meta name='viewport' content='width=device-width,initial-scale=1'>"
-        f"<title>{html.escape(title)}</title><style>{_STYLE}</style></head><body><main class='card'>{body}</main>"
+        f"<title>{html.escape(title)} · {BRAND_NAME}</title><link rel='icon' type='image/svg+xml' href='/assets/brand/favicon.svg'>"
+        f"<style>{_STYLE}</style></head><body><main class='card'><a class='brand' href='/'><img src='/assets/brand/logo.svg' alt='' width='34' height='34'>"
+        f"<span>Folio<b>Reports</b></span></a>{body}</main>"
         "<script src='/assets/signout.js' defer></script></body></html>",
         status_code=status, headers={"Cache-Control": "no-store"})
 

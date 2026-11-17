@@ -70,7 +70,7 @@ def register(app: FastAPI, ctx: SimpleNamespace) -> None:
         payload = await json_body(request)
         definition = reports_by_id.get(str(payload.get("report", "")))
         if definition is None or definition.editor_config is None or not report_in_scope(request, definition):
-            raise HTTPException(status_code=404, detail="Report ID is not registered")
+            raise ctx.unknown_report(request, str(payload.get("report", "")))
         fixed = payload.get("parameters") or {}
         if not isinstance(fixed, dict):
             raise HTTPException(status_code=422, detail="parameters must be an object of fixed values")

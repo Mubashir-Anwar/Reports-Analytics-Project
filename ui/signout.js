@@ -6,6 +6,6 @@ document.addEventListener('click', async (event) => {
   try {
     await fetch('/api/server/logout', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
   } finally {
-    window.location.href = '/server';
+    window.location.href = '/login';
   }
 });
