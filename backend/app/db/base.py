@@ -1,6 +1,8 @@
 """What every system-database backend offers (files, SQL, MongoDB). The rules live here; backends only store."""
 from __future__ import annotations
 
+import random
+import time
 from datetime import datetime
 from typing import Any
 
@@ -61,7 +63,9 @@ class RecordsBackend:
         """Append one audit event at the end of the chain (retries when another instance appends at the same time)."""
         if actor_type not in model.ACTOR_TYPES:
             raise ValueError(f"Unknown actor type {actor_type!r}")
-        for _attempt in range(20):
+        for attempt in range(60):
+            if attempt:                                  # another writer took the number: wait a little (random, growing)
+                time.sleep(random.uniform(0, min(0.25, 0.004 * 2 ** min(attempt, 6))))  # noqa: S311 - timing jitter, not security
             last = self._last_event()
             event = model.clean({
                 "id": model.new_id(), "seq": (last["seq"] + 1) if last else 1, "orgId": model.org_id(), "at": model.now(),

@@ -27,6 +27,10 @@ TEXT = sa.UnicodeText()          # NVARCHAR(MAX) on SQL Server, CLOB on Oracle, 
 
 metadata = sa.MetaData()
 
+# Oracle reserves these but SQLAlchemy's Oracle word list does not have them, so columns with these names are
+# always quoted (quoting a lower-case name changes nothing on the other databases).
+ALWAYS_QUOTE = {"file", "access", "audit", "column", "level", "mode", "online", "rows", "session", "uid", "validate"}
+
 schema_version = sa.Table(
     "rs_schema_version", metadata,
     sa.Column("component", sa.Unicode(32), primary_key=True),
@@ -43,7 +47,9 @@ def _columns(fields: dict[str, tuple[str, int | None, bool]], primary: str) -> l
     columns = []
     for name, (kind, size, required) in fields.items():
         column_type = {"str": sa.Unicode(size or 255), "int": sa.BigInteger(), "time": TIME, "json": TEXT}[kind]
-        columns.append(sa.Column(_snake(name), column_type, primary_key=name == primary, nullable=not required and name != primary))
+        column = _snake(name)
+        columns.append(sa.Column(column, column_type, primary_key=name == primary, nullable=not required and name != primary,
+                                 quote=True if column in ALWAYS_QUOTE else None))
     return columns
 
 
@@ -73,7 +79,9 @@ def entity_table(entity: Any) -> sa.Table:
     columns = []
     for name, (kind, size, required) in entity.fields.items():
         column_type = sa.Unicode(size or 255) if kind == "str" else kinds[kind]
-        columns.append(sa.Column(_snake(name), column_type, primary_key=name in entity.key, nullable=not required))
+        column = _snake(name)
+        columns.append(sa.Column(column, column_type, primary_key=name in entity.key, nullable=not required,
+                                 quote=True if column in ALWAYS_QUOTE else None))
     columns.append(sa.Column("extra", TEXT))
     indexes = [sa.Index(f"ix_{entity.table}_{'_'.join(_snake(f) for f in fields)}"[:30], *[_snake(f) for f in fields])
                for fields in entity.indexes]
@@ -210,6 +218,12 @@ class SqlRecords(RecordsBackend):
                 connection.execute(audit_events.insert().values(**self._to_row(event, model.AUDIT_FIELDS)))
         except sa.exc.IntegrityError:
             raise DuplicateSeq from None
+        except sa.exc.DBAPIError as exc:
+            # SQL Server 1205, MySQL 1213, PostgreSQL 40P01/40001: the database chose this insert as a deadlock victim
+            text = str(exc.orig).lower()
+            if "deadlock" in text or "40001" in text or "could not serialize" in text:
+                raise DuplicateSeq from None
+            raise
 
     def _events_from(self, seq: int, limit: int) -> list[dict[str, Any]]:
         query = sa.select(audit_events).where(audit_events.c.seq >= seq).order_by(audit_events.c.seq).limit(limit)

@@ -52,7 +52,14 @@ jobs:
       - name: Lint (undefined/unused names, imports)
         run: ruff check .
       - name: Tests
-        run: pytest -q
+        shell: bash
+        run: |
+          set +e
+          pytest -q -rfE 2>&1 | tee pytest.log
+          status=${PIPESTATUS[0]}
+          # failures as annotations: visible on the run page and through the public API, without the log
+          grep -E "^(FAILED|ERROR) " pytest.log | head -30 | sed 's/^/::error title=pytest::/'
+          exit $status
 
   system-db:
     name: System database on SQL Server and Oracle
@@ -88,7 +95,13 @@ jobs:
           cache-dependency-path: requirements-dev.txt
       - run: pip install -r requirements-dev.txt
       - name: Run the system database tests on SQL Server and Oracle
-        run: pytest -q tests/test_system_db.py -k "sqlserver or oracle"
+        shell: bash
+        run: |
+          set +e
+          pytest -q -rfE tests/test_system_db.py -k "sqlserver or oracle" 2>&1 | tee pytest.log
+          status=${PIPESTATUS[0]}
+          grep -E "^(FAILED|ERROR) " pytest.log | head -30 | sed 's/^/::error title=pytest::/'
+          exit $status
 
   frontend:
     name: Frontend build
