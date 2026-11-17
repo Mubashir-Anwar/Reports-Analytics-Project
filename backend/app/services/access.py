@@ -51,6 +51,11 @@ def require_folder(ctx: SimpleNamespace, session: dict[str, Any], folder: str, n
 
 def session_for_user(ctx: SimpleNamespace, username: str) -> dict[str, Any] | None:
     """The user's current role, for work done later on their behalf (schedules). None = the user is gone or disabled."""
+    if username.startswith("apikey:"):
+        from backend.app.security import api_keys  # noqa: PLC0415
+        key = api_keys.key_for_owner(username[7:])
+        # folder limits of the key are checked by the runner; inside them the key may run every report
+        return {"username": username, "role": "admin", "rights": {"runner"}, "apiKey": key} if key else None
     user = find_user(username)
     if user is None and username == BOOTSTRAP_USERNAME:
         return {"username": username, "role": "admin", "rights": {"server", "runner", "admin", "designer"}}

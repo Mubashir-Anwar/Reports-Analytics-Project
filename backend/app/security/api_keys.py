@@ -11,8 +11,10 @@ from __future__ import annotations
 
 import hashlib
 import hmac
+import os
 import re
 import secrets
+import threading
 import time
 from datetime import datetime, timezone
 from typing import Any
@@ -49,7 +51,8 @@ def save_keys(keys: list[dict[str, Any]]) -> None:
 def key_view(item: dict[str, Any]) -> dict[str, Any]:
     """What the admin page shows (never the hash)."""
     return {name: item.get(name) for name in ("id", "name", "folders", "allowedIps", "expiresAt", "disabled", "createdBy",
-                                               "createdAt", "lastUsedAt")} | {"prefix": f"mrk_{item['id']}_…"}
+                                               "createdAt", "lastUsedAt", "webhookUrl", "ratePerMinute")} | {
+        "prefix": f"mrk_{item['id']}_…", "webhookSecretSet": bool(item.get("webhookSecret")), "rateLimit": rate_limit(item)}
 
 
 def create_key(name: str, folders: list[str], allowed_ips: list[str], expires_at: str | None, created_by: str) -> tuple[dict[str, Any], str]:
@@ -109,6 +112,53 @@ def key_by_id(key_id: str, client_ip: str) -> dict[str, Any] | None:
     if item is not None:
         _touch(item)
     return item
+
+
+def key_for_owner(key_id: str) -> dict[str, Any] | None:
+    """The key that owns a background run, if it is still enabled and not expired (no address check: the run
+    happens on the server, not at the caller)."""
+    item = next((stored for stored in load_keys() if stored["id"] == key_id), None)
+    if item is None or item.get("disabled"):
+        return None
+    expires = item.get("expiresAt")
+    if expires:
+        try:
+            if datetime.fromisoformat(str(expires).replace("Z", "+00:00")) <= datetime.now(timezone.utc):
+                return None
+        except ValueError:
+            return None
+    return item
+
+
+# ------------------------------------------------------------------ requests per minute, per key (this instance)
+_HITS: dict[str, list[float]] = {}
+_HITS_LOCK = threading.Lock()
+
+
+def rate_limit(item: dict[str, Any]) -> int:
+    own = item.get("ratePerMinute")
+    if isinstance(own, int) and own > 0:
+        return own
+    try:
+        return max(0, int(os.getenv("REPORTING_API_RATE_PER_MINUTE", "120")))
+    except ValueError:
+        return 120
+
+
+def over_limit(item: dict[str, Any]) -> int:
+    """0 when the call may go ahead, else the seconds to wait (sliding one-minute window; limit 0 = off)."""
+    limit = rate_limit(item)
+    if not limit:
+        return 0
+    now = time.monotonic()
+    with _HITS_LOCK:
+        hits = [moment for moment in _HITS.get(item["id"], []) if now - moment < 60]
+        if len(hits) >= limit:
+            _HITS[item["id"]] = hits
+            return max(1, int(60 - (now - hits[0])) + 1)
+        hits.append(now)
+        _HITS[item["id"]] = hits
+    return 0
 
 
 def link_secret() -> str:

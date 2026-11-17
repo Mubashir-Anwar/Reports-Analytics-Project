@@ -105,6 +105,10 @@ def require_report_access(ctx: SimpleNamespace, request: Request, report_file: s
         if key is None:
             LOG.warning("Unknown, disabled or expired API key used for %s", request.url.path)
             raise HTTPException(status_code=401, detail="The API key is not valid, disabled, expired or not allowed from this address")
+        wait = api_keys.over_limit(key)
+        if wait:
+            raise HTTPException(status_code=429, detail=f"Too many requests for this API key; try again in {wait} s",
+                                headers={"Retry-After": str(wait)})
         request.state.report_scope = ("key", key)
         return f"api-key:{key['name']}"
     if report_file is not None and "Signature" in request.query_params:

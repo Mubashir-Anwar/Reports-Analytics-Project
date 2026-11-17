@@ -31,6 +31,21 @@ export default function ApiKeysTab({ notify }) {
   const update = async (key, change, text) => {
     try { await api.updateApiKey(key.id, change); await load(); notify(text); } catch (error) { notify(error.message, 'error'); }
   };
+  const setWebhook = async (key) => {
+    const url = window.prompt(`Webhook URL for "${key.name}" (called when its background reports finish; empty = none):`, key.webhookUrl || 'https://');
+    if (url === null) return;
+    try {
+      const result = await api.updateApiKey(key.id, { webhookUrl: url.trim() === 'https://' ? '' : url.trim() });
+      if (result.webhookSecret) setCreated({ name: `${key.name} (webhook secret)`, secret: result.webhookSecret });
+      await load();
+      notify(url.trim() && url.trim() !== 'https://' ? `Webhook of ${key.name} saved.` : `Webhook of ${key.name} removed.`);
+    } catch (error) { notify(error.message, 'error'); }
+  };
+  const setRate = async (key) => {
+    const value = window.prompt(`Requests per minute for "${key.name}" (empty = the server default):`, key.ratePerMinute || '');
+    if (value === null) return;
+    update(key, { ratePerMinute: value.trim() ? Number(value) : null }, `Rate limit of ${key.name} saved.`);
+  };
   const remove = async (key) => {
     if (!window.confirm(`Delete the key "${key.name}"? The website using it stops working, and its links stop opening.`)) return;
     try { await api.deleteApiKey(key.id); await load(); notify(`Key ${key.name} deleted.`); } catch (error) { notify(error.message, 'error'); }
@@ -61,8 +76,11 @@ export default function ApiKeysTab({ notify }) {
                 <strong>{key.name}{key.disabled ? ' (disabled)' : ''}</strong>
                 <small><code>{key.prefix}</code> · folders: {key.folders?.length ? key.folders.join(', ') : 'all'} · addresses: {key.allowedIps?.length ? key.allowedIps.join(', ') : 'any'}</small>
                 <small>Expires: {key.expiresAt ? formatWhen(key.expiresAt) : 'never'} · last used: {formatWhen(key.lastUsedAt)} · by {key.createdBy || '?'}</small>
+                <small>Webhook: {key.webhookUrl || 'none'} · {key.rateLimit ? `${key.rateLimit} requests/minute` : 'no rate limit'}</small>
               </div>
               <div className="row">
+                <button className="btn sm quiet" onClick={() => setWebhook(key)}>Webhook</button>
+                <button className="btn sm quiet" onClick={() => setRate(key)}>Rate limit</button>
                 <button className="btn sm" onClick={() => update(key, { disabled: !key.disabled }, `${key.name} ${key.disabled ? 'enabled' : 'disabled'}.`)}>{key.disabled ? 'Enable' : 'Disable'}</button>
                 <button className="btn sm danger" onClick={() => remove(key)}>Delete</button>
               </div>
@@ -78,7 +96,8 @@ export default function ApiKeysTab({ notify }) {
 X-API-Key: mrk_…
 {"report": "KFS_FAL", "format": "pdf", "parameters": {"Identifier": "123"}, "expiresInSeconds": 300}
 → {"url": "/generate/KFS_FAL.pdf?Identifier=123&KeyId=…&Expires=…&Signature=…"}`}</pre>
-          <p className="muted">3. Signed-in users with the Run reports right can also open <code>{origin}/generate/&lt;ID&gt;.pdf?…</code> directly.</p>
+          <p className="muted">3. Or the public API v1: <code>GET {origin}/api/v1/reports</code>, <code>POST {origin}/api/v1/reports/&lt;ID&gt;/run</code> with {'{"format": "pdf", "parameters": {…}}'}, or <code>/jobs</code> for big reports (webhook when done). Description: <a href="/api/v1/openapi.json" target="_blank" rel="noreferrer">/api/v1/openapi.json</a>.</p>
+          <p className="muted">4. Signed-in users with the Run reports right can also open <code>{origin}/generate/&lt;ID&gt;.pdf?…</code> directly.</p>
         </details>
       </section>
       <form className="card stack" onSubmit={create}>

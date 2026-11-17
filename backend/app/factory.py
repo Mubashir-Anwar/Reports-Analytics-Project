@@ -18,6 +18,7 @@ from backend.app.routers import (
     generate,
     jobs,
     pages,
+    public_api,
     repository,
     server_portal,
     system,
@@ -104,4 +105,5 @@ def make_app() -> FastAPI:
     api_keys.register(app, ctx)
     system.register(app, ctx)
     generate.register(app, ctx)
+    public_api.register(app, ctx)
     return app

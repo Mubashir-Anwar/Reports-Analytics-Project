@@ -21,7 +21,7 @@ from backend.app.definitions import validate_parameters
 from backend.app.jobs import mailer, schedule, store
 from backend.app.logs import LOG
 from backend.app.rendering.outputs import render_report_output
-from backend.app.security import permissions
+from backend.app.security import api_keys, permissions, webhooks
 
 
 def _now() -> datetime:
@@ -139,6 +139,8 @@ class JobRunner:
             # checked again at run time: the owner may have lost the permission (or the account) since scheduling
             if definition is None or owner is None or ctx.report_level(owner, definition) < permissions.RUN:
                 raise ValueError("The report is no longer published on the server, or its owner may no longer run it")
+            if owner.get("apiKey") and not api_keys.folder_allowed(owner["apiKey"], ctx.report_folder(definition)):
+                raise ValueError("The API key may no longer run reports in this folder")
             enabled = (definition.editor_config or {}).get("formats", ["pdf", "xlsx", "csv"])
             if run["format"] not in enabled:
                 raise ValueError(f"The {run['format'].upper()} format is not enabled for this report")
@@ -169,13 +171,28 @@ class JobRunner:
         finally:
             run["finishedAt"] = _iso(_now())
             audit["durationMs"] = int((time.monotonic() - started) * 1000)
-            ctx.log_run_from_audit(audit, channel="schedule" if run.get("jobId") else "server", actor=run["owner"],
-                                   actor_type="user", definition=ctx.reports_by_id.get(run["reportId"]), body=body or None)
+            by_key = run["owner"].startswith("apikey:")
+            ctx.log_run_from_audit(audit, channel="api" if by_key else ("schedule" if run.get("jobId") else "server"),
+                                   actor=run["owner"], actor_type="api-key" if by_key else "user",
+                                   definition=ctx.reports_by_id.get(run["reportId"]), body=body or None)
         if job and job.get("email", {}).get("to"):
             run["email"] = self._mail(job, run, body)
         store.save_run(run, keep_for_job=job.get("keep", 10) if job else None)
         if job:
             self._record_last_run(job["id"], run)
+        if run["owner"].startswith("apikey:"):
+            self._notify_key(run)
+
+    @staticmethod
+    def _notify_key(run: dict[str, Any]) -> None:
+        """The API key that asked for this run gets its webhook call (when it has one)."""
+        key = api_keys.key_for_owner(run["owner"][7:])
+        if not key or not key.get("webhookUrl") or not key.get("webhookSecret"):
+            return
+        job = {name: run.get(name) for name in ("id", "reportId", "title", "format", "status", "rowCount", "error", "size",
+                                                "queuedAt", "startedAt", "finishedAt")}
+        job["downloadUrl"] = f"/api/v1/jobs/{run['id']}/file" if run.get("status") == "success" else None
+        webhooks.deliver_later(key["webhookUrl"], key["webhookSecret"], "job.finished", {"job": job})
 
     def _mail(self, job: dict[str, Any], run: dict[str, Any], body: bytes) -> str:
         email = job["email"]

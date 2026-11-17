@@ -217,6 +217,29 @@ If your pages are on the same domain behind nginx, you can also link to `/ui` or
 
 These Java snippets are examples for your Grizzly code and were not compiled here (no JDK on this machine).
 
+## 6. Public API v1 (for client websites and other systems)
+
+Create one API key per website in **Admin → API keys** (limit it to folders and the website server's IP; optional
+webhook URL and requests per minute). The key stays on the website's server: `X-API-Key: mrk_…`.
+
+| Call | What it does |
+|---|---|
+| `GET /api/v1/whoami` | Checks the key: name, folders, rate limit |
+| `GET /api/v1/reports`, `GET /api/v1/reports/{id}` | Reports the key may run, with their parameters (type, required, allowed values) |
+| `POST /api/v1/reports/{id}/run` | Runs now: `{"format": "pdf", "parameters": {"Identifier": "123"}, "onBehalfOf": "ali"}` → the file |
+| `POST /api/v1/reports/{id}/jobs` | Runs in the background (202 + `Location`); at most 5 waiting/running per key |
+| `GET /api/v1/jobs/{id}`, `GET /api/v1/jobs/{id}/file` | Status, then the file |
+| `POST /api/v1/links` | A short-lived signed URL for a browser (parameters cannot be changed) |
+| `GET /api/v1/openapi.json` | This API as OpenAPI 3 (always on, no data) |
+
+* **Webhook**: when a background job of the key finishes, its webhook URL gets `POST` `{"event": "job.finished",
+  "job": {…, "downloadUrl"}}` with `X-Reporting-Timestamp` and `X-Reporting-Signature: sha256=HMAC(secret,
+  "<timestamp>.<body>")`. The secret is shown once in Admin. Internal addresses are refused unless
+  `REPORTING_WEBHOOK_ALLOW_PRIVATE=true`; redirects are not followed.
+* **Rate limit**: `REPORTING_API_RATE_PER_MINUTE` (default 120, `0` = off) or per key; over it → `429` with `Retry-After`.
+* Every call is in the run log (channel `api`, actor = the key's name, `onBehalfOf` = the website's own user).
+* **Postman**: `postman/` has a collection for every endpoint and how to run it (see `postman/README.md`).
+
 ## Docker
 
 The image is built from a clean checkout; it builds the React pages itself and contains **no** `data/`

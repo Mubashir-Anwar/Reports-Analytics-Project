@@ -44,6 +44,12 @@ def register(app: FastAPI, ctx: SimpleNamespace) -> None:
         # Checked before anything else, so an unauthenticated caller learns nothing (not even
         # whether a report ID exists) and cannot fill the audit file.
         access = require_report_access(request, report_file)
+        query_pairs = [(key, value) for key, value in request.query_params.multi_items() if key not in SIGNED_LINK_KEYS]
+        return produce_report(request, report_file, access, query_pairs)
+
+    def produce_report(request: Request, report_file: str, access: str, query_pairs: list[tuple[str, str]]) -> Response:
+        """Run a report the caller may run (access already checked) and return the file; one run record either way.
+        Used by /generate (parameters in the URL) and POST /api/v1/reports/{id}/run (parameters in JSON)."""
         started = time.monotonic()
         audit: dict[str, Any] = {
             "requestedAt": datetime.now(timezone.utc),
@@ -52,7 +58,6 @@ def register(app: FastAPI, ctx: SimpleNamespace) -> None:
             "rowCount": 0,
             "access": access,
         }
-        query_pairs = [(key, value) for key, value in request.query_params.multi_items() if key not in SIGNED_LINK_KEYS]
         query_map = dict(query_pairs)
         for key in METADATA_KEYS:
             if key in query_map:
@@ -136,3 +141,5 @@ def register(app: FastAPI, ctx: SimpleNamespace) -> None:
                         # Optional MongoDB audit storage must never block a report
                         # generated with a read-only reporting identity.
                         LOG.exception("Optional MongoDB report audit write failed")
+
+    ctx.produce_report = produce_report

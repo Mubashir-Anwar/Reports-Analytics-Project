@@ -22,7 +22,7 @@ from fastapi import FastAPI, HTTPException, Request
 from backend.app.constants import OUTPUT_FORMATS, SIGNED_LINK_KEYS
 from backend.app.definitions import validate_parameters
 from backend.app.logs import LOG
-from backend.app.security import api_keys
+from backend.app.security import api_keys, webhooks
 from backend.app.storage.files import normalize_folder_path
 
 NAME_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9 ._@-]{1,63}$")
@@ -109,10 +109,35 @@ def register(app: FastAPI, ctx: SimpleNamespace) -> None:
             item["allowedIps"] = clean_ips(payload["allowedIps"])
         if "expiresInDays" in payload:
             item["expiresAt"] = clean_expiry(payload["expiresInDays"])
+        new_secret = None
+        if "webhookUrl" in payload:
+            url = str(payload.get("webhookUrl") or "").strip()
+            if url:
+                try:
+                    item["webhookUrl"] = webhooks.check_url(url)
+                except ValueError as exc:
+                    raise HTTPException(status_code=422, detail=str(exc)) from None
+                if not item.get("webhookSecret") or payload.get("rotateWebhookSecret") is True:
+                    item["webhookSecret"] = new_secret = webhooks.new_secret()
+            else:
+                item.pop("webhookUrl", None)
+                item.pop("webhookSecret", None)
+        if "ratePerMinute" in payload:
+            rate = payload.get("ratePerMinute")
+            if rate in (None, "", 0):
+                item.pop("ratePerMinute", None)
+            elif isinstance(rate, int) and not isinstance(rate, bool) and 1 <= rate <= 100000:
+                item["ratePerMinute"] = rate
+            else:
+                raise HTTPException(status_code=422, detail="ratePerMinute must be a whole number from 1 to 100000 (empty = the default)")
         api_keys.save_keys(keys)
         LOG.info("API key %s changed by %s", key_id, request.state.actor)
         ctx.audit_event(request, "apikey.changed", key_id, {name: payload[name] for name in ("disabled", "folders", "allowedIps", "expiresInDays") if name in payload})
-        return {"key": api_keys.key_view(item)}
+        result: dict[str, Any] = {"key": api_keys.key_view(item)}
+        if new_secret:
+            result["webhookSecret"] = new_secret
+            result["note"] = "Copy the webhook secret now: it is shown only once. The website uses it to check X-Reporting-Signature."
+        return result
 
     @app.delete("/api/admin/api-keys/{key_id}")
     def delete_api_key(key_id: str, request: Request) -> dict[str, Any]:

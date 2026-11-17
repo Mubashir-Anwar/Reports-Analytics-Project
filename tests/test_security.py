@@ -26,6 +26,7 @@ from test_workspace_and_server import ADMIN, client, login  # noqa: E402,F401
 # (signed out, the pages only redirect to /login; see test_access_rights.py)
 PUBLIC = {("GET", "/"), ("GET", "/ui"), ("GET", "/designer"), ("GET", "/server"), ("GET", "/admin"), ("GET", "/ready"),
           ("GET", "/analytics"), ("GET", "/login"),
+          ("GET", "/api/v1/openapi.json"),                       # describes the public API; no data
           ("GET", "/health"), ("POST", "/api/server/logout"), ("GET", "/docs"), ("GET", "/redoc"),
           ("GET", "/openapi.json"), ("GET", "/docs/oauth2-redirect")}
 
