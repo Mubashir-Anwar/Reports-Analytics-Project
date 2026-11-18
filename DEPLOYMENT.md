@@ -1,6 +1,7 @@
-# Deploying the MongoDB Reporting Service
+# Deploying Analysis
 
-This guide covers running the service on a server: which paths to expose and to whom, logs, and how a
+This guide covers running **Analysis** (the reporting and analytics service; the name can be changed in
+Admin → Branding) on a server: which paths to expose and to whom, logs, and how a
 Java/Grizzly application connects to it. All settings are environment variables; `.env.example` lists
 every one with a comment.
 
@@ -16,6 +17,7 @@ every one with a comment.
 | `/designer` | Report designer | Report designers only | `REPORTING_ADMIN_TOKEN` or `REPORTING_DESIGNER_TOKEN` |
 | `/admin` | Management page (data sources, logs) | Administrators only | `REPORTING_ADMIN_TOKEN` |
 | `/api/admin/*` | API behind `/admin` and `/designer` | Administrators and designers | Admin or designer token (per endpoint) |
+| `/analytics`, `/api/analytics/*` | Datasets, model and dashboards | Signed-in users with the Analytics right (datasets and the model: also Designer or Admin) | Sign-in session |
 | `/docs`, `/redoc`, `/openapi.json` | API documentation | Developers only | Switch off in production |
 
 ### Roles
@@ -91,7 +93,6 @@ server {
    for automation only and is never handed to a browser.
 7. **Start with one worker**:
    `python -m uvicorn backend.app.main:app --host 127.0.0.1 --port 8000 --workers 1`
-   (`app:app` still works: the root `app.py` imports the same app.)
    Saved reports and data adapters are cached inside the process; several workers would not see each
    other's changes. Put nginx/IIS in front for HTTPS.
 8. **Check**: `GET /health` → `{"status": "ok", ...}`; sign in at `/login`, open `/admin`; check the Logs tab.
@@ -104,12 +105,10 @@ On Windows, run the start command as a service (for example with NSSM or the Tas
 A `Dockerfile` is included: mount a volume at `/data` and pass the secrets as environment variables:
 
 ```bash
-docker build -t mongo-reporting .
-docker run -d -p 8000:8000 -v reporting-data:/data -e REPORTING_ADMIN_TOKEN=... -e REPORTING_ACCESS_SECRET=... -e REPORTING_ENABLED_AREAS=runner,admin,designer mongo-reporting
+docker build -t analysis .
+docker run -d -p 8000:8000 -v analysis-data:/data -e REPORTING_ADMIN_TOKEN=... -e REPORTING_SECRETS_KEY=... -e REPORTING_ENABLED_AREAS=runner,admin,designer analysis
 ```
 
-Note: starter reports bundled in the image are copied into `/data` only when they are missing there, so a
-bundled report you delete comes back on the next start. Remove it from the image as well.
 
 ## 3. Repository folders and data adapters
 
@@ -219,6 +218,33 @@ These Java snippets are examples for your Grizzly code and were not compiled her
 
 ## 6. Public API v1 (for client websites and other systems)
 
+### How API keys work
+
+An API key lets **another system** (a client website's server, a Java/Grizzly app, an ETL job) run reports without a
+person signing in. People use `/login`; systems use keys.
+
+1. **Create**: Admin → API keys → *New key*. Give it a name (the website), and limit it:
+   * **Folders**: the key can only see and run reports in those folders (and their subfolders); everything else answers 404.
+   * **Allowed IPs**: only requests from the website server's address (or network, e.g. `10.20.0.0/24`) are accepted.
+   * **Expires**: optional end date; **Requests per minute**: optional own rate limit; **Webhook URL**; **Embedding** websites.
+2. **Copy once**: the key looks like `mrk_<12-hex id>_<secret>`. It is shown **only once**. The server stores only the
+   SHA-256 of the secret, so nobody (not even an admin or someone with the database) can read it back. Lost it? Create a
+   new key and disable the old one.
+3. **Use**: the website's **server** sends it on every call, `X-API-Key: mrk_…` (or `Authorization: Bearer mrk_…`).
+   The key must never be put in a web page, JavaScript or a mobile app. For a browser, the server asks for a
+   short-lived signed link (`POST /api/v1/links`) or an embed token (`POST /api/v1/embed-tokens`) and gives that out.
+4. **Each call is checked**: key exists → not disabled → not expired → caller's IP allowed → under its rate limit
+   (`429`) → report is in its folders (`404`) → a free report place (`429`/`503`, see "Large reports and many users").
+   Signed links carry the key's id, so disabling or expiring the key also stops its links.
+5. **Audit**: every run is logged with the key's name as actor (and `onBehalfOf`, the website's own user); creating,
+   changing and disabling keys are in the audit trail. *Last used* is shown in Admin → API keys.
+6. **Rotate**: create the new key, put it on the website server, check *Last used* moves to it, then disable the old one.
+
+The signed links of keys are signed with `REPORTING_SESSION_SECRET` (or, when it is not set, a value derived from
+`REPORTING_ADMIN_TOKEN`). Changing that secret makes every link already given out invalid; keys themselves keep working.
+
+### Calls
+
 Create one API key per website in **Admin → API keys** (limit it to folders and the website server's IP; optional
 webhook URL and requests per minute). The key stays on the website's server: `X-API-Key: mrk_…`.
 
@@ -232,6 +258,10 @@ webhook URL and requests per minute). The key stays on the website's server: `X-
 | `GET /api/v1/jobs/{id}`, `GET /api/v1/jobs/{id}/file` | Status, then the file |
 | `POST /api/v1/links` | A short-lived signed URL for a browser (parameters cannot be changed) |
 | `GET /api/v1/openapi.json` | This API as OpenAPI 3 (always on, no data) |
+| `GET /api/v1/analytics/datasets` | Analytics datasets in the key's folders: columns, status, record count |
+| `GET /api/v1/analytics/dashboards`, `GET /api/v1/analytics/dashboards/{id}` | Dashboards in the key's folders, with their tiles (visual definitions) to draw them in your own page |
+| `POST /api/v1/analytics/query` | One visual: `{"dataset", "groupBy": [{"column", "bucket"}], "values": [{"column", "agg"}], "filters": […]}` → `{"columns", "rows"}` |
+| `POST /api/v1/analytics/datasets/{id}/refresh` | Import the dataset again now (202; runs in the background) |
 
 * **Webhook**: when a background job of the key finishes, its webhook URL gets `POST` `{"event": "job.finished",
   "job": {…, "downloadUrl"}}` with `X-Reporting-Timestamp` and `X-Reporting-Signature: sha256=HMAC(secret,
@@ -269,11 +299,12 @@ is in the run log with channel `embed`, the key's name and `onBehalfOf`; issuing
 ## Docker
 
 The image is built from a clean checkout; it builds the React pages itself and contains **no** `data/`
-(reports, adapters, users and secrets live on the `/data` volume).
+(reports, adapters, users, secrets and analytics datasets live on the `/data` volume). `.dockerignore` keeps
+`.env`, `data/`, tests, tools and caches out of the build.
 
 ```bash
-docker build -t mongo-reporting .
-docker run -d --name reporting -p 8000:8000 -v reporting-data:/data --env-file .env mongo-reporting
+docker build -t analysis .
+docker run -d --name analysis -p 8000:8000 -v analysis-data:/data --env-file .env analysis
 ```
 
 * The `default` data adapter comes from `MONGODB_URI` / `MONGODB_DATABASE`; add more on `/admin → Data sources`.
@@ -311,6 +342,7 @@ What is kept (and what is not):
 | Report run: who, channel (runner, server, designer preview/run, schedule, API, signed link), report, data source, parameters, status, error, rows, duration, output size and SHA-256, client IP, the website's own user | `rs_report_runs` | every execution | report data rows; values of parameters marked **Sensitive** are stored masked (`42*********71`) |
 | Published reports and designer drafts (folder, ID, title, data source, query language, the definition), folders, data adapters (no passwords) | `rs_reports`, `rs_drafts`, `rs_folders`, `rs_data_sources` | current state | data adapter URLs and passwords (they stay in the private secrets, encrypted with `REPORTING_SECRETS_KEY`) |
 | Accounts, rights, API keys (hashes only), folder permissions, report versions and history, schedules and background/scheduled runs | `rs_users`, `rs_api_keys`, `rs_folder_permissions`, `rs_report_versions`, `rs_report_history`, `rs_job_schedules`, `rs_job_runs` | current state (versions: last 50 per report; history: last 200) | plain passwords or API keys |
+| Analytics: datasets (adapter, query, column model, status, record count, file name), relationships, dashboards (tiles and filters), import history | `rs_analytics_datasets`, `rs_analytics_relationships`, `rs_analytics_dashboards`, `rs_analytics_refreshes` | current state (import history: last 200 per dataset) | the imported records themselves: those are Parquet files in `data/analytics` (or `REPORTING_ANALYTICS_DIR`) |
 | Audit event: sign-ins (also failed), sign-outs, users and rights, API keys, publish, delete, move, upload, version restore, folder permissions, data sources, schedules | `rs_audit_events` | append-only, each with the hash of the one before (`/admin → Logs → Audit trail → Verify chain`) | passwords, tokens, API keys, database URLs; draft autosaves |
 
 Moving an existing data folder into a database (one time; the folder is not changed, and running it twice copies
@@ -410,3 +442,139 @@ job stops working when its owner loses the permission). The dialog shows, per us
 Known limits: the permissions are for `/server` sign-ins. Token access (`/generate` with the admin token or a
 signed link, the designer token) is not limited by folders — keep those tokens for trusted systems. Designers can
 query any registered data adapter, so adapter users must be limited in the database itself.
+
+## Analytics (datasets and dashboards)
+
+`/analytics` turns data from any data adapter into dashboards. It is on when `REPORTING_ENABLED_AREAS` contains
+`analytics` (the default).
+
+1. **Dataset**: a data adapter plus a query (aggregation JSON, mongosh, JavaScript or SQL). Its records are imported
+   into a compressed Parquet file (DuckDB) under `data/analytics/` (`REPORTING_ANALYTICS_DIR`). Nested fields become
+   columns such as `customer.city`. Dashboards read this file, never the source database, so a busy dashboard puts no
+   load on MongoDB or SQL Server. A dataset is imported again by hand, on a schedule (every N minutes, at least
+   `ANALYTICS_MIN_REFRESH_MINUTES`), or by `POST /api/v1/analytics/datasets/{id}/refresh`. A failed import keeps the
+   previous file, so dashboards keep working, and the error shows on the dataset.
+2. **Model**: relationships between datasets on a shared column (for example orders `Branch` = branches `Code`), even
+   when the datasets come from different databases. A visual can then group or filter one dataset by columns of the other.
+3. **Dashboards**: cards (KPI), column, bar, line, area, pie, donut, scatter, table and slicer visuals on a 12-column
+   grid. Clicking a bar or a slice filters the other visuals; slicers and dashboard filters do the same.
+
+| Right | May |
+|---|---|
+| Report Server | see and open the dashboards in the folders they may see (read-only, filters work), like reports |
+| Report Server + Designer/Admin with Manage on the folder | also download a dashboard (`.mdash`), upload one, move it; delete needs Admin |
+| Analytics | open dashboards, filter them, make dashboards and change their own |
+| Analytics + Designer or Admin | also make and import datasets and change the model |
+| Admin / super admin | also change or delete anybody's dashboard |
+
+**Admin → Analytics** (the Admin right is enough; the Analytics right is not needed) is where administrators
+control it: every dataset with its source, status, records, size, last import, schedule and the dashboards using it,
+with **Import now**, a schedule picker (or *Only by hand* to pause) and **Delete**; every dashboard with its owner and
+**Change owner** (when someone leaves; users that no longer exist are marked); the recent imports with their errors;
+disk space used and free; the limits in force; and **Remove leftover files** for Parquet files no dataset uses any more.
+Each action is in the audit trail. Who may *see* a dashboard is set with the folder permissions on the Report Server;
+who may *make* datasets with the rights in Users & rights.
+
+**Dashboards on the Report Server.** A dashboard lives in a repository folder (default **Analytics**) and is listed on
+`/server` next to the reports. The folder permissions apply to it exactly as to reports (also in `/analytics`), and
+deleting a folder deletes its dashboards (their datasets stay). **Download (.mdash)** gives one JSON file with the
+dashboard, its datasets' definitions (adapter ID, query, column model) and their relationships; no data and no
+adapter addresses or passwords. **Add Resource** (or **Import** in Analytics) uploads it into any folder: datasets that
+are already on the server with the same query are reused, others are created and imported; another data adapter can
+be chosen when the file's adapter is not on this server.
+
+**Power BI (.pbit, .pbix).** Analytics → Dashboards → **Import** also takes a Power BI template (`.pbit`) or report
+(`.pbix`). A `.pbix` keeps its data model and data in Microsoft's closed format, so the browser takes only its report
+part (pages and visuals) out of the file and sends that — no data is uploaded and the file size does not matter. Its
+tables and columns are then known only from the visuals' fields: measures (no DAX), column types and relationships are
+missing, so visuals on measures are left out and two tables must be related in **Model**. For the full model, save a
+template in Power BI Desktop (*File → Export → Power BI template*) and import the `.pbit`. A dialog lists the pages (each becomes a dashboard) with what changes on each, and every Power BI table the
+chosen pages use: match it to a dataset here (suggested when the names are the same), a new dataset on one of this
+server's data adapters (the collection or SQL table is suggested from the template's Power Query source), or leave it
+out. Converted: cards, column/bar/line/area/pie/donut/scatter charts, tables, matrices (as tables) and slicers at about
+the same place; summaries of columns, date levels (year, quarter, month, day), simple measures (`SUM`, `AVERAGE`,
+`MIN`, `MAX`, `COUNT`, `COUNTA`, `DISTINCTCOUNT`, `MEDIAN` of one column, `COUNTROWS` of a table) and the
+relationships. Not converted: other DAX, Power Query steps, page and report filters, formatting, text boxes and images.
+Columns are matched by name (ignoring case); a field the chosen dataset does not have is left out and named in the
+result. API: `POST /api/analytics/powerbi/inspect` and `POST /api/analytics/powerbi/import` (the file as base64, at
+most 15 MB; modellers only).
+
+Every change to a dataset, relationship or dashboard is in the audit trail (`analytics.…`); every import is in the
+run log (channel `analytics`) and in the dataset's import history. API keys see the datasets and dashboards in their
+folders (folder **Analytics** when none is set).
+
+| Setting | Default | What it limits |
+|---|---|---|
+| `ANALYTICS_IMPORT_MAX_ROWS` / `ANALYTICS_IMPORT_MAX_TIME_MS` | 5 000 000 / 30 min | records and time of one import |
+| `ANALYTICS_QUERY_MAX_ROWS` / `ANALYTICS_QUERY_TIMEOUT_SECONDS` | 5 000 / 30 s | rows and time of one visual |
+| `ANALYTICS_MEMORY_LIMIT` / `ANALYTICS_THREADS` | 1GB / 2 | memory and CPU of one query (DuckDB spills to disk above it) |
+| `ANALYTICS_REFRESH_WORKERS` | 1 | imports running at once in this process |
+
+Size the server for it: the Parquet file is usually 5–20× smaller than the source data (20 000 orders ≈ 250 KB), and
+a query reads only the columns it uses. Several servers behind a load balancer need `REPORTING_ANALYTICS_DIR` on a
+shared disk; imports run on whichever server received the request or the schedule.
+
+## Large reports and many users
+
+A report server must not fall over when many people press *Run* at once, or when one report asks for years of data.
+The service protects itself in four layers:
+
+| Layer | What happens | Setting (`.env`) |
+|---|---|---|
+| **1. Report places** | Every report run (query + PDF/Excel/CSV) needs a *place*. There are a fixed number per process; a request that finds none waits up to 15 s in line, then gets `503 Busy, try again` with `Retry-After`. Memory use therefore has a ceiling: places × rows per run, however many requests arrive. | `REPORT_MAX_CONCURRENT` (default: CPU count, 2–8), `REPORT_QUEUE_WAIT_SECONDS` |
+| **2. Fair share** | One user may hold only 2 places at once; all API keys, tokens and links together at most half of them, so one website (or a script in a loop) cannot lock out everybody else. Over it → `429`. | `REPORT_MAX_PER_CALLER` |
+| **3. Direct runs are capped** | A run in the browser or by URL reads at most `REPORT_MAX_ROWS` records and stops after `REPORT_MAX_TIME_MS` (the database cancels the query). Above the cap the answer is `413` with: *run it in the background as CSV or Excel*. PDF is always capped: a 100 000-page PDF helps nobody. Plus the per-key rate limit. | `REPORT_MAX_ROWS` (10 000), `REPORT_MAX_TIME_MS` (30 s), `REPORTING_API_RATE_PER_MINUTE` |
+| **4. Big exports stream to disk** | A **background** CSV/Excel run (Run in background, schedules, `POST /api/v1/reports/{id}/jobs`) reads the database in batches of 2 000 with a cursor (MongoDB batch cursor, PostgreSQL server-side cursor, MySQL unbuffered cursor, Oracle array fetch) and writes each batch straight into the file. Memory stays a few MB whether the result is 10 000 or 1 000 000 rows / several GB. The file is downloaded from disk (`GET /api/v1/jobs/{id}/file`), and files over 15 MB are not e-mailed (the e-mail gets the link). | `REPORT_EXPORT_MAX_ROWS` (1 000 000), `REPORT_EXPORT_MAX_TIME_MS` (10 min), `REPORTING_JOB_WORKERS` (2), `REPORTING_EXPORT_DIR` |
+
+Watch it in **Admin → Overview → Capacity**: places in use, waiting, turned away, background queue, and the limits.
+
+**Sizing** (rule of thumb): one place needs about *rows × columns × 200 bytes* of RAM while it renders (10 000 × 20
+columns ≈ 40 MB, a PDF a little more). With 8 places, keep ~1 GB per worker process free for reports. If people get
+`503` often, add CPU/RAM and raise `REPORT_MAX_CONCURRENT`, or run more instances behind the load balancer (see
+"Several instances" above; then point `REPORTING_EXPORT_DIR` at a shared disk). Excel has a hard limit of 1 048 576 rows
+per sheet; ask for CSV beyond that.
+
+**On the database side** (this matters as much as the app): give reports **indexes** on the fields they filter by
+(dates, branch, identifier), a **read-only** user, and, for MongoDB, run reports against a **secondary** /
+analytics node (`readPreference=secondaryPreferred` in the adapter URL) so a heavy report never slows the
+application that writes the data. Ask report designers to filter by a date range parameter instead of reading
+"everything".
+
+## If a super admin forgets the password
+
+No database editing is needed. Anybody who can open a shell on the server (and so could read `.env` anyway) runs:
+
+```bash
+python -m backend.app.reset_password                       # list the accounts, super admins first
+python -m backend.app.reset_password admin                 # type a new password twice (hidden, 12+ characters)
+python -m backend.app.reset_password admin --generate      # or: print a strong random password once
+python -m backend.app.reset_password admin --make-super-admin   # also make the account a super admin again
+docker compose exec reporting python -m backend.app.reset_password admin   # in Docker
+```
+
+It works with every system database (files, SQL Server, PostgreSQL, MySQL, Oracle, SQLite, MongoDB), enables the
+account again, signs out all its sessions and writes the audit event `user.password_recovered`. Other people: a
+super admin resets their password in Admin → Users & rights. The sign-in page shows both ways under *Forgot your
+password?*. Tip: keep **two** super admins, so one can always reset the other.
+
+## What to keep (deployment record)
+
+Keep one document per environment (staging, production) in your password manager or a restricted wiki. **Never** in
+Git, e-mail or chat. `.env.example` lists every setting.
+
+| Keep | Why | If lost |
+|---|---|---|
+| `REPORTING_ADMIN_TOKEN` | First sign-in, automation | Set a new one in `.env` and restart (sessions are signed out unless `REPORTING_SESSION_SECRET` is set) |
+| `REPORTING_SESSION_SECRET` | Signs sign-ins and API-key links | Set a new one: everybody signs in again, links given out stop working |
+| `REPORTING_SECRETS_KEY` | Decrypts data-source passwords | Re-enter every data adapter's password in Admin → Data sources |
+| `REPORTING_ACCESS_SECRET`, `REPORTING_DESIGNER_TOKEN` | Older token access | Make new ones, give them to the systems that use them |
+| `REPORTING_STORAGE` / `REPORTING_STORAGE_URL` | Where the service keeps its own data (system database) | You cannot find reports, users and keys |
+| Data adapter connection details (host, database, read-only user) | To re-create adapters | Ask the DBA |
+| API keys: **name, owner, which website/IP, folders, created** (not the key itself, which is only on the website server) | To know whom to call when rotating | Create a new key for that website |
+| Super admin user names (2+) | Recovery | `reset_password` (above) |
+| Server: host names, ports, TLS certificate renewal date, reverse proxy config, service/Docker command | Restart and renewal | — |
+| Limits you chose: `REPORT_MAX_*`, `REPORT_EXPORT_*`, `REPORTING_JOB_WORKERS`, `REPORTING_OUTPUT_DAYS`, `ANALYTICS_*` | Capacity decisions | Defaults apply |
+| Backups: what is backed up (storage database or data folder, **excluding** `data/exports`; `data/analytics` is optional: datasets can be imported again from their sources), how often, where, and the last restore test | Disaster recovery | — |
+
+Back up the secrets **separately** from the database backup: a stolen backup without `REPORTING_SECRETS_KEY` does
+not reveal the data-source passwords.

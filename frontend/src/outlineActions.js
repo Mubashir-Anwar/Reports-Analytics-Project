@@ -1,7 +1,7 @@
 // Actions behind the right-click menus of the Outline and the canvas (like Jaspersoft Studio's).
 import {
   BUILTIN_VARIABLES, NAME_PATTERN, PALETTE_GROUPS, addElementToBand, bandKeys, bandLabel, bandPresent, contentBottom, createBand, deleteBand,
-  findElement, getBand, groupOfBand, moveElementToBand, nextName, placeField, removeElement, removeGroup,
+  findElement, getBand, groupOfBand, mapElements, moveElementToBand, nextName, placeField, removeElement, removeGroup,
   renameCalculated, renameGroup, renameInElements, renameToken, reorderElement, setBand,
 } from './designModel.js';
 import {
@@ -124,6 +124,12 @@ export function makeActions({ get, dispatch, notify, ui = { current: {} } }) {
     if (chosen.length) dispatch({ type: 'DESIGN', key: 'nudge', update: (d) => nudgeElements(d, chosen, dx, dy) });
   };
   const order = (toFront) => arrange((d, chosen) => selectedElements(d, chosen).reduce((next, { bandKey, element }) => reorderElement(next, bandKey, element.id, toFront), d));
+  /** Ribbon → Home: font, size, bold, alignment, colours on every selected element. */
+  const patchSelected = (values) => {
+    const chosen = ids();
+    if (!chosen.length) return;
+    dispatch({ type: 'DESIGN', key: `ribbon-${chosen.join()}-${Object.keys(values).join()}`, update: (d) => mapElements(d, (el) => (chosen.includes(el.id) ? { ...el, ...values } : el)) });
+  };
   const toggleLock = () => {
     const chosen = ids();
     if (!chosen.length) return;
@@ -401,7 +407,7 @@ export function makeActions({ get, dispatch, notify, ui = { current: {} } }) {
 
   return {
     rename, deleteSelection, createBandAt, createGroup,
-    align, distribute, matchSize, nudge, order, toggleLock, copy, cut, paste, duplicateSelected, selectAll, removeSelected,
+    align, distribute, matchSize, nudge, order, toggleLock, patchSelected, copy, cut, paste, duplicateSelected, selectAll, removeSelected,
     reportMenu, bandMenu, elementMenu, parametersMenu, parameterMenu, fieldsMenu, fieldMenu,
     variablesMenu, variableMenu, builtinMenu, calcsMenu, calcMenu, canvasMenu, createBandMenu,
   };

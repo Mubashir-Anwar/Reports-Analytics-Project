@@ -13,12 +13,13 @@ from defusedxml import ElementTree as SafeET
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse, Response
 
+from backend.app.analytics import store as analytics_store
 from backend.app.connectors.profiles import load_connection_profiles
 from backend.app.constants import BOOTSTRAP_USERNAME, OUTPUT_FORMATS, REPORT_ID_PATTERN, SESSION_COOKIE, USER_RIGHTS, WORKSPACE_META
 from backend.app.logs import LOG
 from backend.app.mrd import parse_report_definition_xml, render_report_definition_xml
 from backend.app.security import permissions, shared_state
-from backend.app.security.access import client_address
+from backend.app.security.access import client_address, enabled_areas
 from backend.app.security.users import (
     bootstrap_login_active,
     check_user_password,
@@ -136,10 +137,21 @@ def register(app: FastAPI, ctx: SimpleNamespace) -> None:
             have = permissions.level(session, item["folder"], rules)
             if have >= permissions.RUN:
                 reports.append({**item, "access": permissions.NAMES[have]})
-        seen_folders = {r["folder"] for r in reports}
+        dashboards = []
+        if "analytics" in enabled_areas():                 # dashboards live in the same folders, with the same permissions
+            for item in analytics_store.dashboards():
+                folder = item.get("folder") or "Analytics"
+                have = permissions.level(session, folder, rules)
+                if have >= permissions.RUN:
+                    dashboards.append({"id": item["id"], "name": item.get("name", ""), "folder": folder, "description": item.get("description") or "",
+                                       "tiles": len(item.get("tiles") or []), "owner": item.get("owner"), "updatedAt": item.get("updatedAt"),
+                                       "access": permissions.NAMES[have]})
+        seen_folders = {r["folder"] for r in reports} | {d["folder"] for d in dashboards}
+        folders = sorted(set(folders) | {d["folder"] for d in dashboards})
         visible = [f for f in folders if permissions.level(session, f, rules) >= permissions.RUN
                    or any(s == f or s.startswith(f"{f}/") for s in seen_folders)]
         return {"folders": visible, "reports": sorted(reports, key=lambda item: item["title"].casefold()),
+                "dashboards": sorted(dashboards, key=lambda item: item["name"].casefold()),
                 "user": session_view(session), "folderAccess": {f: permissions.NAMES[permissions.level(session, f, rules)] for f in visible}}
 
     @app.post("/api/server/reports/{report_id}/run")

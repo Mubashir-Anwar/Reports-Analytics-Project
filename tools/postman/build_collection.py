@@ -15,8 +15,11 @@ first setup), adminToken (for the token-based requests) and mongoUri.
 """
 from __future__ import annotations
 
+import base64
+import io
 import json
 import uuid
+import zipfile
 from pathlib import Path
 
 OUT = Path(__file__).resolve().parents[2] / "postman"
@@ -257,6 +260,146 @@ FOLDER[4]["event"][0]["script"]["exec"].append(
     "pm.test('only LHR rows', function () { pm.response.json().rows.forEach(r => pm.expect(r.Branch).to.eql('LHR')); });")
 req("SDK script for the website", "GET", "/assets/embed/sdk.js", auth="none")
 
+folder("12c Analytics (datasets, model, dashboards)",
+       "Imports the demo orders into a dataset (DuckDB + Parquet), relates a second dataset, builds a dashboard, queries it "
+       "with the session and with the API key, then removes everything. Datasets and the model need the Analytics right "
+       "plus Designer or Admin.")
+
+
+def power_bi_layout() -> dict:
+    """The report part of a small Power BI file: one page with a column chart of Orders (sum of Amount by Branch)."""
+    def column(name):
+        return {"Column": {"Expression": {"SourceRef": {"Source": "o"}}, "Property": name}}
+    single = {"visualType": "clusteredColumnChart", "projections": {"Category": [{"queryRef": "c"}], "Y": [{"queryRef": "y"}]},
+              "prototypeQuery": {"Version": 2, "From": [{"Name": "o", "Entity": "Orders"}], "Select": [
+                  {**column("Branch"), "Name": "c"}, {"Aggregation": {"Expression": column("Amount"), "Function": 0}, "Name": "y"}]}}
+    layout = {"sections": [{"displayName": "Branches", "width": 1280, "height": 720, "visualContainers": [
+        {"x": 0, "y": 0, "width": 1280, "height": 400, "config": json.dumps({"name": "c1", "singleVisual": single})}]}]}
+    return layout
+
+
+def power_bi_report_parts() -> dict:
+    """What the browser sends for a .pbix: only its report part, as {name: base64}."""
+    return {"Report/Layout": base64.b64encode(json.dumps(power_bi_layout()).encode("utf-16-le")).decode()}
+
+
+def power_bi_template() -> str:
+    """A small Power BI template (.pbit) as base64: one table Orders (Branch, Amount), one page with a column chart."""
+    layout = power_bi_layout()
+    model = {"model": {"tables": [{"name": "Orders", "columns": [{"name": "Branch", "dataType": "string"},
+                                                                {"name": "Amount", "dataType": "double"}]}]}}
+    out = io.BytesIO()
+    with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED) as archive:
+        archive.writestr("DataModelSchema", json.dumps(model).encode("utf-16-le"))
+        archive.writestr("Report/Layout", json.dumps(layout).encode("utf-16-le"))
+    return base64.b64encode(out.getvalue()).decode()
+
+
+ORDERS_SOURCE = '[{"$project": {"_id": 0, "Name": 1, "Branch": 1, "Amount": 1}}]'
+BRANCH_SOURCE = '[{"$group": {"_id": "$Branch"}}, {"$project": {"_id": 0, "Code": "$_id"}}]'
+SUM_BY_BRANCH = {"dataset": "{{dsOrders}}", "groupBy": [{"column": "Branch"}], "values": [{"column": "Amount", "agg": "sum"}],
+                 "sort": [{"by": "value:0", "dir": "desc"}]}
+req("Analytics: limits, visuals, aggregations", "GET", "/api/analytics/info",
+    checks="pm.test('may build datasets', function () { pm.expect(pm.response.json().mayModel).to.eql(true); });")
+req("Test a dataset query (first records, nothing saved)", "POST", "/api/analytics/datasets/test",
+    body={"connectionId": "pm_mongo", "queryLanguage": "aggregation-json", "collection": "orders", "querySource": ORDERS_SOURCE},
+    checks="pm.test('has columns', function () { pm.expect(pm.response.json().columns.length).to.be.above(0); });")
+req("Create dataset PM orders (imports in the background)", "POST", "/api/analytics/datasets", expect=(201,),
+    body={"name": "PM orders", "folder": "Postman", "connectionId": "pm_mongo", "queryLanguage": "aggregation-json",
+          "collection": "orders", "querySource": ORDERS_SOURCE, "refreshEveryMinutes": 0},
+    save={"dsOrders": "pm.response.json().dataset.id"})
+req("Create dataset PM branches", "POST", "/api/analytics/datasets", expect=(201,),
+    body={"name": "PM branches", "folder": "Postman", "connectionId": "pm_mongo", "queryLanguage": "aggregation-json",
+          "collection": "orders", "querySource": BRANCH_SOURCE, "refreshEveryMinutes": 0},
+    save={"dsBranches": "pm.response.json().dataset.id"})
+req("Wait until both datasets are ready (repeats itself)", "GET", "/api/analytics/datasets",
+    checks="const mine = pm.response.json().datasets.filter(d => [pm.environment.get('dsOrders'), pm.environment.get('dsBranches')].includes(d.id));\n"
+           "const tries = Number(pm.environment.get('analyticsTries') || 0);\n"
+           "if (mine.some(d => d.status !== 'ready' && d.status !== 'failed') && tries < 30) { pm.environment.set('analyticsTries', tries + 1); "
+           "postman.setNextRequest(pm.info.requestName); }\n"
+           "else { pm.environment.unset('analyticsTries'); pm.test('both imported', function () { mine.forEach(d => pm.expect(d.status).to.eql('ready')); }); }")
+FOLDER[-1]["event"].append({"listen": "prerequest", "script": {"type": "text/javascript", "exec": ["setTimeout(function () {}, 1000);"]}})
+req("One dataset with its columns", "GET", "/api/analytics/datasets/{{dsOrders}}")
+req("Change a column's role and format", "PUT", "/api/analytics/datasets/{{dsOrders}}",
+    body={"name": "PM orders", "folder": "Postman", "connectionId": "pm_mongo", "queryLanguage": "aggregation-json", "collection": "orders",
+          "querySource": ORDERS_SOURCE, "refreshEveryMinutes": 0,
+          "columns": [{"name": "Amount", "kind": "number", "role": "measure", "label": "Amount (PKR)", "format": "number"}]},
+    checks="pm.test('source unchanged, no re-import', function () { pm.expect(pm.response.json().sourceChanged).to.eql(false); });")
+req("First records of the imported data", "GET", "/api/analytics/datasets/{{dsOrders}}/rows?limit=5")
+req("Import history", "GET", "/api/analytics/datasets/{{dsOrders}}/refreshes")
+req("Relate orders.Branch to branches.Code", "POST", "/api/analytics/relationships", expect=(201,),
+    body={"fromDataset": "{{dsOrders}}", "fromColumn": "Branch", "toDataset": "{{dsBranches}}", "toColumn": "Code"},
+    save={"relationshipId": "pm.response.json().relationship.id"})
+req("Relationships", "GET", "/api/analytics/relationships")
+req("One visual: amount by branch", "POST", "/api/analytics/query", body=SUM_BY_BRANCH,
+    checks="pm.test('rows by branch', function () { pm.expect(pm.response.json().rows.length).to.be.above(0); });")
+req("A wrong column is refused", "POST", "/api/analytics/query",
+    body={"dataset": "{{dsOrders}}", "groupBy": [{"column": "Nope"}], "values": [{"column": "Amount", "agg": "sum"}]}, expect=(422,))
+req("Create dashboard PM sales", "POST", "/api/analytics/dashboards", expect=(201,),
+    body={"name": "PM sales", "folder": "Postman", "tiles": [
+        {"id": "kpi", "type": "kpi", "title": "Total", "x": 0, "y": 0, "w": 3, "h": 2, "dataset": "{{dsOrders}}", "values": [{"column": "Amount", "agg": "sum"}]},
+        {"id": "col", "type": "column", "title": "By branch", "x": 3, "y": 0, "w": 9, "h": 5, "dataset": "{{dsOrders}}",
+         "groupBy": [{"dataset": "{{dsBranches}}", "column": "Code"}], "values": [{"column": "Amount", "agg": "sum"}]}]},
+    save={"dashboardId": "pm.response.json().dashboard.id"})
+req("Dashboards", "GET", "/api/analytics/dashboards")
+req("One dashboard", "GET", "/api/analytics/dashboards/{{dashboardId}}")
+req("Rename the dashboard", "PUT", "/api/analytics/dashboards/{{dashboardId}}", body={"name": "PM sales (edited)", "folder": "Postman"})
+req("All visuals of a dashboard, filtered (cross-filter from a click)", "POST", "/api/analytics/query-batch",
+    body={"queries": [{"dataset": "{{dsOrders}}", "values": [{"column": "Amount", "agg": "sum"}]}, SUM_BY_BRANCH],
+          "filters": [{"dataset": "{{dsOrders}}", "column": "Branch", "op": "in", "values": ["LHR"], "fromTile": "col"}]},
+    checks="pm.test('two results', function () { pm.expect(pm.response.json().results.length).to.eql(2); });")
+req("A dataset used by a dashboard is not deleted", "DELETE", "/api/analytics/datasets/{{dsBranches}}", expect=(409,))
+req("Download the dashboard as one file (.mdash)", "GET", "/api/analytics/dashboards/{{dashboardId}}/file",
+    save={"dashFile": "JSON.stringify(pm.response.text())"},
+    checks="pm.test('dashboard file', function () { pm.expect(pm.response.json().format).to.eql('analysis-dashboard'); });")
+req("Report Server: dashboards are listed with the reports", "GET", "/api/server/repository",
+    checks="pm.test('lists PM sales', function () { pm.expect(pm.response.json().dashboards.map(d => d.id)).to.include(pm.environment.get('dashboardId')); });")
+req("Report Server: open the dashboard (read-only)", "GET", "/api/server/dashboards/{{dashboardId}}")
+req("Report Server: its visuals", "POST", "/api/server/dashboards/{{dashboardId}}/query-batch",
+    body={"queries": [{"dataset": "{{dsOrders}}", "values": [{"column": "Amount", "agg": "sum"}]}]})
+req("Report Server: download (.mdash)", "GET", "/api/server/dashboards/{{dashboardId}}/file")
+req("Report Server: upload the file into Postman/Copies (its datasets are reused)", "POST", "/api/server/dashboards/upload", expect=(201,),
+    raw_body='{"content": {{dashFile}}, "folder": "Postman/Copies"}', save={"dashboardCopyId": "pm.response.json().dashboard.id"},
+    checks="pm.test('datasets reused', function () { pm.expect(pm.response.json().reused.length).to.eql(2); });")
+req("Report Server: move the copy", "POST", "/api/server/dashboards/{{dashboardCopyId}}/move", body={"folder": "Postman"})
+req("Report Server: delete the copy", "DELETE", "/api/server/dashboards/{{dashboardCopyId}}")
+req("Analytics: import the file again (modellers)", "POST", "/api/analytics/dashboards/import", expect=(201,),
+    raw_body='{"content": {{dashFile}}, "folder": "Postman"}', save={"dashboardCopyId": "pm.response.json().dashboard.id"})
+req("Delete the imported copy", "DELETE", "/api/analytics/dashboards/{{dashboardCopyId}}")
+req("Power BI template (.pbit): its pages, visuals and tables", "POST", "/api/analytics/powerbi/inspect",
+    body={"content": power_bi_template(), "name": "PM sales.pbit"},
+    checks="pm.test('one page, one table', function () { var b = pm.response.json(); pm.expect(b.pages[0].visuals).to.eql(1); "
+           "pm.expect(b.tables[0].name).to.eql('Orders'); });")
+req("Power BI report (.pbix): its report part only", "POST", "/api/analytics/powerbi/inspect",
+    body={"parts": power_bi_report_parts(), "name": "PM sales.pbix"},
+    checks="pm.test('report part read', function () { var b = pm.response.json(); pm.expect(b.kind).to.eql('pbix'); "
+           "pm.expect(b.tables[0].columns.map(c => c.name)).to.include('Amount'); });")
+req("Power BI template: import its page as a dashboard on PM orders", "POST", "/api/analytics/powerbi/import", expect=(201,),
+    body={"content": power_bi_template(), "name": "PM sales.pbit", "folder": "Postman", "pages": [0],
+          "tables": {"Orders": {"dataset": "{{dsOrders}}"}}},
+    save={"dashboardCopyId": "pm.response.json().dashboards[0].id"},
+    checks="pm.test('dataset reused', function () { pm.expect(pm.response.json().reused).to.include(pm.environment.get('dsOrders')); });")
+req("Delete the dashboard from Power BI", "DELETE", "/api/analytics/dashboards/{{dashboardCopyId}}")
+req("Public API: datasets in the key's folders", "GET", "/api/v1/analytics/datasets", auth="key",
+    checks="pm.test('sees PM orders', function () { pm.expect(pm.response.json().datasets.map(d => d.name)).to.include('PM orders'); });")
+req("Public API: dashboards", "GET", "/api/v1/analytics/dashboards", auth="key")
+req("Public API: one dashboard (tiles to draw it yourself)", "GET", "/api/v1/analytics/dashboards/{{dashboardId}}", auth="key")
+req("Public API: one visual", "POST", "/api/v1/analytics/query", auth="key", body=SUM_BY_BRANCH)
+req("Public API: import again now", "POST", "/api/v1/analytics/datasets/{{dsOrders}}/refresh", auth="key", expect=(202,))
+req("Import again now (session)", "POST", "/api/analytics/datasets/{{dsBranches}}/refresh", expect=(202,))
+req("Admin: every dataset and dashboard, disk use, limits", "GET", "/api/admin/analytics",
+    checks="pm.test('has totals', function () { pm.expect(pm.response.json().totals.datasets).to.be.above(0); });")
+req("Admin: import a dataset now", "POST", "/api/admin/analytics/datasets/{{dsBranches}}/refresh", expect=(202,))
+req("Admin: a schedule shorter than the minimum is refused", "PUT", "/api/admin/analytics/datasets/{{dsOrders}}/schedule",
+    body={"refreshEveryMinutes": 1}, expect=(422,))
+req("Admin: import every day", "PUT", "/api/admin/analytics/datasets/{{dsOrders}}/schedule", body={"refreshEveryMinutes": 1440})
+req("Admin: give the dashboard a new owner", "PUT", "/api/admin/analytics/dashboards/{{dashboardId}}/owner", body={"owner": "pm_runner"})
+req("Admin: remove leftover files", "POST", "/api/admin/analytics/cleanup", body={})
+req("Delete dashboard", "DELETE", "/api/analytics/dashboards/{{dashboardId}}")
+req("Delete relationship", "DELETE", "/api/analytics/relationships/{{relationshipId}}")
+req("Admin: delete dataset PM branches", "DELETE", "/api/admin/analytics/datasets/{{dsBranches}}?force=true")
+req("Delete dataset PM orders", "DELETE", "/api/analytics/datasets/{{dsOrders}}?force=true")
+
 folder("13 Logs, audit and system (Admin)")
 req("System database (where the service keeps its data)", "GET", "/api/admin/system-db",
     checks="pm.test('names the database', function () { pm.expect(pm.response.json().label).to.be.a('string'); });")
@@ -264,6 +407,11 @@ req("System database: a wrong choice is refused", "POST", "/api/admin/system-db/
 req("Postman collection for this server", "GET", "/api/admin/postman/collection.json")
 req("Postman environment for this server", "GET", "/api/admin/postman/environment.json",
     checks="pm.test('base URL filled in', function () { pm.expect(pm.response.json().values.find(v => v.key === 'baseUrl').value).to.eql(pm.environment.get('baseUrl')); });")
+req("Product name (public: sign-in page, navigation bar)", "GET", "/api/branding", auth="none",
+    checks="pm.test('has a name', function () { pm.expect(pm.response.json().name).to.be.a('string'); });")
+req("Product name: a wrong name is refused (super admin)", "PUT", "/api/admin/branding", body={"name": "<x>", "tagline": ""}, expect=(422,))
+req("Capacity: report places in use, background queue, limits", "GET", "/api/admin/capacity",
+    checks="pm.test('has limits', function () { pm.expect(pm.response.json().limits.maxConcurrent).to.be.above(0); });")
 req("Service log", "GET", "/api/admin/logs?lines=50")
 req("Download service log", "GET", "/api/admin/logs/download")
 req("Report runs", "GET", "/api/admin/audit?limit=50")
@@ -291,12 +439,12 @@ req("Sign out", "POST", "/api/server/logout", body={})
 def main() -> None:
     OUT.mkdir(exist_ok=True)
     collection = {
-        "info": {"_postman_id": str(uuid.uuid5(uuid.NAMESPACE_URL, "mongo-reporting-service")), "name": "Folio Reports — all APIs",
+        "info": {"_postman_id": str(uuid.uuid5(uuid.NAMESPACE_URL, "mongo-reporting-service")), "name": "Analysis — all APIs",
                  "description": __doc__, "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"},
         "item": ITEMS,
     }
     (OUT / "Reporting-Service.postman_collection.json").write_text(json.dumps(collection, indent=2, ensure_ascii=False), encoding="utf-8")
-    environment = {"id": str(uuid.uuid5(uuid.NAMESPACE_URL, "mongo-reporting-local")), "name": "Folio Reports — local",
+    environment = {"id": str(uuid.uuid5(uuid.NAMESPACE_URL, "mongo-reporting-local")), "name": "Analysis — local",
                    "values": [{"key": key, "value": value, "type": kind, "enabled": True} for key, value, kind in (
                        ("baseUrl", "http://127.0.0.1:8000", "default"), ("username", "admin", "default"),
                        ("password", "", "secret"), ("adminToken", "", "secret"),

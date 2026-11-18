@@ -8,8 +8,8 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-import designer_render as dr  # noqa: E402
-import reporting_core as core  # noqa: E402
+from backend.app.rendering import engine as dr  # noqa: E402
+import service_names as core  # noqa: E402
 
 COLUMNS = ["Branch", "Name", "Amount", "LastUpdateDateTime"]
 

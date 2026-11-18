@@ -23,7 +23,7 @@ from types import SimpleNamespace
 from typing import Any
 
 from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import JSONResponse, Response
+from fastapi.responses import FileResponse, JSONResponse, Response
 from pymongo.errors import PyMongoError
 
 from backend.app.connectors.errors import ConnectorQueryError, MongoReadAccessError
@@ -160,7 +160,8 @@ def register(app: FastAPI, ctx: SimpleNamespace) -> None:
                   "on_behalf_of": next((value for name, value in pairs if name == "GeneratedBy"), "")}
         try:
             parameters, _ = validate_parameters(definition, [(n, v) for n, v in pairs if n != "GeneratedBy"])
-            rows = ctx.run_report_rows(definition, parameters, definition.connection_id, max_rows=ctx.settings.max_rows, limit_rows=False)
+            with ctx.run_gate.slot(access):
+                rows = ctx.run_report_rows(definition, parameters, definition.connection_id, max_rows=ctx.settings.max_rows, limit_rows=False)
         except ValueError as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from None
         except HTTPException as exc:
@@ -205,6 +206,10 @@ def register(app: FastAPI, ctx: SimpleNamespace) -> None:
         run = owned_job(request, job_id)
         if run.get("status") != "success":
             raise HTTPException(status_code=409, detail=f"The job is {run.get('status')}; the file is ready when it is success")
+        on_disk = job_store.output_path(run)
+        if on_disk is not None:                    # a big export: sent from disk in pieces, never read into memory
+            stamp = re.sub(r"\D", "", str(run.get("finishedAt") or ""))[:14]
+            return FileResponse(on_disk, media_type=MEDIA[run["format"]], filename=f"{run['reportId']}-{stamp}.{run['format']}")
         body = job_store.read_output(run)
         if body is None:
             raise HTTPException(status_code=410, detail="The file is no longer kept")

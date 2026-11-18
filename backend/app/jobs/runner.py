@@ -10,18 +10,23 @@ import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
 from datetime import date, datetime, timedelta, timezone
+from itertools import chain, islice
 from types import SimpleNamespace
 from typing import Any
 from zoneinfo import ZoneInfo
 
 from fastapi import HTTPException
 
+from backend.app.connectors.errors import MongoReadAccessError
 from backend.app.connectors.mongo_fallback import _row_value
 from backend.app.definitions import validate_parameters
 from backend.app.jobs import mailer, schedule, store
 from backend.app.logs import LOG
+from backend.app.rendering import spool
 from backend.app.rendering.outputs import render_report_output
 from backend.app.security import api_keys, permissions, webhooks
+
+MAIL_ATTACH_MAX = 15 * 1_048_576  # bigger files are not attached to e-mails (download them on /server, Runs)
 
 
 def _now() -> datetime:
@@ -68,6 +73,9 @@ class JobRunner:
         while not self._stop.wait(self.poll):
             try:
                 self.tick()
+                refresher = getattr(self.ctx, "analytics_refresher", None)
+                if refresher is not None:
+                    refresher.tick()                   # analytics datasets with a refresh schedule
                 if time.monotonic() - last_cleanup > 3600:
                     last_cleanup = time.monotonic()
                     self.remove_old_outputs()
@@ -152,15 +160,22 @@ class JobRunner:
             parameters, _ = validate_parameters(definition, pairs)
             audit["parameters"] = {k: v.isoformat() if isinstance(v, date) else v for k, v in parameters.items()}
             audit["connectionId"] = definition.connection_id
-            rows = ctx.run_report_rows(definition, parameters, definition.connection_id, max_rows=ctx.settings.max_rows, limit_rows=False)
-            rows = [{key: _row_value(row, key) for key in definition.columns} for row in rows]
-            body, _media = render_report_output(definition, parameters, rows, run["format"],
-                                                ctx.subreport_loader(ctx.report_allowed_for(owner)),
-                                                ctx.dataset_loader(definition.connection_id, definition.report_id))
             name = f"{run['id']}.{run['format']}"
-            store.write_output(name, body)
-            run.update({"status": "success", "rowCount": len(rows), "file": name, "size": len(body)})
-            audit.update({"status": "success", "rowCount": len(rows)})
+            rows = self._first_rows(definition, parameters, run["format"])
+            if isinstance(rows, tuple):           # more than REPORT_MAX_ROWS: a big CSV / Excel written to disk
+                first, rest = rows
+                count = self._spool(definition, run["format"], name, chain(first, rest))
+                size = spool.export_path(name).stat().st_size
+                run.update({"status": "success", "rowCount": count, "file": name, "size": size, "spooled": True})
+                audit.update({"status": "success", "rowCount": count})
+            else:
+                rows = [{key: _row_value(row, key) for key in definition.columns} for row in rows]
+                body, _media = render_report_output(definition, parameters, rows, run["format"],
+                                                    ctx.subreport_loader(ctx.report_allowed_for(owner)),
+                                                    ctx.dataset_loader(definition.connection_id, definition.report_id))
+                store.write_output(name, body)
+                run.update({"status": "success", "rowCount": len(rows), "file": name, "size": len(body)})
+                audit.update({"status": "success", "rowCount": len(rows)})
         except HTTPException as exc:
             run.update({"status": "failed", "error": str(exc.detail)})
             audit["errorCode"] = str(exc.status_code)
@@ -176,12 +191,48 @@ class JobRunner:
                                    actor=run["owner"], actor_type="api-key" if by_key else "user",
                                    definition=ctx.reports_by_id.get(run["reportId"]), body=body or None)
         if job and job.get("email", {}).get("to"):
+            if run.get("spooled") and run.get("size", 0) <= MAIL_ATTACH_MAX:
+                body = spool.export_path(run["file"]).read_bytes()
             run["email"] = self._mail(job, run, body)
         store.save_run(run, keep_for_job=job.get("keep", 10) if job else None)
         if job:
             self._record_last_run(job["id"], run)
         if run["owner"].startswith("apikey:"):
             self._notify_key(run)
+
+    def _first_rows(self, definition: Any, parameters: dict[str, Any], output_format: str) -> Any:
+        """The records of a run: first the normal run (up to REPORT_MAX_ROWS, a list for the normal, designed file).
+        Only when that says "too many records" and the file is a CSV / Excel: (the first records, the rest still being
+        read) for a file written to disk. Small reports never take the streaming path."""
+        ctx = self.ctx
+        max_rows = ctx.settings.max_rows
+        try:
+            return ctx.run_report_rows(definition, parameters, definition.connection_id, max_rows=max_rows, limit_rows=False)
+        except HTTPException as too_many:
+            if too_many.status_code != 413 or output_format not in ("csv", "xlsx") or ctx.settings.export_max_rows <= max_rows:
+                raise
+            try:
+                stream = ctx.iter_report_rows(definition, parameters, definition.connection_id, limit=ctx.settings.export_max_rows)
+                first = list(islice(stream, max_rows + 1))
+            except MongoReadAccessError:
+                raise too_many from None          # no aggregate permission: only the normal (limited) run is possible
+        if len(first) <= max_rows:
+            stream.close()
+            return first
+        LOG.info("Report %s has more than %d records: writing the %s to disk while reading", definition.report_id, max_rows,
+                 output_format.upper())
+        return first, stream
+
+    @staticmethod
+    def _spool(definition: Any, output_format: str, name: str, rows: Any) -> int:
+        columns = list(definition.columns)
+        layout = (definition.editor_config or {}).get("layout", {}) or {}
+        labels = layout.get("columnLabels", {}) or {}
+        plain = ({key: _row_value(row, key) for key in columns} for row in rows)
+        path = spool.export_path(name)
+        if output_format == "csv":
+            return spool.write_csv(path, columns, labels, plain)
+        return spool.write_xlsx(path, str(layout.get("title") or definition.title), columns, labels, plain)
 
     @staticmethod
     def _notify_key(run: dict[str, Any]) -> None:
@@ -204,7 +255,9 @@ class JobRunner:
                  f"Status: {run['status']}", f"Records: {run['rowCount']}"]
         if not ok:
             lines.append(f"Error: {run['error']}")
-        attachment = (f"{run['reportId']}.{run['format']}", body) if ok and email.get("attach", True) else None
+        attachment = (f"{run['reportId']}.{run['format']}", body) if ok and body and email.get("attach", True) else None
+        if ok and email.get("attach", True) and not body:
+            lines.append(f"The file is too big to send by e-mail ({run.get('size', 0) // 1_048_576} MB): download it on /server, Runs.")
         try:
             mailer.send(email["to"], subject, "\n".join(lines), attachment)
             return f"sent to {len(email['to'])}"

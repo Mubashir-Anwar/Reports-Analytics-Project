@@ -25,7 +25,7 @@ from typing import Any
 SCHEMA_VERSION = 1
 DEFAULT_ORG = "default"
 
-CHANNELS = ("runner", "server", "designer-preview", "designer-run", "schedule", "api", "signed-link", "embed")
+CHANNELS = ("runner", "server", "designer-preview", "designer-run", "schedule", "api", "signed-link", "embed", "analytics")
 STATUSES = ("success", "failed")
 ACTOR_TYPES = ("user", "api-key", "token", "schedule", "system", "anonymous")
 

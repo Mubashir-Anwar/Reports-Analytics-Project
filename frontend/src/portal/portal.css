@@ -104,7 +104,7 @@ table.data tr.failed td { color: var(--danger); }
 .log-toolbar .grow { flex: 1; min-width: 200px; }
 .segmented { display: inline-flex; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
 .segmented button { border: 0; background: var(--panel); padding: 8px 12px; cursor: pointer; font-weight: 600; font-size: 12px; }
-.segmented button.on { background: var(--accent); color: #fff; }
+.segmented button.on { background: var(--accent); color: var(--on-accent); }
 .log-lines { font: 12px/1.45 ui-monospace, Consolas, monospace; border: 1px solid var(--line); border-radius: 10px; max-height: 62vh; overflow: auto; }
 .log-line { display: grid; grid-template-columns: 170px 70px 140px minmax(0, 1fr); gap: 8px; padding: 5px 10px; border-bottom: 1px solid var(--line); }
 .log-line pre { margin: 0; white-space: pre-wrap; word-break: break-word; font: inherit; }
@@ -168,10 +168,10 @@ table.data tr.failed td { color: var(--danger); }
 .schedule-main { display: grid; gap: 3px; min-width: 0; }
 .day-picker { display: flex; gap: 6px; flex-wrap: wrap; }
 .day-picker button { width: 48px; padding: 8px 0; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); color: var(--text); cursor: pointer; font-weight: 600; }
-.day-picker button.on { background: var(--accent); border-color: var(--accent); color: #fff; }
+.day-picker button.on { background: var(--accent); border-color: var(--accent); color: var(--on-accent); }
 .status-chip { display: inline-block; padding: 2px 8px; border-radius: 999px; font-size: 11px; font-weight: 700; background: var(--soft); color: var(--muted); white-space: nowrap; }
-.status-chip.ok { background: #dcfce7; color: #166534; }
-.status-chip.error { background: #fee2e2; color: #991b1b; }
+.status-chip.ok { background: var(--ok-soft); color: var(--ok); }
+.status-chip.error { background: var(--danger-soft); color: var(--danger); }
 .status-chip.running, .status-chip.queued { background: var(--accent-soft); color: var(--accent); }
 .small { font-size: 12px; }
 .runs-table td { vertical-align: top; }
@@ -320,3 +320,38 @@ table.data tr.failed td { color: var(--danger); }
 .snippet-head { display: flex; justify-content: space-between; align-items: center; padding: 6px 10px; background: var(--soft); border-bottom: 1px solid var(--line); font-size: 12.5px; }
 .snippet pre { margin: 0; padding: 10px 12px; font: 12px/1.5 var(--mono); white-space: pre-wrap; word-break: break-all; background: var(--panel); }
 .login-logo { width: 52px; height: 52px; filter: drop-shadow(0 8px 18px rgb(79 70 229 / .35)); }
+.login .forgot { font-size: 12.5px; color: var(--muted); }
+.login .forgot summary { cursor: pointer; color: var(--accent); font-weight: 600; width: max-content; }
+.login .forgot ol { margin: 8px 0 0; padding-left: 18px; display: grid; gap: 6px; line-height: 1.5; }
+.login .forgot code { font-size: 11.5px; background: var(--soft); border: 1px solid var(--line); border-radius: 5px; padding: 0 4px; color: var(--text); word-break: break-all; }
+.login .forgot code.block { display: block; margin: 4px 0; padding: 6px 8px; }
+
+/* Admin → Overview: capacity */
+.capacity { margin-bottom: 16px; }
+.cap-meter { height: 10px; border-radius: 999px; background: var(--soft); border: 1px solid var(--line); overflow: hidden; margin: 4px 0 12px; }
+.cap-meter span { display: block; height: 100%; background: var(--ok); transition: width .4s var(--ease); }
+.cap-meter span.warm { background: var(--warn); } .cap-meter span.hot { background: var(--danger); }
+.cap-list { margin: 0 0 10px; padding-left: 18px; display: grid; gap: 4px; color: var(--muted); font-size: 13px; }
+.cap-list b { color: var(--text); }
+.cap-table { width: 100%; border-collapse: collapse; font-size: 12.5px; margin-top: 8px; }
+.cap-table td { padding: 5px 8px; border-top: 1px solid var(--line); vertical-align: top; }
+.cap-table td:first-child { font-family: var(--mono); font-size: 11.5px; color: var(--accent); white-space: nowrap; }
+.cap-table td:nth-child(2) { font-weight: 700; text-align: right; white-space: nowrap; }
+.capacity summary { cursor: pointer; color: var(--accent); font-weight: 600; font-size: 13px; }
+/* Admin → Name & look */
+.brand-preview { display: flex; align-items: center; gap: 10px; padding: 12px 14px; border-radius: 12px; background: linear-gradient(90deg, #0c1425, #131f3a); color: #e4e9f3; margin: 4px 0 12px; }
+.brand-preview .fx-logo { background: #fff; border-radius: 9px; padding: 3px; }
+.brand-preview .fx-name { display: flex; flex-direction: column; line-height: 1.1; }
+.brand-preview .fx-name b { font-size: 16px; font-weight: 800; }
+.brand-preview .fx-name b span { font-weight: 500; color: #818cf8; margin-left: 4px; }
+.brand-preview .fx-name small { font-size: 10.5px; letter-spacing: .06em; text-transform: uppercase; color: #93a3bd; margin-top: 3px; }
+.lk-inline .lk-panel { position: static; width: auto; max-height: none; box-shadow: none; padding: 0; border: 0; background: transparent;
+  --fx-menu: var(--panel); --fx-menu-text: var(--text); --fx-menu-muted: var(--muted); --fx-menu-line: var(--line); --fx-menu-hover: var(--soft); }
+
+/* /admin → Analytics */
+.admin-bi .stat-warn { border-color: var(--warn); }
+.admin-bi .stat-warn strong { color: var(--warn); }
+.admin-bi .bi-error { color: var(--danger); font-size: 11.5px; overflow-wrap: anywhere; }
+.admin-bi .nowrap { white-space: nowrap; }
+.admin-bi .bi-admin-table select { font-size: 12px; padding: 3px 6px; max-width: 160px; }
+.admin-bi .small { font-size: 12.5px; }

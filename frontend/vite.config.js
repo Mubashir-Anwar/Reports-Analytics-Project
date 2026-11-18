@@ -2,8 +2,8 @@ import { resolve } from 'node:path';
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 
-// One React project, three pages. The build goes into ../ui/app and FastAPI serves
-//   /designer -> index.html, /server -> server.html, /admin -> admin.html
+// One React project, four pages. The build goes into ../ui/app and FastAPI serves
+//   /designer -> index.html, /server -> server.html, /admin -> admin.html, /analytics -> analytics.html
 // (assets under /assets/app/). For `npm run dev`, API calls are proxied to uvicorn.
 export default defineConfig({
   plugins: [react()],
@@ -16,6 +16,7 @@ export default defineConfig({
         designer: resolve(__dirname, 'index.html'),
         server: resolve(__dirname, 'server.html'),
         admin: resolve(__dirname, 'admin.html'),
+        analytics: resolve(__dirname, 'analytics.html'),
       },
     },
   },

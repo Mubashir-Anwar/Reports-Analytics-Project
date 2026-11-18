@@ -12,9 +12,9 @@ from openpyxl import load_workbook
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-import designer_render as dr  # noqa: E402
-import jexpr  # noqa: E402
-import reporting_core as core  # noqa: E402
+from backend.app.rendering import engine as dr  # noqa: E402
+from backend.app.expressions import jexpr  # noqa: E402
+import service_names as core  # noqa: E402
 
 NO_REFS = lambda kind, name: None  # noqa: E731
 

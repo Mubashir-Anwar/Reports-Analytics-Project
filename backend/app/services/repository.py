@@ -82,10 +82,14 @@ def save_report_payload(ctx: SimpleNamespace, payload: Any, expected_id: str | N
 
 
 def folder_contents(ctx: SimpleNamespace, folder: str) -> dict[str, list[str]]:
-    """Subfolders, published reports and data adapters inside a repository folder (at any depth)."""
+    """Subfolders, published reports, dashboards and data adapters inside a repository folder (at any depth)."""
+    from backend.app.analytics import store as analytics_store  # noqa: PLC0415 - analytics is optional
+
     def inside(path: str) -> bool:
         return path == folder or path.startswith(f"{folder}/")
     return {
+        "dashboards": sorted(item.get("name") or item["id"] for item in analytics_store.dashboards()
+                             if inside(str(item.get("folder") or "Analytics"))),
         "subfolders": [item for item in list_saved_folders() if item.startswith(f"{folder}/")],
         "reports": sorted(item.report_id for item in ctx.reports_by_id.values()
                           if item.editor_config and inside(str(item.editor_config.get("folder", "General")))),
@@ -104,18 +108,26 @@ def delete_repository_folder(ctx: SimpleNamespace, folder: str, recursive: bool 
     contents = ctx.folder_contents(folder)
     if contents["adapters"]:
         raise HTTPException(status_code=409, detail=f"Move or delete the data adapters in this folder first: {', '.join(contents['adapters'])}")
-    if not recursive and (contents["subfolders"] or contents["reports"]):
+    if not recursive and (contents["subfolders"] or contents["reports"] or contents["dashboards"]):
         parts = []
         if contents["subfolders"]:
             parts.append(f"{len(contents['subfolders'])} subfolder(s)")
         if contents["reports"]:
             parts.append(f"{len(contents['reports'])} report(s): {', '.join(contents['reports'][:5])}")
+        if contents["dashboards"]:
+            parts.append(f"{len(contents['dashboards'])} dashboard(s)")
         raise HTTPException(status_code=409, detail=f"The folder is not empty ({' and '.join(parts)}); confirm to delete it with everything inside")
     store = get_store()
     for report_id in contents["reports"]:
         definition = ctx.reports_by_id[report_id]
         store.delete(report_definition_key(report_id, normalize_folder_path(definition.editor_config.get("folder", "General"))))
         ctx.record_history(report_id, "deleted", user or "admin", f"with the folder {folder}")
+    if contents["dashboards"]:
+        from backend.app.analytics import store as analytics_store  # noqa: PLC0415
+        for item in analytics_store.dashboards():
+            where = str(item.get("folder") or "Analytics")
+            if where == folder or where.startswith(f"{folder}/"):
+                analytics_store.delete_dashboard(item["id"])     # their datasets stay (other dashboards may use them)
     if not store.remove_dir("/".join(["reports", *folder.split("/")]), recursive=recursive):
         raise HTTPException(status_code=409, detail="The folder still has files in it; confirm to delete it with everything inside")
     removed = {folder, *contents["subfolders"]}

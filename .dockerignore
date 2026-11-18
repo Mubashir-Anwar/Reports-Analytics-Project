@@ -1,6 +1,8 @@
+# Only what the Dockerfile copies is needed: keep secrets, data, caches and tooling out of the build context.
 .env
+.env.*
+!.env.example
 .venv/
-.pip-tmp/
 __pycache__/
 *.pyc
 .pytest_cache/
@@ -9,7 +11,11 @@ __pycache__/
 .git/
 .github/
 tests/
+tools/
 data/
+deploy/.env
+deploy/certs/
 frontend/node_modules/
 ui/app/
-.env.before-storage-*
+*.md
+!postman/README.md

@@ -95,8 +95,38 @@ DATA_SOURCES = Entity("data_sources", {
     "type": ("str", 16, False), "storage": ("str", 8, False), "database": ("str", 128, False), "folder": ("str", 240, False),
 }, key=("id",))
 
+# Analytics (Phase 4): datasets imported to Parquet files, relationships between them (the model), dashboards, refresh log.
+# The data itself is never stored here: only definitions and status. Parquet files live in REPORTING_ANALYTICS_DIR.
+ANALYTICS_DATASETS = Entity("analytics_datasets", {
+    "id": ("str", 40, True), "orgId": ("str", 64, True), "name": ("str", 120, True), "folder": ("str", 240, False),
+    "description": ("str", 500, False), "connectionId": ("str", 64, True), "queryLanguage": ("str", 32, True),
+    "collection": ("str", 200, False), "querySource": ("json", None, True), "columns": ("json", None, False),
+    "refreshEveryMinutes": ("int", None, False), "status": ("str", 16, False), "rowCount": ("int", None, False),
+    "sizeBytes": ("int", None, False), "refreshedAt": ("time", None, False), "nextRefreshAt": ("time", None, False),
+    "lastError": ("str", 500, False), "file": ("str", 80, False), "createdBy": ("str", 128, False),
+    "createdAt": ("time", None, False), "updatedBy": ("str", 128, False), "updatedAt": ("time", None, False),
+}, key=("id",), indexes=(("name",), ("nextRefreshAt",)))
+ANALYTICS_RELATIONSHIPS = Entity("analytics_relationships", {
+    "id": ("str", 40, True), "orgId": ("str", 64, True), "fromDataset": ("str", 40, True), "fromColumn": ("str", 120, True),
+    "toDataset": ("str", 40, True), "toColumn": ("str", 120, True), "active": ("bool", None, False),
+    "createdBy": ("str", 128, False), "createdAt": ("time", None, False),
+}, key=("id",), indexes=(("fromDataset",), ("toDataset",)))
+ANALYTICS_DASHBOARDS = Entity("analytics_dashboards", {
+    "id": ("str", 40, True), "orgId": ("str", 64, True), "name": ("str", 120, True), "folder": ("str", 240, False),
+    "description": ("str", 500, False), "tiles": ("json", None, False), "filters": ("json", None, False),
+    "owner": ("str", 128, False), "createdAt": ("time", None, False), "updatedBy": ("str", 128, False),
+    "updatedAt": ("time", None, False),
+}, key=("id",), indexes=(("name",),))
+ANALYTICS_REFRESHES = Entity("analytics_refreshes", {
+    "id": ("str", 40, True), "orgId": ("str", 64, True), "datasetId": ("str", 40, True), "trigger": ("str", 16, False),
+    "actor": ("str", 128, False), "status": ("str", 16, True), "startedAt": ("time", None, False),
+    "finishedAt": ("time", None, False), "rowCount": ("int", None, False), "sizeBytes": ("int", None, False),
+    "durationMs": ("int", None, False), "error": ("str", 500, False),
+}, key=("id",), indexes=(("datasetId", "startedAt"),))
+
 ENTITIES = (USERS, API_KEYS, FOLDER_PERMISSIONS, REPORT_VERSIONS, REPORT_HISTORY, JOB_SCHEDULES, JOB_RUNS,
-            REPORTS, DRAFTS, FOLDERS, DATA_SOURCES)
+            REPORTS, DRAFTS, FOLDERS, DATA_SOURCES,
+            ANALYTICS_DATASETS, ANALYTICS_RELATIONSHIPS, ANALYTICS_DASHBOARDS, ANALYTICS_REFRESHES)
 
 
 # ------------------------------------------------------------------ record <-> stored values
@@ -344,7 +374,7 @@ class MongoEntities(EntityBackend):
             collection = self.db[entity.table]
             for fields in ((entity.key,) if len(entity.key) > 1 else ()) + entity.indexes:
                 collection.create_index([(name, ASCENDING) for name in fields], name=f"ix_{entity.table}_{'_'.join(fields)}"[:120])
-        self.db["rs_schema_version"].update_one({"_id": "entities"}, {"$max": {"version": 3}, "$set": {"appliedAt": model.now()}}, upsert=True)
+        self.db["rs_schema_version"].update_one({"_id": "entities"}, {"$max": {"version": 4}, "$set": {"appliedAt": model.now()}}, upsert=True)
 
     @staticmethod
     def _id(key: tuple) -> str:

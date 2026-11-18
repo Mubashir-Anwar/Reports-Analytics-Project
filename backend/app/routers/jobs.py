@@ -4,12 +4,13 @@ Everyone signed in can run a report in the background. Creating schedules needs 
 Users see their own schedules and runs; administrators see everybody's."""
 from __future__ import annotations
 
+import re
 from datetime import datetime, timezone
 from types import SimpleNamespace
 from typing import Any
 
 from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import Response
+from fastapi.responses import FileResponse, Response
 
 from backend.app.definitions import validate_parameters
 from backend.app.jobs import mailer, schedule, store
@@ -187,6 +188,10 @@ def register(app: FastAPI, ctx: SimpleNamespace) -> None:
     @app.get("/api/server/runs/{run_id}/file")
     def run_file(run_id: str, request: Request) -> Response:
         run = find_run(run_id, require_session(request))
+        on_disk = store.output_path(run)
+        if on_disk is not None:                    # a big export: sent from disk in pieces, never read into memory
+            stamp = re.sub(r"\D", "", str(run.get("finishedAt") or ""))[:14]
+            return FileResponse(on_disk, media_type=MEDIA[run["format"]], filename=f"{run['reportId']}-{stamp}.{run['format']}")
         body = store.read_output(run)
         if body is None:
             raise HTTPException(status_code=404, detail="This run has no file (it failed, or the file was removed)")

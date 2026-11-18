@@ -16,7 +16,7 @@ import uuid
 from dataclasses import dataclass
 from datetime import time as daytime, timedelta
 from decimal import Decimal
-from typing import Any, Callable
+from typing import Any, Callable, Iterator
 from urllib.parse import parse_qs, unquote, urlsplit
 
 from backend.app.connectors.errors import ConnectorQueryError
@@ -247,6 +247,48 @@ def run_query(kind: str, url: str, prepared: PreparedSql, values: dict[str, Any]
         finally:
             cursor.close()
     return [{name: _plain(value) for name, value in zip(names, row)} for row in rows]
+
+
+def iter_query(kind: str, url: str, prepared: PreparedSql, values: dict[str, Any], *, timeout_ms: int,
+               batch_size: int = 2000) -> Iterator[dict[str, Any]]:
+    """The query's rows in batches (big exports): a server-side cursor where the driver needs one (PostgreSQL,
+    MySQL), so the database sends the rows as they are read instead of all at once."""
+    sql, params = _bind(kind, prepared, values)
+    with _Session(kind, url, timeout_ms) as session:
+        try:
+            if kind == "postgresql":
+                cursor = session.connection.cursor(name="report_export")       # psycopg: a server-side cursor
+                cursor.itersize = batch_size
+                cursor.execute(sql, params)
+            elif kind == "mysql":
+                cursor = session.connection.cursor(session.module.cursors.SSCursor)  # PyMySQL: unbuffered
+                cursor.execute(sql, params)
+            else:
+                cursor = session.execute(sql, params, "The SQL query failed")
+                if kind == "oracle":
+                    cursor.arraysize = batch_size
+        except ConnectorQueryError:
+            raise
+        except Exception as exc:  # noqa: BLE001
+            raise ConnectorQueryError(f"The SQL query failed: {safe_error(exc, url)}") from None
+        try:
+            if cursor.description is None:
+                raise ConnectorQueryError("The query returned no result set (it must be a SELECT)")
+            names = _names(cursor)
+            while True:
+                try:
+                    batch = cursor.fetchmany(batch_size)
+                except Exception as exc:  # noqa: BLE001
+                    raise ConnectorQueryError(f"The SQL query failed: {safe_error(exc, url)}") from None
+                if not batch:
+                    break
+                for row in batch:
+                    yield {name: _plain(value) for name, value in zip(names, row)}
+        finally:
+            try:
+                cursor.close()
+            except Exception:  # noqa: BLE001,S110 - closing a broken cursor
+                pass
 
 
 def describe(kind: str, url: str, prepared: PreparedSql, values: dict[str, Any] | None = None) -> list[str]:

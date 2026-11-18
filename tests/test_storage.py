@@ -14,7 +14,7 @@ from fastapi.testclient import TestClient
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-import reporting_core as core  # noqa: E402
+import service_names as core  # noqa: E402
 from backend.app.storage import store as store_module  # noqa: E402
 from test_workspace_and_server import ADMIN, PUBLISHED, FakeMongoClient, client, login, token  # noqa: E402,F401
 

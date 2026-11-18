@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { Suspense, lazy, useCallback, useEffect, useMemo, useState } from 'react';
 import ContextMenu from '../ContextMenu.jsx';
 import { confirmFolderDelete } from '../folderDelete.js';
 import { Notice, Topbar, downloadBlob } from '../portal/Shell.jsx';
@@ -9,6 +9,8 @@ import PermissionsDialog from './PermissionsDialog.jsx';
 import ResourcePanel from './ResourcePanel.jsx';
 import { RunsList, SchedulesList } from './Schedules.jsx';
 import UploadDialog from './UploadDialog.jsx';
+
+const DashboardViewer = lazy(() => import('./DashboardViewer.jsx'));     // charts load only when a dashboard is opened
 import { safeNext } from '../shared/session.js';
 import { roleAtLeast, serverApi, whenSignedOut } from './serverApi.js';
 
@@ -39,6 +41,16 @@ function LoginForm({ onSignedIn, message }) {
         <label className="field"><span>Password</span><input name="password" type="password" autoComplete="current-password" value={password} onChange={(e) => setPassword(e.target.value)} required /></label>
         <Notice message={error} />
         <button className="btn primary" type="submit" disabled={busy} style={{ justifyContent: 'center', padding: '10px' }}>{busy ? 'Signing in…' : 'Sign in'}</button>
+        <details className="forgot">
+          <summary>Forgot your password?</summary>
+          <ol>
+            <li><b>Users:</b> ask an administrator. In Admin → Users &amp; rights they set a new password for you.</li>
+            <li><b>Super admin</b> (or no administrator can sign in): on the server, in the service folder, run
+              <code className="block">python -m backend.app.reset_password &lt;username&gt;</code>
+              Docker: <code>docker compose exec reporting python -m backend.app.reset_password &lt;username&gt;</code>.
+              It asks for a new password (or <code>--generate</code> makes one), enables the account again and signs out its old sessions. No database editing is needed.</li>
+          </ol>
+        </details>
         <p className="muted" style={{ fontSize: 12 }}>Accounts and their rights are set in Admin → Users &amp; rights. First setup: user <code>admin</code> with the admin token as the password, until a super admin exists.</p>
       </form>
     </div>
@@ -49,6 +61,8 @@ function LoginForm({ onSignedIn, message }) {
 function Repository({ user, onUser }) {
   const [folders, setFolders] = useState([]);
   const [reports, setReports] = useState([]);
+  const [dashboards, setDashboards] = useState([]);
+  const [openDash, setOpenDash] = useState(null);   // the dashboard being viewed (replaces the three columns)
   const [folder, setFolder] = useState('');
   const [search, setSearch] = useState('');
   const [selectedId, setSelectedId] = useState('');
@@ -56,7 +70,7 @@ function Repository({ user, onUser }) {
   const [message, setMessage] = useState(null);
   const [loading, setLoading] = useState(true);
   const [menu, setMenu] = useState(null);
-  const [clipboard, setClipboard] = useState(null); // { mode: 'copy' | 'cut', id, title }
+  const [clipboard, setClipboard] = useState(null); // { mode: 'copy' | 'cut', id, title, kind: 'report' | 'dashboard' }
   const [uploading, setUploading] = useState(false);
   const [version, setVersion] = useState(0); // reloads the resource panel after a change
   const [view, setView] = useState('repository'); // repository | schedules | runs
@@ -78,6 +92,7 @@ function Repository({ user, onUser }) {
       const data = await serverApi.repository();
       setFolders(data.folders);
       setReports(data.reports);
+      setDashboards(data.dashboards || []);
       setFolderAccess(data.folderAccess || {});
       onUser(data.user);
       setFolder((current) => (current && !data.folders.includes(current) ? '' : current));
@@ -92,6 +107,10 @@ function Repository({ user, onUser }) {
     // a folder shows its own reports (subfolders are tiles); searching looks inside the subfolders too
     return reports.filter((r) => (!folder || (needle ? inFolder(r, folder) : r.folder === folder)) && (!needle || `${r.title} ${r.id} ${r.description}`.toLowerCase().includes(needle)));
   }, [reports, folder, search]);
+  const visibleDashboards = useMemo(() => {
+    const needle = search.trim().toLowerCase();
+    return dashboards.filter((d) => (!folder || (needle ? inFolder(d, folder) : d.folder === folder)) && (!needle || `${d.name} ${d.description}`.toLowerCase().includes(needle)));
+  }, [dashboards, folder, search]);
 
   const done = async (text, select) => {
     await load();
@@ -109,7 +128,7 @@ function Repository({ user, onUser }) {
   /* ---------- actions */
   const createFolder = (parent = folder) => setNewFolder(parent);
   const saveNewFolder = async (path) => { await serverApi.createFolder(path); setFolder(path); await done(`Folder /${path} created.`); };
-  const countIn = (path) => reports.filter((r) => inFolder(r, path)).length;
+  const countIn = (path) => reports.filter((r) => inFolder(r, path)).length + dashboards.filter((d) => inFolder(d, path)).length;
   const deleteFolder = async (path = folder) => {
     try {
       const answer = confirmFolderDelete(path, await serverApi.folderContents(path));
@@ -134,7 +153,11 @@ function Repository({ user, onUser }) {
     if (!clipboard) return;
     const where = target || 'General';
     try {
-      if (clipboard.mode === 'cut') {
+      if (clipboard.kind === 'dashboard') {
+        await serverApi.moveDashboard(clipboard.id, where);
+        setClipboard(null);
+        await done(`Moved the dashboard “${clipboard.title}” to /${where}.`);
+      } else if (clipboard.mode === 'cut') {
         await serverApi.move(clipboard.id, where);
         setClipboard(null);
         await done(`Moved “${clipboard.title}” to /${where}.`, clipboard.id);
@@ -164,9 +187,32 @@ function Repository({ user, onUser }) {
     { label: 'Properties', icon: '⚙', onClick: () => open(r.id, 'overview') },
     { label: 'Delete', icon: '✕', danger: true, disabled: !admin, hint: admin ? '' : 'Needs an admin account', onClick: () => remove(r) },
   ];
+  const removeDashboard = async (d) => {
+    if (!window.confirm(`Delete the dashboard “${d.name}” from the server and Analytics? Its datasets stay. This cannot be undone.`)) return;
+    try { await serverApi.deleteDashboard(d.id); if (openDash?.id === d.id) setOpenDash(null); await done(`The dashboard “${d.name}” was deleted.`); } catch (error) { fail(error); }
+  };
+  const downloadDashboard = async (d) => {
+    try {
+      const { saveDashboardFile } = await import('../analytics/api.js');
+      saveDashboardFile(await serverApi.dashboardFile(d.id), d.name);
+      setMessage({ text: `Downloaded ${d.name}.mdash: the dashboard and its datasets' definitions (no data). Upload it on another server with Add Resource.`, kind: 'ok' });
+    } catch (error) { fail(error); }
+  };
+  const canManageDash = (d) => designer && d.access === 'manage';
+  const dashboardMenu = (d) => [
+    { header: `${d.name} (dashboard)` },
+    { label: 'Open', icon: '📊', onClick: () => setOpenDash(d) },
+    { label: 'Open in Analytics', icon: '✎', disabled: !user.rights?.includes('analytics'), hint: user.rights?.includes('analytics') ? 'Change it there' : 'Needs the Analytics right', onClick: () => window.open(`/analytics#dash/${encodeURIComponent(d.id)}`, '_blank', 'noopener') },
+    { label: 'Download (.mdash)', icon: '⤓', disabled: !canManageDash(d), hint: canManageDash(d) ? 'The dashboard and its datasets (no data)' : 'Needs the Manage permission on this folder', onClick: () => downloadDashboard(d) },
+    '-',
+    { label: 'Cut', icon: '✂', disabled: !canManageDash(d), onClick: () => { setClipboard({ mode: 'cut', id: d.id, title: d.name, kind: 'dashboard' }); setMessage({ text: `“${d.name}” cut — right-click a folder → Paste to move it.`, kind: 'ok' }); } },
+    { label: 'Paste into this folder', icon: '📋', disabled: !canManageFolder(d.folder) || !clipboard, onClick: () => paste(d.folder) },
+    '-',
+    { label: 'Delete', icon: '✕', danger: true, disabled: !admin || d.access !== 'manage', hint: admin ? '' : 'Needs an admin account', onClick: () => removeDashboard(d) },
+  ];
   const folderMenu = (path) => [
     { header: path ? `/${path}` : 'Repository' },
-    { label: 'Add Resource: upload .mrd / .jrxml', icon: '⤒', disabled: !canManageFolder(path), onClick: () => { setFolder(path); setUploading(true); } },
+    { label: 'Add Resource: upload .mrd / .jrxml / .mdash', icon: '⤒', disabled: !canManageFolder(path), onClick: () => { setFolder(path); setUploading(true); } },
     { label: 'New folder', icon: '📁', disabled: !canManageFolder(path), onClick: () => createFolder(path) },
     { label: clipboard ? `Paste “${clipboard.title}”${clipboard.mode === 'cut' ? ' (move)' : ''}` : 'Paste', icon: '📋', disabled: !canManageFolder(path) || !clipboard, onClick: () => paste(path) },
     '-',
@@ -181,7 +227,7 @@ function Repository({ user, onUser }) {
       if (!designer || !(event.ctrlKey || event.metaKey) || ['INPUT', 'TEXTAREA', 'SELECT'].includes(event.target.tagName)) return;
       const key = event.key.toLowerCase();
       const r = reports.find((x) => x.id === selectedId);
-      if ((key === 'c' || key === 'x') && r && !window.getSelection()?.toString()) { setClipboard({ mode: key === 'c' ? 'copy' : 'cut', id: r.id, title: r.title }); setMessage({ text: `“${r.title}” ${key === 'c' ? 'copied' : 'cut'}.`, kind: 'ok' }); }
+      if ((key === 'c' || key === 'x') && r && !window.getSelection()?.toString()) { setClipboard({ mode: key === 'c' ? 'copy' : 'cut', id: r.id, title: r.title, kind: 'report' }); setMessage({ text: `“${r.title}” ${key === 'c' ? 'copied' : 'cut'}.`, kind: 'ok' }); }
       if (key === 'v' && clipboard) paste(folder || r?.folder);
     };
     window.addEventListener('keydown', onKey);
@@ -191,8 +237,8 @@ function Repository({ user, onUser }) {
   return (
     <main className="page">
       <div className="page-head">
-        <div><p className="eyebrow">Report server</p><h1>{{ repository: 'Published reports', schedules: 'Schedules', runs: 'Runs and outputs' }[view]}</h1>
-          <p className="muted">{{ repository: 'Right-click a report or a folder for its actions. Only published or uploaded reports are on the server.', schedules: 'Reports that run by themselves at set times. Create one from a report → Schedules.', runs: 'Background runs and scheduled outputs. Files are kept on the server until they are replaced or deleted.' }[view]}</p></div>
+        <div><p className="eyebrow">Report server</p><h1>{{ repository: 'Reports and dashboards', schedules: 'Schedules', runs: 'Runs and outputs' }[view]}</h1>
+          <p className="muted">{{ repository: 'Right-click a report, a dashboard or a folder for its actions. Reports are published from the Designer, dashboards are made in Analytics; both can be uploaded as files.', schedules: 'Reports that run by themselves at set times. Create one from a report → Schedules.', runs: 'Background runs and scheduled outputs. Files are kept on the server until they are replaced or deleted.' }[view]}</p></div>
         <div className="row">
           <div className="segmented view-switch" role="tablist">
             {[['repository', '🗄 Repository'], ['schedules', '⏰ Schedules'], ['runs', '⟳ Runs']].map(([id, label]) => (
@@ -208,16 +254,21 @@ function Repository({ user, onUser }) {
       {clipboard && <div className="clip-bar">📋 {clipboard.mode === 'cut' ? 'Cut' : 'Copied'}: <b>{clipboard.title}</b> — right-click a folder → Paste <button className="btn quiet sm" onClick={() => setClipboard(null)}>✕</button></div>}
       {view === 'schedules' && <section className="card"><SchedulesList info={scheduleInfo} onMessage={showMessage} /></section>}
       {view === 'runs' && <section className="card"><RunsList onMessage={showMessage} version={runsVersion} /></section>}
-      {view === 'repository' && <div className={`server-grid ${selectedId ? 'has-selection' : ''}`} style={{ marginTop: 14 }}>
+      {view === 'repository' && openDash && (
+        <Suspense fallback={<section className="card"><p className="muted">Loading the dashboard…</p></section>}>
+          <DashboardViewer key={openDash.id} entry={openDash} mayManage={canManageDash(openDash)} onBack={() => setOpenDash(null)} onMessage={showMessage} />
+        </Suspense>
+      )}
+      {view === 'repository' && !openDash && <div className={`server-grid ${selectedId ? 'has-selection' : ''}`} style={{ marginTop: 14 }}>
         <aside className="card" onContextMenu={showMenu(folderMenu(''))}>
           <div className="card-head"><div><p className="eyebrow">Folders</p><h2>Repository</h2></div>{designer && <button className="btn sm quiet" onClick={() => createFolder()}>+ Folder</button>}</div>
-          <input type="search" placeholder="⌕  Find a report" value={search} onChange={(e) => setSearch(e.target.value)} style={{ marginBottom: 10 }} />
-          <FolderTree folders={folders} selected={folder} onSelect={setFolder} count={countIn} rootCount={reports.length}
+          <input type="search" placeholder="⌕  Find a report or dashboard" value={search} onChange={(e) => setSearch(e.target.value)} style={{ marginBottom: 10 }} />
+          <FolderTree folders={folders} selected={folder} onSelect={setFolder} count={countIn} rootLabel="Everything" rootCount={reports.length + dashboards.length}
             onMenu={(event, path) => showMenu(folderMenu(path))(event)} storageKey="server-folders-open" />
         </aside>
         <section className="card" onContextMenu={showMenu(folderMenu(folder))}>
           <div className="card-head">
-            <div><Breadcrumbs path={folder} onSelect={setFolder} /><h2>{folder ? folder.split('/').pop() : 'All reports'}</h2></div>
+            <div><Breadcrumbs path={folder} onSelect={setFolder} rootLabel="Everything" /><h2>{folder ? folder.split('/').pop() : 'Everything'}</h2></div>
             <div className="row">
               {designer && canManageFolder(folder) && <button className="btn sm" onClick={() => createFolder(folder)} title={folder ? `New folder inside /${folder}` : 'New top-level folder'}>+ Folder</button>}
               {designer && clipboard && <button className="btn sm" onClick={() => paste(folder)} title="Paste here">📋 Paste</button>}
@@ -225,13 +276,13 @@ function Repository({ user, onUser }) {
               {admin && folder && folder !== 'General' && <button className="btn danger sm" onClick={() => deleteFolder()}>Delete folder</button>}
             </div>
           </div>
-          {!search.trim() && <SubfolderTiles folders={folders} parent={folder} count={countIn} onOpen={setFolder} onMenu={(event, path) => showMenu(folderMenu(path))(event)} />}
+          {!search.trim() && <SubfolderTiles folders={folders} parent={folder} count={countIn} itemWord="item" onOpen={setFolder} onMenu={(event, path) => showMenu(folderMenu(path))(event)} />}
           <div className="stack">
             {loading && <div className="empty">Loading…</div>}
-            {!loading && !visible.length && (
+            {!loading && !visible.length && !visibleDashboards.length && (
               <div className="empty">
-                {!reports.length ? 'Nothing is published yet. Open the Designer, save a report and use “Publish to server”, or Add Resource → upload a .mrd file.'
-                  : search.trim() ? `No report matches “${search.trim()}”${folder ? ` in /${folder}` : ''}.` : folder ? 'No reports directly in this folder.' : 'No reports.'}
+                {!reports.length && !dashboards.length ? 'Nothing is here yet. Publish a report from the Designer, make a dashboard in Analytics, or Add Resource → upload a .mrd or .mdash file.'
+                  : search.trim() ? `Nothing matches “${search.trim()}”${folder ? ` in /${folder}` : ''}.` : folder ? 'Nothing directly in this folder.' : 'Nothing here.'}
                 {designer && folder && !search.trim() && canManageFolder(folder) && (
                   <div className="row" style={{ justifyContent: 'center', marginTop: 10 }}>
                     <button className="btn sm" onClick={() => setUploading(true)}>⤒ Add a report here</button>
@@ -253,6 +304,14 @@ function Repository({ user, onUser }) {
                 {r.description && <small>{r.description}</small>}
               </button>
             ))}
+            {visibleDashboards.map((d) => (
+              <button key={d.id} className={`report-card dashboard-card ${clipboard?.mode === 'cut' && clipboard.id === d.id ? 'cut' : ''}`}
+                onClick={() => setOpenDash(d)} onContextMenu={showMenu(dashboardMenu(d))}>
+                <strong><span className="kind-badge" aria-hidden="true">📊</span> {d.name}</strong>
+                <small>{d.folder} · dashboard · {d.tiles} visual{d.tiles === 1 ? '' : 's'}{d.owner ? ` · by ${d.owner}` : ''}</small>
+                {d.description && <small>{d.description}</small>}
+              </button>
+            ))}
           </div>
         </section>
         {selectedId
@@ -268,6 +327,11 @@ function Repository({ user, onUser }) {
         <UploadDialog folders={folders} folder={folder} onClose={() => setUploading(false)}
           onDone={async (result) => {
             setUploading(false);
+            if (result.dashboard) {
+              setFolder(result.dashboard.folder);
+              await done(`${result.replaced ? 'Replaced' : 'Uploaded'} the dashboard “${result.dashboard.name}” in /${result.dashboard.folder}: ${result.created.length} new dataset(s) importing now, ${result.reused.length} already here.${result.warnings?.length ? ` Check: ${result.warnings.join('; ')}` : ''}`);
+              return;
+            }
             setFolder(result.report.folder);
             await done(`${result.replaced ? 'Replaced' : 'Uploaded'} ${result.report.id} in /${result.report.folder}.${result.warnings?.length ? ` Check: ${result.warnings.join('; ')}` : ''}`, result.report.id);
             setTab('overview');

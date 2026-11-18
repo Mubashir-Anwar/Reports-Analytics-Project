@@ -1,10 +1,10 @@
 // The navigation bar of every React page (Designer, Server, Admin): logo, the parts this account may open,
 // the page's own buttons, theme and the account menu. The Run reports page has the same bar in plain HTML.
-import { useEffect, useId, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import '../../../ui/brand/navbar.css';
-import { BRAND } from './brand.js';
+import { useBrand } from './brand.js';
 import { signOut, useMe } from './session.js';
-import ThemeToggle from './ThemeToggle.jsx';
+import ThemeMenu from './ThemeMenu.jsx';
 
 const ICONS = {
   designer: 'M4 20h4l10.5-10.5a2.1 2.1 0 0 0-3-3L5 17v3zM13.5 6.5l3 3',
@@ -14,6 +14,7 @@ const ICONS = {
   admin: 'M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6zM19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z',
   api: 'M8 9l-4 3 4 3M16 9l4 3-4 3M13.5 6l-3 12',
   out: 'M15 4h3a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2h-3M10 16l4-4-4-4M14 12H4',
+  brand: 'M4 20V10M10 20V4M16 20v-7M3 3h18',
   key: 'M15 7a4 4 0 1 1-3.9 4.9L4 19v2h3v-2h2v-2h2l1.1-1.1A4 4 0 0 1 15 7z',
 };
 
@@ -25,19 +26,15 @@ export function Icon({ name, size = 16 }) {
   );
 }
 
-/** The Folio Reports mark (same drawing as /assets/brand/logo.svg). */
+/** The product mark (same drawing as /assets/brand/logo.svg): a circle, a bar and a tall bar whose overlaps multiply. */
 export function Logo({ size = 30, className = 'fx-logo' }) {
-  const id = useId().replace(/:/g, '');
   return (
     <svg className={className} width={size} height={size} viewBox="0 0 64 64" aria-hidden="true">
-      <defs><linearGradient id={`g${id}`} x1="0" y1="0" x2="1" y2="1"><stop offset="0" stopColor="#4f46e5" /><stop offset="1" stopColor="#06b6d4" /></linearGradient></defs>
-      <rect width="64" height="64" rx="16" fill={`url(#g${id})`} />
-      <path d="M25 10h14l8 8v4H25z" fill="#fff" opacity=".35" />
-      <path d="M20 15h17l9 9v25a4 4 0 0 1-4 4H20a4 4 0 0 1-4-4V19a4 4 0 0 1 4-4z" fill="#fff" />
-      <path d="M37 15v6a3 3 0 0 0 3 3h6z" fill="#c7d2fe" />
-      <rect x="21.5" y="38" width="5" height="9" rx="1.6" fill="#4f46e5" />
-      <rect x="28.5" y="32" width="5" height="15" rx="1.6" fill="#6366f1" />
-      <rect x="35.5" y="27" width="5" height="20" rx="1.6" fill="#0891b2" />
+      <g style={{ isolation: 'isolate' }}>
+        <circle cx="21" cy="45" r="13" fill="#e23c8f" />
+        <rect x="28" y="22" width="16" height="36" rx="8" fill="#2ea3dd" style={{ mixBlendMode: 'multiply' }} />
+        <rect x="40" y="6" width="16" height="52" rx="8" fill="#f6a11a" style={{ mixBlendMode: 'multiply' }} />
+      </g>
     </svg>
   );
 }
@@ -79,6 +76,7 @@ function UserMenu({ me }) {
           </div>
           {isAdmin && <a role="menuitem" href="/admin#developer"><Icon name="api" />API, Postman and curl</a>}
           {isAdmin && <a role="menuitem" href="/admin#keys"><Icon name="key" />API keys</a>}
+          {me.superAdmin && <a role="menuitem" href="/admin#branding"><Icon name="brand" />Name and logo</a>}
           {isAdmin && <div className="fx-sep" />}
           <button type="button" role="menuitem" className="fx-danger" onClick={signOut}><Icon name="out" />Sign out</button>
         </div>
@@ -94,13 +92,14 @@ function UserMenu({ me }) {
 export default function NavBar({ current, context, children }) {
   const [open, setOpen] = useState(false);
   const me = useMe();
+  const brand = useBrand();
   const apps = me ? NAV_APPS.filter((app) => me.rights?.includes(app.right)) : [];
   const here = NAV_APPS.find((app) => app.href === current);
   return (
     <header className={`fx-nav ${open ? 'open' : ''}`}>
-      <a className="fx-brand" href="/" title={`${BRAND.name} — home`}>
+      <a className="fx-brand" href="/" title={`${brand.name} — home`}>
         <Logo />
-        <span className="fx-name"><b>{BRAND.first}<span>{BRAND.second}</span></b><small>{here ? here.label : BRAND.tagline}</small></span>
+        <span className="fx-name"><b>{brand.first}{brand.second && <span>{brand.second}</span>}</b><small>{here ? here.label : brand.tagline}</small></span>
       </a>
       <button type="button" className="fx-icon-btn fx-burger" aria-expanded={open} aria-controls="fx-links" aria-label="Menu" onClick={() => setOpen(!open)}>{open ? '✕' : '☰'}</button>
       {apps.length > 0 && <span className="fx-divider" aria-hidden="true" />}
@@ -114,7 +113,7 @@ export default function NavBar({ current, context, children }) {
       {context && <div className="fx-context">{context}</div>}
       <div className="fx-actions">
         {children}
-        <ThemeToggle />
+        <ThemeMenu />
         <UserMenu me={me} />
       </div>
     </header>

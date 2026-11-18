@@ -13,7 +13,8 @@ from urllib.parse import quote
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import HTMLResponse, RedirectResponse, Response
 
-from backend.app.constants import BRAND_NAME, RIGHT_LABELS
+from backend.app.branding import brand_name
+from backend.app.constants import RIGHT_LABELS
 
 # Which page each right opens, in the order the home page picks the first one.
 APP_PAGES = (("designer", "/designer"), ("server", "/server"), ("analytics", "/analytics"), ("runner", "/ui"), ("admin", "/admin"))
@@ -31,11 +32,12 @@ a.app:hover{border-color:var(--accent)}
 
 
 def _page(title: str, body: str, status: int = 200) -> HTMLResponse:
+    name = html.escape(brand_name())
     return HTMLResponse(
         f"<!doctype html><html lang='en'><head><meta charset='utf-8'><meta name='viewport' content='width=device-width,initial-scale=1'>"
-        f"<title>{html.escape(title)} · {BRAND_NAME}</title><link rel='icon' type='image/svg+xml' href='/assets/brand/favicon.svg'>"
+        f"<title>{html.escape(title)} · {name}</title><link rel='icon' type='image/svg+xml' href='/assets/brand/favicon.svg'>"
         f"<style>{_STYLE}</style></head><body><main class='card'><a class='brand' href='/'><img src='/assets/brand/logo.svg' alt='' width='34' height='34'>"
-        f"<span>Folio<b>Reports</b></span></a>{body}</main>"
+        f"<span>{name}</span></a>{body}</main>"
         "<script src='/assets/signout.js' defer></script></body></html>",
         status_code=status, headers={"Cache-Control": "no-store"})
 
@@ -94,9 +96,7 @@ def register(app: FastAPI, ctx: SimpleNamespace) -> None:
 
     @app.get("/analytics", include_in_schema=False)
     def analytics_ui(request: Request) -> Response:
-        return guarded(request, "analytics", _page("Analytics", "<h1>Analytics</h1><p>Dashboards, models and visuals are "
-                                                   "being built. Your account already has the Analytics right, so it will "
-                                                   "open here.</p><a class='app' href='/'>Back</a>"))
+        return guarded(request, "analytics", react_page("analytics.html"))
 
     @app.get("/login", include_in_schema=False)
     def login_page() -> Response:

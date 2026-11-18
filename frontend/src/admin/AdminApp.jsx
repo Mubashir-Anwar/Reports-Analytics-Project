@@ -1,16 +1,18 @@
 import { useCallback, useEffect, useState } from 'react';
 import { api } from '../api.js';
 import { signOut } from '../shared/session.js';
+import AnalyticsTab from './AnalyticsTab.jsx';
 import ApiKeysTab from './ApiKeysTab.jsx';
 import { Notice, Topbar } from '../portal/Shell.jsx';
 import DataSourcesTab from './DataSourcesTab.jsx';
 import DeveloperTab from './DeveloperTab.jsx';
 import SystemDbTab from './SystemDbTab.jsx';
+import BrandingTab from './BrandingTab.jsx';
 import LogsTab from './LogsTab.jsx';
 import OverviewTab from './OverviewTab.jsx';
 import UsersTab from './UsersTab.jsx';
 
-const TABS = [['overview', 'Overview'], ['users', 'Users & rights'], ['keys', 'API keys'], ['developer', 'API & Postman'], ['sources', 'Data sources'], ['systemdb', 'System database'], ['logs', 'Logs']];
+const TABS = [['overview', 'Overview'], ['users', 'Users & rights'], ['keys', 'API keys'], ['developer', 'API & Postman'], ['sources', 'Data sources'], ['analytics', 'Analytics'], ['systemdb', 'System database'], ['branding', 'Name & look'], ['logs', 'Logs']];
 
 /** /admin needs a signed-in account with the Admin right (the server sends anyone else to /login or a "no access" page). */
 
@@ -50,7 +52,7 @@ export default function AdminApp() {
       {state === 'ready' && (
         <main className="page">
           <div className="page-head">
-            <div><p className="eyebrow">Administration</p><h1>Server administration</h1><p className="muted">Users and rights, API keys and Postman, the data sources reports read, the system database Folio Reports keeps its own data in, and the logs. Reports are designed in the <a href="/designer">Designer</a> and published to the <a href="/server">Server</a>.</p></div>
+            <div><p className="eyebrow">Administration</p><h1>Server administration</h1><p className="muted">Users and rights, API keys and Postman, the data sources reports read, analytics datasets and dashboards, the system database the service keeps its own data in, and the logs. Reports are designed in the <a href="/designer">Designer</a> and published to the <a href="/server">Server</a>.</p></div>
           </div>
           <nav className="tabs" role="tablist">
             {TABS.map(([id, label]) => <button key={id} role="tab" aria-selected={tab === id} className={tab === id ? 'on' : ''} onClick={() => { setTab(id); setMessage(null); }}>{label}</button>)}
@@ -60,8 +62,10 @@ export default function AdminApp() {
           {tab === 'users' && <UsersTab notify={notify} />}
           {tab === 'keys' && <ApiKeysTab notify={notify} />}
           {tab === 'sources' && <DataSourcesTab notify={notify} />}
+          {tab === 'analytics' && <AnalyticsTab notify={notify} />}
           {tab === 'developer' && <DeveloperTab notify={notify} />}
           {tab === 'systemdb' && <SystemDbTab notify={notify} />}
+          {tab === 'branding' && <BrandingTab who={who} notify={notify} />}
           {tab === 'logs' && <LogsTab />}
         </main>
       )}

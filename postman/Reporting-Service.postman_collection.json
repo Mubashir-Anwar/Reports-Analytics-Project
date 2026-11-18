@@ -1,7 +1,7 @@
 {
   "info": {
     "_postman_id": "7c3800c9-feb4-5d0e-a94f-c5dbfd8485b1",
-    "name": "Folio Reports — all APIs",
+    "name": "Analysis — all APIs",
     "description": "Build the Postman collection and environment for every API of the reporting service.\n\n    python tools/postman/build_collection.py            -> postman/Reporting-Service.postman_collection.json\n                                                           postman/Local.postman_environment.json\n\nThe collection is a complete end-to-end run (create -> use -> clean up), so it can be run as a whole in Postman\n(\"Run collection\") or from the command line:\n\n    npx newman run postman/Reporting-Service.postman_collection.json -e postman/Local.postman_environment.json\n\nIt needs a data adapter it can read: by default a local MongoDB with the demo database rs_postman_demo\n(tools/postman/seed_demo.py creates it). Everything it creates is named PM_… / pm_… / \"Postman\" and removed at\nthe end. Fill in the environment: baseUrl, username/password (a super admin, or \"admin\" + the admin token during\nfirst setup), adminToken (for the token-based requests) and mongoUri.\n",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
@@ -4173,6 +4173,2086 @@
       ]
     },
     {
+      "name": "12c Analytics (datasets, model, dashboards)",
+      "description": "Imports the demo orders into a dataset (DuckDB + Parquet), relates a second dataset, builds a dashboard, queries it with the session and with the API key, then removes everything. Datasets and the model need the Analytics right plus Designer or Admin.",
+      "item": [
+        {
+          "name": "Analytics: limits, visuals, aggregations",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/analytics/info",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "analytics",
+                "info"
+              ]
+            },
+            "description": ""
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Analytics: limits, visuals, aggregations: HTTP 200\", function () { pm.expect([200]).to.include(pm.response.code); });",
+                  "pm.test('may build datasets', function () { pm.expect(pm.response.json().mayModel).to.eql(true); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Test a dataset query (first records, nothing saved)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/analytics/datasets/test",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "analytics",
+                "datasets",
+                "test"
+              ]
+            },
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"connectionId\": \"pm_mongo\",\n  \"queryLanguage\": \"aggregation-json\",\n  \"collection\": \"orders\",\n  \"querySource\": \"[{\\\"$project\\\": {\\\"_id\\\": 0, \\\"Name\\\": 1, \\\"Branch\\\": 1, \\\"Amount\\\": 1}}]\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Test a dataset query (first records, nothing saved): HTTP 200\", function () { pm.expect([200]).to.include(pm.response.code); });",
+                  "pm.test('has columns', function () { pm.expect(pm.response.json().columns.length).to.be.above(0); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Create dataset PM orders (imports in the background)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/analytics/datasets",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "analytics",
+                "datasets"
+              ]
+            },
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"PM orders\",\n  \"folder\": \"Postman\",\n  \"connectionId\": \"pm_mongo\",\n  \"queryLanguage\": \"aggregation-json\",\n  \"collection\": \"orders\",\n  \"querySource\": \"[{\\\"$project\\\": {\\\"_id\\\": 0, \\\"Name\\\": 1, \\\"Branch\\\": 1, \\\"Amount\\\": 1}}]\",\n  \"refreshEveryMinutes\": 0\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Create dataset PM orders (imports in the background): HTTP 201\", function () { pm.expect([201]).to.include(pm.response.code); });",
+                  "try { pm.environment.set('dsOrders', pm.response.json().dataset.id); } catch (e) { console.log('could not save dsOrders', e); }"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Create dataset PM branches",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/analytics/datasets",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "analytics",
+                "datasets"
+              ]
+            },
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"PM branches\",\n  \"folder\": \"Postman\",\n  \"connectionId\": \"pm_mongo\",\n  \"queryLanguage\": \"aggregation-json\",\n  \"collection\": \"orders\",\n  \"querySource\": \"[{\\\"$group\\\": {\\\"_id\\\": \\\"$Branch\\\"}}, {\\\"$project\\\": {\\\"_id\\\": 0, \\\"Code\\\": \\\"$_id\\\"}}]\",\n  \"refreshEveryMinutes\": 0\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Create dataset PM branches: HTTP 201\", function () { pm.expect([201]).to.include(pm.response.code); });",
+                  "try { pm.environment.set('dsBranches', pm.response.json().dataset.id); } catch (e) { console.log('could not save dsBranches', e); }"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Wait until both datasets are ready (repeats itself)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/analytics/datasets",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "analytics",
+                "datasets"
+              ]
+            },
+            "description": ""
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Wait until both datasets are ready (repeats itself): HTTP 200\", function () { pm.expect([200]).to.include(pm.response.code); });",
+                  "const mine = pm.response.json().datasets.filter(d => [pm.environment.get('dsOrders'), pm.environment.get('dsBranches')].includes(d.id));\nconst tries = Number(pm.environment.get('analyticsTries') || 0);\nif (mine.some(d => d.status !== 'ready' && d.status !== 'failed') && tries < 30) { pm.environment.set('analyticsTries', tries + 1); postman.setNextRequest(pm.info.requestName); }\nelse { pm.environment.unset('analyticsTries'); pm.test('both imported', function () { mine.forEach(d => pm.expect(d.status).to.eql('ready')); }); }"
+                ]
+              }
+            },
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "setTimeout(function () {}, 1000);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "One dataset with its columns",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/analytics/datasets/{{dsOrders}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "analytics",
+                "datasets",
+                "{{dsOrders}}"
+              ]
+            },
+            "description": ""
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"One dataset with its columns: HTTP 200\", function () { pm.expect([200]).to.include(pm.response.code); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Change a column's role and format",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/analytics/datasets/{{dsOrders}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "analytics",
+                "datasets",
+                "{{dsOrders}}"
+              ]
+            },
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"PM orders\",\n  \"folder\": \"Postman\",\n  \"connectionId\": \"pm_mongo\",\n  \"queryLanguage\": \"aggregation-json\",\n  \"collection\": \"orders\",\n  \"querySource\": \"[{\\\"$project\\\": {\\\"_id\\\": 0, \\\"Name\\\": 1, \\\"Branch\\\": 1, \\\"Amount\\\": 1}}]\",\n  \"refreshEveryMinutes\": 0,\n  \"columns\": [\n    {\n      \"name\": \"Amount\",\n      \"kind\": \"number\",\n      \"role\": \"measure\",\n      \"label\": \"Amount (PKR)\",\n      \"format\": \"number\"\n    }\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Change a column's role and format: HTTP 200\", function () { pm.expect([200]).to.include(pm.response.code); });",
+                  "pm.test('source unchanged, no re-import', function () { pm.expect(pm.response.json().sourceChanged).to.eql(false); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "First records of the imported data",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/analytics/datasets/{{dsOrders}}/rows?limit=5",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "analytics",
+                "datasets",
+                "{{dsOrders}}",
+                "rows"
+              ],
+              "query": [
+                {
+                  "key": "limit",
+                  "value": "5"
+                }
+              ]
+            },
+            "description": ""
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"First records of the imported data: HTTP 200\", function () { pm.expect([200]).to.include(pm.response.code); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Import history",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/analytics/datasets/{{dsOrders}}/refreshes",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "analytics",
+                "datasets",
+                "{{dsOrders}}",
+                "refreshes"
+              ]
+            },
+            "description": ""
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Import history: HTTP 200\", function () { pm.expect([200]).to.include(pm.response.code); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Relate orders.Branch to branches.Code",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/analytics/relationships",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "analytics",
+                "relationships"
+              ]
+            },
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"fromDataset\": \"{{dsOrders}}\",\n  \"fromColumn\": \"Branch\",\n  \"toDataset\": \"{{dsBranches}}\",\n  \"toColumn\": \"Code\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Relate orders.Branch to branches.Code: HTTP 201\", function () { pm.expect([201]).to.include(pm.response.code); });",
+                  "try { pm.environment.set('relationshipId', pm.response.json().relationship.id); } catch (e) { console.log('could not save relationshipId', e); }"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Relationships",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/analytics/relationships",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "analytics",
+                "relationships"
+              ]
+            },
+            "description": ""
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Relationships: HTTP 200\", function () { pm.expect([200]).to.include(pm.response.code); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "One visual: amount by branch",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/analytics/query",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "analytics",
+                "query"
+              ]
+            },
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"dataset\": \"{{dsOrders}}\",\n  \"groupBy\": [\n    {\n      \"column\": \"Branch\"\n    }\n  ],\n  \"values\": [\n    {\n      \"column\": \"Amount\",\n      \"agg\": \"sum\"\n    }\n  ],\n  \"sort\": [\n    {\n      \"by\": \"value:0\",\n      \"dir\": \"desc\"\n    }\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"One visual: amount by branch: HTTP 200\", function () { pm.expect([200]).to.include(pm.response.code); });",
+                  "pm.test('rows by branch', function () { pm.expect(pm.response.json().rows.length).to.be.above(0); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "A wrong column is refused",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/analytics/query",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "analytics",
+                "query"
+              ]
+            },
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"dataset\": \"{{dsOrders}}\",\n  \"groupBy\": [\n    {\n      \"column\": \"Nope\"\n    }\n  ],\n  \"values\": [\n    {\n      \"column\": \"Amount\",\n      \"agg\": \"sum\"\n    }\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"A wrong column is refused: HTTP 422\", function () { pm.expect([422]).to.include(pm.response.code); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Create dashboard PM sales",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/analytics/dashboards",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "analytics",
+                "dashboards"
+              ]
+            },
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"PM sales\",\n  \"folder\": \"Postman\",\n  \"tiles\": [\n    {\n      \"id\": \"kpi\",\n      \"type\": \"kpi\",\n      \"title\": \"Total\",\n      \"x\": 0,\n      \"y\": 0,\n      \"w\": 3,\n      \"h\": 2,\n      \"dataset\": \"{{dsOrders}}\",\n      \"values\": [\n        {\n          \"column\": \"Amount\",\n          \"agg\": \"sum\"\n        }\n      ]\n    },\n    {\n      \"id\": \"col\",\n      \"type\": \"column\",\n      \"title\": \"By branch\",\n      \"x\": 3,\n      \"y\": 0,\n      \"w\": 9,\n      \"h\": 5,\n      \"dataset\": \"{{dsOrders}}\",\n      \"groupBy\": [\n        {\n          \"dataset\": \"{{dsBranches}}\",\n          \"column\": \"Code\"\n        }\n      ],\n      \"values\": [\n        {\n          \"column\": \"Amount\",\n          \"agg\": \"sum\"\n        }\n      ]\n    }\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Create dashboard PM sales: HTTP 201\", function () { pm.expect([201]).to.include(pm.response.code); });",
+                  "try { pm.environment.set('dashboardId', pm.response.json().dashboard.id); } catch (e) { console.log('could not save dashboardId', e); }"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Dashboards",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/analytics/dashboards",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "analytics",
+                "dashboards"
+              ]
+            },
+            "description": ""
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Dashboards: HTTP 200\", function () { pm.expect([200]).to.include(pm.response.code); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "One dashboard",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/analytics/dashboards/{{dashboardId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "analytics",
+                "dashboards",
+                "{{dashboardId}}"
+              ]
+            },
+            "description": ""
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"One dashboard: HTTP 200\", function () { pm.expect([200]).to.include(pm.response.code); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Rename the dashboard",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/analytics/dashboards/{{dashboardId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "analytics",
+                "dashboards",
+                "{{dashboardId}}"
+              ]
+            },
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"PM sales (edited)\",\n  \"folder\": \"Postman\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Rename the dashboard: HTTP 200\", function () { pm.expect([200]).to.include(pm.response.code); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "All visuals of a dashboard, filtered (cross-filter from a click)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/analytics/query-batch",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "analytics",
+                "query-batch"
+              ]
+            },
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"queries\": [\n    {\n      \"dataset\": \"{{dsOrders}}\",\n      \"values\": [\n        {\n          \"column\": \"Amount\",\n          \"agg\": \"sum\"\n        }\n      ]\n    },\n    {\n      \"dataset\": \"{{dsOrders}}\",\n      \"groupBy\": [\n        {\n          \"column\": \"Branch\"\n        }\n      ],\n      \"values\": [\n        {\n          \"column\": \"Amount\",\n          \"agg\": \"sum\"\n        }\n      ],\n      \"sort\": [\n        {\n          \"by\": \"value:0\",\n          \"dir\": \"desc\"\n        }\n      ]\n    }\n  ],\n  \"filters\": [\n    {\n      \"dataset\": \"{{dsOrders}}\",\n      \"column\": \"Branch\",\n      \"op\": \"in\",\n      \"values\": [\n        \"LHR\"\n      ],\n      \"fromTile\": \"col\"\n    }\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"All visuals of a dashboard, filtered (cross-filter from a click): HTTP 200\", function () { pm.expect([200]).to.include(pm.response.code); });",
+                  "pm.test('two results', function () { pm.expect(pm.response.json().results.length).to.eql(2); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "A dataset used by a dashboard is not deleted",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/analytics/datasets/{{dsBranches}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "analytics",
+                "datasets",
+                "{{dsBranches}}"
+              ]
+            },
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"A dataset used by a dashboard is not deleted: HTTP 409\", function () { pm.expect([409]).to.include(pm.response.code); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Download the dashboard as one file (.mdash)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/analytics/dashboards/{{dashboardId}}/file",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "analytics",
+                "dashboards",
+                "{{dashboardId}}",
+                "file"
+              ]
+            },
+            "description": ""
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Download the dashboard as one file (.mdash): HTTP 200\", function () { pm.expect([200]).to.include(pm.response.code); });",
+                  "try { pm.environment.set('dashFile', JSON.stringify(pm.response.text())); } catch (e) { console.log('could not save dashFile', e); }",
+                  "pm.test('dashboard file', function () { pm.expect(pm.response.json().format).to.eql('analysis-dashboard'); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Report Server: dashboards are listed with the reports",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/server/repository",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "server",
+                "repository"
+              ]
+            },
+            "description": ""
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Report Server: dashboards are listed with the reports: HTTP 200\", function () { pm.expect([200]).to.include(pm.response.code); });",
+                  "pm.test('lists PM sales', function () { pm.expect(pm.response.json().dashboards.map(d => d.id)).to.include(pm.environment.get('dashboardId')); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Report Server: open the dashboard (read-only)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/server/dashboards/{{dashboardId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "server",
+                "dashboards",
+                "{{dashboardId}}"
+              ]
+            },
+            "description": ""
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Report Server: open the dashboard (read-only): HTTP 200\", function () { pm.expect([200]).to.include(pm.response.code); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Report Server: its visuals",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/server/dashboards/{{dashboardId}}/query-batch",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "server",
+                "dashboards",
+                "{{dashboardId}}",
+                "query-batch"
+              ]
+            },
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"queries\": [\n    {\n      \"dataset\": \"{{dsOrders}}\",\n      \"values\": [\n        {\n          \"column\": \"Amount\",\n          \"agg\": \"sum\"\n        }\n      ]\n    }\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Report Server: its visuals: HTTP 200\", function () { pm.expect([200]).to.include(pm.response.code); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Report Server: download (.mdash)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/server/dashboards/{{dashboardId}}/file",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "server",
+                "dashboards",
+                "{{dashboardId}}",
+                "file"
+              ]
+            },
+            "description": ""
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Report Server: download (.mdash): HTTP 200\", function () { pm.expect([200]).to.include(pm.response.code); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Report Server: upload the file into Postman/Copies (its datasets are reused)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/server/dashboards/upload",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "server",
+                "dashboards",
+                "upload"
+              ]
+            },
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{\"content\": {{dashFile}}, \"folder\": \"Postman/Copies\"}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Report Server: upload the file into Postman/Copies (its datasets are reused): HTTP 201\", function () { pm.expect([201]).to.include(pm.response.code); });",
+                  "try { pm.environment.set('dashboardCopyId', pm.response.json().dashboard.id); } catch (e) { console.log('could not save dashboardCopyId', e); }",
+                  "pm.test('datasets reused', function () { pm.expect(pm.response.json().reused.length).to.eql(2); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Report Server: move the copy",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/server/dashboards/{{dashboardCopyId}}/move",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "server",
+                "dashboards",
+                "{{dashboardCopyId}}",
+                "move"
+              ]
+            },
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"folder\": \"Postman\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Report Server: move the copy: HTTP 200\", function () { pm.expect([200]).to.include(pm.response.code); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Report Server: delete the copy",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/server/dashboards/{{dashboardCopyId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "server",
+                "dashboards",
+                "{{dashboardCopyId}}"
+              ]
+            },
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Report Server: delete the copy: HTTP 200\", function () { pm.expect([200]).to.include(pm.response.code); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Analytics: import the file again (modellers)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/analytics/dashboards/import",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "analytics",
+                "dashboards",
+                "import"
+              ]
+            },
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{\"content\": {{dashFile}}, \"folder\": \"Postman\"}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Analytics: import the file again (modellers): HTTP 201\", function () { pm.expect([201]).to.include(pm.response.code); });",
+                  "try { pm.environment.set('dashboardCopyId', pm.response.json().dashboard.id); } catch (e) { console.log('could not save dashboardCopyId', e); }"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Delete the imported copy",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/analytics/dashboards/{{dashboardCopyId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "analytics",
+                "dashboards",
+                "{{dashboardCopyId}}"
+              ]
+            },
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Delete the imported copy: HTTP 200\", function () { pm.expect([200]).to.include(pm.response.code); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Power BI template (.pbit): its pages, visuals and tables",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/analytics/powerbi/inspect",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "analytics",
+                "powerbi",
+                "inspect"
+              ]
+            },
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"content\": \"UEsDBBQAAAAIAOhicl1hfqQcfgAAABgBAAAPAAAARGF0YU1vZGVsU2NoZW1hhY8xCoNAEEXfUcTaE9jFC6SxCxbGlURQI6sWIt4931HEQrBYdvfx/h9mJqThh6Ok1jsmYNY9kPMWKel3+jLeijeiGwt54i3rzYuMFeqrGeW1N+lEuVy04Hukncg6PWWiO7m9qKeS/dFvMfuq82H7jOLDbaczc9tz7cz2s/AHUEsDBBQAAAAIAOhicl02PitejAEAAJQFAAANAAAAUmVwb3J0L0xheW91dM1Ty2rCQBQ9n1Jcu1AptHRnRZf2iVCaLiTGmBKT1KSPEPLvPXMzEyYTQdxJyDzu49xz7sxUGCBHAB8FIqRIuBvgDld4R8XVhtYcGWKsUWLJcc/oJmKAexxoSZi9o1VlDsX+y6wNEXc6cowJbjHSXhUbIeRcaP8N/cb7IxW/iRtjJowKriPOAat12f3pncktnf25PK7pM15fam8lwuit4HFMdBc8bfckeizzUO9zYRxSQ4CVpcjkNEi21leyz3qoMb05+SntAbWojijbnugzMl/TXnQqZ7Sk+HTOtFt3xjyFGdJ7YF3P6qpaf7FCIJ5nzluHkxprfLQV387KL9v82uFcyN904alF6DJf6VvQ6DK+SYu0EKR9j9HyyJmlnb7N5aZFwsCOeiDiRld1lb/QHutOuxXtk+pqmPPeZnKeeU9JpXFTZh6IGzgd7Pv7imqrs4/Sj0z4u8rs19vkmaxj3fKtmIbFlPcnFB2h3KdjSk5rvfw+TclN4ST6lO28hdj9nvrRiW7ar0B9Zq3+f1BLAQIUABQAAAAIAOhicl1hfqQcfgAAABgBAAAPAAAAAAAAAAAAAACAAQAAAABEYXRhTW9kZWxTY2hlbWFQSwECFAAUAAAACADoYnJdNj4rXowBAACUBQAADQAAAAAAAAAAAAAAgAGrAAAAUmVwb3J0L0xheW91dFBLBQYAAAAAAgACAHgAAABiAgAAAAA=\",\n  \"name\": \"PM sales.pbit\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Power BI template (.pbit): its pages, visuals and tables: HTTP 200\", function () { pm.expect([200]).to.include(pm.response.code); });",
+                  "pm.test('one page, one table', function () { var b = pm.response.json(); pm.expect(b.pages[0].visuals).to.eql(1); pm.expect(b.tables[0].name).to.eql('Orders'); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Power BI report (.pbix): its report part only",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/analytics/powerbi/inspect",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "analytics",
+                "powerbi",
+                "inspect"
+              ]
+            },
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"parts\": {\n    \"Report/Layout\": \"ewAiAHMAZQBjAHQAaQBvAG4AcwAiADoAIABbAHsAIgBkAGkAcwBwAGwAYQB5AE4AYQBtAGUAIgA6ACAAIgBCAHIAYQBuAGMAaABlAHMAIgAsACAAIgB3AGkAZAB0AGgAIgA6ACAAMQAyADgAMAAsACAAIgBoAGUAaQBnAGgAdAAiADoAIAA3ADIAMAAsACAAIgB2AGkAcwB1AGEAbABDAG8AbgB0AGEAaQBuAGUAcgBzACIAOgAgAFsAewAiAHgAIgA6ACAAMAAsACAAIgB5ACIAOgAgADAALAAgACIAdwBpAGQAdABoACIAOgAgADEAMgA4ADAALAAgACIAaABlAGkAZwBoAHQAIgA6ACAANAAwADAALAAgACIAYwBvAG4AZgBpAGcAIgA6ACAAIgB7AFwAIgBuAGEAbQBlAFwAIgA6ACAAXAAiAGMAMQBcACIALAAgAFwAIgBzAGkAbgBnAGwAZQBWAGkAcwB1AGEAbABcACIAOgAgAHsAXAAiAHYAaQBzAHUAYQBsAFQAeQBwAGUAXAAiADoAIABcACIAYwBsAHUAcwB0AGUAcgBlAGQAQwBvAGwAdQBtAG4AQwBoAGEAcgB0AFwAIgAsACAAXAAiAHAAcgBvAGoAZQBjAHQAaQBvAG4AcwBcACIAOgAgAHsAXAAiAEMAYQB0AGUAZwBvAHIAeQBcACIAOgAgAFsAewBcACIAcQB1AGUAcgB5AFIAZQBmAFwAIgA6ACAAXAAiAGMAXAAiAH0AXQAsACAAXAAiAFkAXAAiADoAIABbAHsAXAAiAHEAdQBlAHIAeQBSAGUAZgBcACIAOgAgAFwAIgB5AFwAIgB9AF0AfQAsACAAXAAiAHAAcgBvAHQAbwB0AHkAcABlAFEAdQBlAHIAeQBcACIAOgAgAHsAXAAiAFYAZQByAHMAaQBvAG4AXAAiADoAIAAyACwAIABcACIARgByAG8AbQBcACIAOgAgAFsAewBcACIATgBhAG0AZQBcACIAOgAgAFwAIgBvAFwAIgAsACAAXAAiAEUAbgB0AGkAdAB5AFwAIgA6ACAAXAAiAE8AcgBkAGUAcgBzAFwAIgB9AF0ALAAgAFwAIgBTAGUAbABlAGMAdABcACIAOgAgAFsAewBcACIAQwBvAGwAdQBtAG4AXAAiADoAIAB7AFwAIgBFAHgAcAByAGUAcwBzAGkAbwBuAFwAIgA6ACAAewBcACIAUwBvAHUAcgBjAGUAUgBlAGYAXAAiADoAIAB7AFwAIgBTAG8AdQByAGMAZQBcACIAOgAgAFwAIgBvAFwAIgB9AH0ALAAgAFwAIgBQAHIAbwBwAGUAcgB0AHkAXAAiADoAIABcACIAQgByAGEAbgBjAGgAXAAiAH0ALAAgAFwAIgBOAGEAbQBlAFwAIgA6ACAAXAAiAGMAXAAiAH0ALAAgAHsAXAAiAEEAZwBnAHIAZQBnAGEAdABpAG8AbgBcACIAOgAgAHsAXAAiAEUAeABwAHIAZQBzAHMAaQBvAG4AXAAiADoAIAB7AFwAIgBDAG8AbAB1AG0AbgBcACIAOgAgAHsAXAAiAEUAeABwAHIAZQBzAHMAaQBvAG4AXAAiADoAIAB7AFwAIgBTAG8AdQByAGMAZQBSAGUAZgBcACIAOgAgAHsAXAAiAFMAbwB1AHIAYwBlAFwAIgA6ACAAXAAiAG8AXAAiAH0AfQAsACAAXAAiAFAAcgBvAHAAZQByAHQAeQBcACIAOgAgAFwAIgBBAG0AbwB1AG4AdABcACIAfQB9ACwAIABcACIARgB1AG4AYwB0AGkAbwBuAFwAIgA6ACAAMAB9ACwAIABcACIATgBhAG0AZQBcACIAOgAgAFwAIgB5AFwAIgB9AF0AfQB9AH0AIgB9AF0AfQBdAH0A\"\n  },\n  \"name\": \"PM sales.pbix\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Power BI report (.pbix): its report part only: HTTP 200\", function () { pm.expect([200]).to.include(pm.response.code); });",
+                  "pm.test('report part read', function () { var b = pm.response.json(); pm.expect(b.kind).to.eql('pbix'); pm.expect(b.tables[0].columns.map(c => c.name)).to.include('Amount'); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Power BI template: import its page as a dashboard on PM orders",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/analytics/powerbi/import",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "analytics",
+                "powerbi",
+                "import"
+              ]
+            },
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"content\": \"UEsDBBQAAAAIAOhicl1hfqQcfgAAABgBAAAPAAAARGF0YU1vZGVsU2NoZW1hhY8xCoNAEEXfUcTaE9jFC6SxCxbGlURQI6sWIt4931HEQrBYdvfx/h9mJqThh6Ok1jsmYNY9kPMWKel3+jLeijeiGwt54i3rzYuMFeqrGeW1N+lEuVy04Hukncg6PWWiO7m9qKeS/dFvMfuq82H7jOLDbaczc9tz7cz2s/AHUEsDBBQAAAAIAOhicl02PitejAEAAJQFAAANAAAAUmVwb3J0L0xheW91dM1Ty2rCQBQ9n1Jcu1AptHRnRZf2iVCaLiTGmBKT1KSPEPLvPXMzEyYTQdxJyDzu49xz7sxUGCBHAB8FIqRIuBvgDld4R8XVhtYcGWKsUWLJcc/oJmKAexxoSZi9o1VlDsX+y6wNEXc6cowJbjHSXhUbIeRcaP8N/cb7IxW/iRtjJowKriPOAat12f3pncktnf25PK7pM15fam8lwuit4HFMdBc8bfckeizzUO9zYRxSQ4CVpcjkNEi21leyz3qoMb05+SntAbWojijbnugzMl/TXnQqZ7Sk+HTOtFt3xjyFGdJ7YF3P6qpaf7FCIJ5nzluHkxprfLQV387KL9v82uFcyN904alF6DJf6VvQ6DK+SYu0EKR9j9HyyJmlnb7N5aZFwsCOeiDiRld1lb/QHutOuxXtk+pqmPPeZnKeeU9JpXFTZh6IGzgd7Pv7imqrs4/Sj0z4u8rs19vkmaxj3fKtmIbFlPcnFB2h3KdjSk5rvfw+TclN4ST6lO28hdj9nvrRiW7ar0B9Zq3+f1BLAQIUABQAAAAIAOhicl1hfqQcfgAAABgBAAAPAAAAAAAAAAAAAACAAQAAAABEYXRhTW9kZWxTY2hlbWFQSwECFAAUAAAACADoYnJdNj4rXowBAACUBQAADQAAAAAAAAAAAAAAgAGrAAAAUmVwb3J0L0xheW91dFBLBQYAAAAAAgACAHgAAABiAgAAAAA=\",\n  \"name\": \"PM sales.pbit\",\n  \"folder\": \"Postman\",\n  \"pages\": [\n    0\n  ],\n  \"tables\": {\n    \"Orders\": {\n      \"dataset\": \"{{dsOrders}}\"\n    }\n  }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Power BI template: import its page as a dashboard on PM orders: HTTP 201\", function () { pm.expect([201]).to.include(pm.response.code); });",
+                  "try { pm.environment.set('dashboardCopyId', pm.response.json().dashboards[0].id); } catch (e) { console.log('could not save dashboardCopyId', e); }",
+                  "pm.test('dataset reused', function () { pm.expect(pm.response.json().reused).to.include(pm.environment.get('dsOrders')); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Delete the dashboard from Power BI",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/analytics/dashboards/{{dashboardCopyId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "analytics",
+                "dashboards",
+                "{{dashboardCopyId}}"
+              ]
+            },
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Delete the dashboard from Power BI: HTTP 200\", function () { pm.expect([200]).to.include(pm.response.code); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Public API: datasets in the key's folders",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-API-Key",
+                "value": "{{apiKey}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/analytics/datasets",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "analytics",
+                "datasets"
+              ]
+            },
+            "description": "",
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Public API: datasets in the key's folders: HTTP 200\", function () { pm.expect([200]).to.include(pm.response.code); });",
+                  "pm.test('sees PM orders', function () { pm.expect(pm.response.json().datasets.map(d => d.name)).to.include('PM orders'); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Public API: dashboards",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-API-Key",
+                "value": "{{apiKey}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/analytics/dashboards",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "analytics",
+                "dashboards"
+              ]
+            },
+            "description": "",
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Public API: dashboards: HTTP 200\", function () { pm.expect([200]).to.include(pm.response.code); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Public API: one dashboard (tiles to draw it yourself)",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-API-Key",
+                "value": "{{apiKey}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/analytics/dashboards/{{dashboardId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "analytics",
+                "dashboards",
+                "{{dashboardId}}"
+              ]
+            },
+            "description": "",
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Public API: one dashboard (tiles to draw it yourself): HTTP 200\", function () { pm.expect([200]).to.include(pm.response.code); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Public API: one visual",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-API-Key",
+                "value": "{{apiKey}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/analytics/query",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "analytics",
+                "query"
+              ]
+            },
+            "description": "",
+            "auth": {
+              "type": "noauth"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"dataset\": \"{{dsOrders}}\",\n  \"groupBy\": [\n    {\n      \"column\": \"Branch\"\n    }\n  ],\n  \"values\": [\n    {\n      \"column\": \"Amount\",\n      \"agg\": \"sum\"\n    }\n  ],\n  \"sort\": [\n    {\n      \"by\": \"value:0\",\n      \"dir\": \"desc\"\n    }\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Public API: one visual: HTTP 200\", function () { pm.expect([200]).to.include(pm.response.code); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Public API: import again now",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-API-Key",
+                "value": "{{apiKey}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/analytics/datasets/{{dsOrders}}/refresh",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "analytics",
+                "datasets",
+                "{{dsOrders}}",
+                "refresh"
+              ]
+            },
+            "description": "",
+            "auth": {
+              "type": "noauth"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Public API: import again now: HTTP 202\", function () { pm.expect([202]).to.include(pm.response.code); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Import again now (session)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/analytics/datasets/{{dsBranches}}/refresh",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "analytics",
+                "datasets",
+                "{{dsBranches}}",
+                "refresh"
+              ]
+            },
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Import again now (session): HTTP 202\", function () { pm.expect([202]).to.include(pm.response.code); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Admin: every dataset and dashboard, disk use, limits",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/admin/analytics",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "admin",
+                "analytics"
+              ]
+            },
+            "description": ""
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Admin: every dataset and dashboard, disk use, limits: HTTP 200\", function () { pm.expect([200]).to.include(pm.response.code); });",
+                  "pm.test('has totals', function () { pm.expect(pm.response.json().totals.datasets).to.be.above(0); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Admin: import a dataset now",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/admin/analytics/datasets/{{dsBranches}}/refresh",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "admin",
+                "analytics",
+                "datasets",
+                "{{dsBranches}}",
+                "refresh"
+              ]
+            },
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Admin: import a dataset now: HTTP 202\", function () { pm.expect([202]).to.include(pm.response.code); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Admin: a schedule shorter than the minimum is refused",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/admin/analytics/datasets/{{dsOrders}}/schedule",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "admin",
+                "analytics",
+                "datasets",
+                "{{dsOrders}}",
+                "schedule"
+              ]
+            },
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"refreshEveryMinutes\": 1\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Admin: a schedule shorter than the minimum is refused: HTTP 422\", function () { pm.expect([422]).to.include(pm.response.code); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Admin: import every day",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/admin/analytics/datasets/{{dsOrders}}/schedule",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "admin",
+                "analytics",
+                "datasets",
+                "{{dsOrders}}",
+                "schedule"
+              ]
+            },
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"refreshEveryMinutes\": 1440\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Admin: import every day: HTTP 200\", function () { pm.expect([200]).to.include(pm.response.code); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Admin: give the dashboard a new owner",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/admin/analytics/dashboards/{{dashboardId}}/owner",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "admin",
+                "analytics",
+                "dashboards",
+                "{{dashboardId}}",
+                "owner"
+              ]
+            },
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"owner\": \"pm_runner\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Admin: give the dashboard a new owner: HTTP 200\", function () { pm.expect([200]).to.include(pm.response.code); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Admin: remove leftover files",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/admin/analytics/cleanup",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "admin",
+                "analytics",
+                "cleanup"
+              ]
+            },
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Admin: remove leftover files: HTTP 200\", function () { pm.expect([200]).to.include(pm.response.code); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Delete dashboard",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/analytics/dashboards/{{dashboardId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "analytics",
+                "dashboards",
+                "{{dashboardId}}"
+              ]
+            },
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Delete dashboard: HTTP 200\", function () { pm.expect([200]).to.include(pm.response.code); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Delete relationship",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/analytics/relationships/{{relationshipId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "analytics",
+                "relationships",
+                "{{relationshipId}}"
+              ]
+            },
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Delete relationship: HTTP 200\", function () { pm.expect([200]).to.include(pm.response.code); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Admin: delete dataset PM branches",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/admin/analytics/datasets/{{dsBranches}}?force=true",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "admin",
+                "analytics",
+                "datasets",
+                "{{dsBranches}}"
+              ],
+              "query": [
+                {
+                  "key": "force",
+                  "value": "true"
+                }
+              ]
+            },
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Admin: delete dataset PM branches: HTTP 200\", function () { pm.expect([200]).to.include(pm.response.code); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Delete dataset PM orders",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/analytics/datasets/{{dsOrders}}?force=true",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "analytics",
+                "datasets",
+                "{{dsOrders}}"
+              ],
+              "query": [
+                {
+                  "key": "force",
+                  "value": "true"
+                }
+              ]
+            },
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Delete dataset PM orders: HTTP 200\", function () { pm.expect([200]).to.include(pm.response.code); });"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
       "name": "13 Logs, audit and system (Admin)",
       "description": "",
       "item": [
@@ -4310,6 +6390,114 @@
                 "exec": [
                   "pm.test(\"Postman environment for this server: HTTP 200\", function () { pm.expect([200]).to.include(pm.response.code); });",
                   "pm.test('base URL filled in', function () { pm.expect(pm.response.json().values.find(v => v.key === 'baseUrl').value).to.eql(pm.environment.get('baseUrl')); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Product name (public: sign-in page, navigation bar)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/branding",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "branding"
+              ]
+            },
+            "description": "",
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Product name (public: sign-in page, navigation bar): HTTP 200\", function () { pm.expect([200]).to.include(pm.response.code); });",
+                  "pm.test('has a name', function () { pm.expect(pm.response.json().name).to.be.a('string'); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Product name: a wrong name is refused (super admin)",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/admin/branding",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "admin",
+                "branding"
+              ]
+            },
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"<x>\",\n  \"tagline\": \"\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Product name: a wrong name is refused (super admin): HTTP 422\", function () { pm.expect([422]).to.include(pm.response.code); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Capacity: report places in use, background queue, limits",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/admin/capacity",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "admin",
+                "capacity"
+              ]
+            },
+            "description": ""
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Capacity: report places in use, background queue, limits: HTTP 200\", function () { pm.expect([200]).to.include(pm.response.code); });",
+                  "pm.test('has limits', function () { pm.expect(pm.response.json().limits.maxConcurrent).to.be.above(0); });"
                 ]
               }
             }

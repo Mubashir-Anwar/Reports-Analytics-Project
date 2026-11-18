@@ -11,9 +11,9 @@ from openpyxl import load_workbook
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-import jexpr  # noqa: E402
-import jrxml_import  # noqa: E402
-import reporting_core as core  # noqa: E402
+from backend.app.expressions import jexpr  # noqa: E402
+from backend.app.importers import jrxml as jrxml_import  # noqa: E402
+import service_names as core  # noqa: E402
 
 # The exact expressions from a Jaspersoft Studio report.
 ADJUSTED_START = """new java.util.GregorianCalendar(

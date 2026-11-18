@@ -1,11 +1,13 @@
-# Architecture — Mongo Reporting Service
+# Architecture — Analysis
 
-A Jaspersoft Studio + JasperReports Server style reporting product, written in **Python (FastAPI)** and
-**React**. Designers build band-based reports in the browser, save them in their own workspace, publish
-them to a server repository, and users or other systems run them as PDF, Excel or CSV.
+**Analysis** (default product name; Admin → Branding renames it) is a Jaspersoft Studio + JasperReports Server
+style reporting product with Power BI–style analytics, written in **Python (FastAPI)** and **React**. Designers
+build band-based reports in the browser, save them in their own workspace, publish them to a server repository,
+and users or other systems run them as PDF, Excel or CSV. Analytics imports query results into Parquet datasets
+and shows them on dashboards.
 
-This document explains **what every part is, why it exists and how the parts work together**, and then the
-**plan for making it production ready**. Keep it up to date when the structure changes.
+This document explains **what every part is, why it exists and how the parts work together**, for the backend
+and frontend teams. Keep it up to date when the structure changes.
 
 ---
 
@@ -18,20 +20,23 @@ flowchart LR
     S["/server<br/>Report Server portal (React)"]
     A["/admin<br/>Administration (React)"]
     U["/ui<br/>Report runner (static JS)"]
+    B["/analytics<br/>Datasets and dashboards (React)"]
   end
   W["Website / Java server"] -->|"/generate/ID.pdf<br/>signed link or X-Report-Token"| API
-  D -->|"/api/admin/* (admin or designer token)"| API
-  A -->|"/api/admin/* (admin token)"| API
+  D -->|"/api/admin/* (login cookie)"| API
+  A -->|"/api/admin/* (login cookie)"| API
   S -->|"/api/server/* (login cookie)"| API
   U -->|"/reports, /generate"| API
+  B -->|"/api/analytics/* (login cookie)"| API
   subgraph Service["FastAPI service (one process)"]
     API["HTTP API<br/>backend/app routers"] --> R["Renderer<br/>rendering/engine.py"]
     API --> X["Expressions<br/>expressions/jexpr.py"]
     API --> J["JRXML import<br/>importers/jrxml.py"]
     R --> X
   end
-  API -->|"read-only aggregation"| M[(MongoDB)]
-  API --> F[("data/ folder<br/>JSON files")]
+  API -->|"read-only queries"| M[("Data sources<br/>MongoDB, SQL")]
+  API --> F[("System storage<br/>files, SQL or MongoDB")]
+  API --> P[("data/analytics<br/>Parquet (DuckDB)")]
 ```
 
 | Jaspersoft product | Here | Purpose |
@@ -41,32 +46,33 @@ flowchart LR
 | JasperReports Server repository | `data/reports/` + `/server` | Published reports in folders; run, edit properties, copy/move, history |
 | JRXML file | `.mrd` file | One file with the whole report (query, parameters, adapter, design, images) |
 | Data Adapter | `data/connections.json` + `data/private_secrets.json` | Named database connections; secrets kept apart |
-| JasperReports Library (Java) | `designer_render.py` + `jexpr.py` | Fills the design with data and draws PDF / Excel / CSV |
+| JasperReports Library (Java) | `rendering/engine.py` + `expressions/jexpr.py` | Fills the design with data and draws PDF / Excel / CSV |
 
 ---
 
 ## 2. Repository layout
 
 ```text
-backend/app/               The service (Python package) — see §3
-app.py                     `uvicorn app:app` entry point (same app as `uvicorn backend.app.main:app`)
-reporting_core.py          Compatibility module: re-exports the old names from backend.app (old imports and tests)
-designer_render.py, jexpr.py, jrxml_import.py
-                           Compatibility aliases for backend.app.rendering.engine / expressions.jexpr / importers.jrxml
-reports/                   Built-in Python reports (optional, REPORTING_LOAD_BUILTIN_REPORTS)
+backend/app/               The service (Python package); start: `uvicorn backend.app.main:app` — see §3
 frontend/                  React source (Vite, several pages) — see §4
-  index.html, server.html, admin.html   page entry points → built into ui/app/
-  src/ (designer)  src/server/  src/admin/  src/portal/ (shared shell, styles)
-ui/                        What the service serves: index.html + runner.* (/ui, plain JS) and app/ (built React pages)
-tests/                     pytest suite (≈240 tests) + JRXML fixture
+  index.html, server.html, admin.html, analytics.html   page entry points → built into ui/app/
+  src/ (designer)  src/server/  src/admin/  src/analytics/  src/portal/ (page shell)  src/shared/ (theme, nav,
+  folders, adapters)
+ui/                        What the service serves: app/ (built React pages), index.html + runner.* (/ui, plain JS),
+                           embed/ (embed SDK and viewer), brand/ (logo, favicon, theme)
+tests/                     pytest suite (≈430 tests), JRXML fixture, service_names.py (every module's names in one
+                           namespace, for the older tests)
+postman/                   Collection + environment for every endpoint (Admin → Tools offers them for download)
+tools/                     postman/ (collection builder, demo data), embed/ (example page), theme/ (runner dark CSS)
+deploy/                    docker-compose.yml (PostgreSQL + 2 instances + nginx HTTPS), nginx.conf, .env.example
 data/                      Runtime data — never in git or in the Docker image (see §6)
-.github/workflows/ci.yml   CI: ruff + pytest, frontend build, Docker build and start
+.github/workflows/ci.yml   CI: ruff + pytest (with PostgreSQL, MySQL, MongoDB, SQL Server, Oracle), frontend build,
+                           Docker build and start
 pyproject.toml             Project metadata, ruff (lint) and pytest settings
 requirements*.txt          Runtime / development dependencies
 Dockerfile, .dockerignore  Multi-stage image: builds the frontend, then the Python service (no data inside)
-seed_demo_data.py, check_local_mongo.py   Local helpers
 .env.example               Every setting with a comment (copy to .env; .env is never committed)
-DEPLOYMENT.md, README_roman_urdu.md, ARCHITECTURE.md   Documentation
+README.md, ARCHITECTURE.md, DEPLOYMENT.md, TESTING.md, README_roman_urdu.md   Documentation
 ```
 
 ---
@@ -90,7 +96,7 @@ backend/app/
     access.py              folder permissions applied to /server, schedules and subreports
     accounts.py            /admin user helpers
   routers/                 one module per area; each has register(app, ctx)
-    pages.py               /, /ui, /admin, /designer, /server
+    pages.py               /, /login, /ui, /admin, /designer, /server, /analytics
     designer.py            query parse, JRXML import, design validate/render, draft preview/run, local bootstrap
     repository.py          /api/admin/reports…, /api/admin/folders… (token access)
     connections.py         /api/admin/connections… (data adapters)
@@ -100,6 +106,10 @@ backend/app/
     users.py               /api/admin/users…
     system.py              /health, /ready, adapter status, whoami, logs, audit
     generate.py            /reports and /generate/<ID>.<format>
+    analytics.py           /api/analytics/… (datasets, relationships, dashboards, query, .mdash and Power BI import),
+                           /api/server/dashboards/…, /api/admin/analytics/… and /api/v1/analytics/…
+    api_keys.py, public_api.py, embed.py   API keys, the public API v1 (/api/v1/…), embedding
+    admin_tools.py         branding, system database, Postman files, capacity
   config.py                Settings from environment variables
   constants.py             Patterns, roles, formats, cookie names, PROJECT_ROOT
   logs.py                  Logger, rotating log file, reading log entries
@@ -123,6 +133,14 @@ backend/app/
     outputs.py             Simple table outputs and render_report_output() (band design or simple table)
   expressions/jexpr.py     Safe interpreter for Jasper's Java-like expressions
   importers/jrxml.py       Jaspersoft Studio .jrxml → report definition + design
+  analytics/               settings.py (ANALYTICS_* limits, data/analytics folder) · store.py
+                           (validation and CRUD of datasets, relationships, dashboards, import history) ·
+                           importer.py (run the dataset query, flatten records, write Parquet with DuckDB, read
+                           its columns) · engine.py (visual spec → checked, parameter-bound DuckDB SQL; joins over
+                           relationships; cross-filters; row and time limits) · refresher.py (background imports,
+                           scheduled refresh called from the job scheduler, recovery after a restart) ·
+                           bundle.py (a dashboard with its datasets as one .mdash file: export, check, install) ·
+                           powerbi.py (Power BI .pbit, or the report part of a .pbix → page bundles: tables, visuals, measures)
   healthcheck.py           Container liveness probe
 ```
 
@@ -138,7 +156,7 @@ router sees the same objects. Lower layers (`storage`, `security`, `connectors`,
 * A new endpoint goes into the router of its area; a helper used by several routers goes into a `services/`
   module (first parameter `ctx`, listed in that module's `__all__`).
 * To replace a function in tests, patch it where it is defined, e.g. `monkeypatch.setattr(core.mongodb,
-  "MongoClient", Fake)`. Call sites reach `MongoClient`, `_execute_report_pipeline` and `_append_report_audit`
+  "MongoClient", Fake)` (`core` = `tests/service_names.py`). Call sites reach `MongoClient`, `_execute_report_pipeline` and `_append_report_audit`
   through their module for exactly this reason.
 * `ruff check .` (undefined/unused names, imports) and `pytest` must pass; CI runs both.
 
@@ -188,7 +206,7 @@ MongoDB query) and returns our report + design plus a list of warnings for what 
 | Group | Paths | Who |
 |---|---|---|
 | Report access | `/generate/{ID}.{pdf,xlsx,csv}`, `/reports`, `/reports/connections/{id}/status` | Websites (signed link, `X-Report-Token`) or admin token |
-| Pages | `/designer`, `/server`, `/admin`, `/ui` | Browser |
+| Pages | `/login`, `/designer`, `/server`, `/admin`, `/analytics`, `/ui` | Browser (signed in; each page needs its right) |
 | Designer workspace | `/api/admin/workspace…`, `/publish` | Designer or admin token |
 | Designer tools | `/api/admin/query/parse`, `/designer/render`, `/designer/validate`, `/drafts/preview`, `/drafts/run`, `/jrxml/import` | Designer or admin token |
 | Repository (token) | `/api/admin/reports…`, `/api/admin/folders…` | Designer (read/save), admin (delete) |
@@ -196,41 +214,57 @@ MongoDB query) and returns our report + design plus a list of warnings for what 
 | `/server` portal | `/api/server/login`, `/repository`, `/reports/{id}` (details, edit, copy, move, file, run), `/upload`, `/folders…`, `/connections` | Session cookie; viewer < designer < admin |
 | Administration | `/api/admin/users…`, `/logs…`, `/audit`, `/whoami` | Admin token |
 | Health | `/health` | Open |
+| Analytics | `/api/analytics/info`, `/datasets…` (test, import, refresh, rows, refreshes), `/relationships…`, `/dashboards…` (+ `/file`, `/import`), `/powerbi/inspect`, `/powerbi/import`, `/query`, `/query-batch` | Session: Analytics right (datasets and the model also Designer or Admin) |
+| Server dashboards | `/api/server/dashboards/{id}` (+ `/query-batch`, `/file`, `/move`), `/api/server/dashboards/upload` | Session with the Report Server right; folder permissions |
+| Analytics administration | `/api/admin/analytics` (+ `/datasets/{id}/refresh`, `/schedule`, `DELETE /datasets/{id}`, `/dashboards/{id}/owner`, `/cleanup`) | Admin right |
+| Public analytics | `/api/v1/analytics/datasets`, `/dashboards…`, `/query`, `/datasets/{id}/refresh` | API key (its folders) |
 
 ---
 
 ## 4. Frontend
 
-Built with Vite into `ui/app/` (`cd frontend && npm run build`). Three React pages share `ContextMenu`,
-`portal/Shell` and the API helpers.
+Built with Vite into `ui/app/` (`cd frontend && npm run build`). Four React pages (designer, `/server`, `/admin`,
+`/analytics`) share `ContextMenu`, `portal/Shell`, `shared/` (theme, nav bar, folder tiles, adapter logos) and the
+API helpers.
 
 ### 4.1 Designer (`frontend/src`)
 
 | File | Responsibility |
 |---|---|
-| `App.jsx` | Layout (left docks, tabs Setup / Design / Source / Preview, right docks), keyboard shortcuts, dialogs, save / publish / open file |
+| `App.jsx` | Layout (left: Repository explorer and Outline; tabs Setup / Design / Source / Preview; right: Palette and Properties — each panel shown or hidden on its own), keyboard shortcuts, dialogs, save / publish / open file |
+| `Ribbon.jsx` | The ribbon (File, Home, Insert, View…), panel toggles, theme panel |
 | `store.js` | Reducer: report fields, design, undo/redo history, selection, armed palette tool |
 | `designModel.js` | Pure functions on the design JSON: bands, elements, defaults, palette, rename/refactor |
 | `arrange.js` | Multi-select, align/distribute/size, clipboard, snapping and smart guides |
 | `templates.js`, `TemplateGallery.jsx` | Layout templates: blank, letter, table, form, certificate |
 | `Canvas.jsx` | Visual editor: bands, elements, drag/resize, rulers, guides, rubber band, arrange toolbar |
-| `panels.jsx` | Workspace, Server and Data Adapters trees, Outline, Palette, adapter wizard, database logos |
+| `panels.jsx` | Repository explorer trees (Workspace, Server, Data Adapters), Outline, Palette, adapter wizard |
 | `outlineActions.js` | Every right-click menu (report, band, element, parameter, field, variable, canvas) |
 | `Properties.jsx`, `ComponentProps.jsx` | Property tabs for the report, bands, elements and data components |
 | `SetupForm.jsx`, `DatasetQueryDialog.jsx` | Report details, data adapter, query, fields, parameters, filter and sort |
 | `ComponentWizard.jsx`, `ExpressionEditor.jsx`, `PublishDialog.jsx` | Table/Crosstab/Subreport wizards, expression editor, publish |
 | `SourceView.jsx`, `mrd.js` | Source tab (definition as JSON, validated Apply) and the `.mrd` file format |
 | `Preview.jsx` | Runs the draft on a data adapter and shows/exports the result |
-| `api.js` | Token-based fetch helper for `/api/admin/*` |
+| `api.js` | Fetch helper for `/api/admin/*` (session cookie) |
 
 ### 4.2 `/server` (`frontend/src/server`)
 
-`ServerApp` (login, folder tree, report list, right-click menus, clipboard), `ResourcePanel` (Run · Overview ·
-Parameters · Data Source · Query · History), `UploadDialog` (Add Resource), `RunPanel`, `serverApi` (cookie session).
+`ServerApp` (folder tree, reports and dashboards, right-click menus, clipboard), `ResourcePanel` (Run · Overview ·
+Parameters · Data Source · Query · History · Versions · Schedules), `UploadDialog` (Add Resource: `.mrd`, `.jrxml`,
+`.mdash`), `DashboardViewer`, `PermissionsDialog`, `Schedules`, `RunPanel`, `serverApi` (cookie session).
 
 ### 4.3 `/admin` (`frontend/src/admin`)
 
-Overview, Users (accounts and roles), Data sources (adapters), Logs (service log + run history).
+Overview, Users & rights, API keys (and embedding), Data sources, Analytics (datasets, schedules, owners, recent
+imports, disk use and limits), Branding, System database, Developer tools, Logs (service log, run log, audit trail).
+
+### 4.4 `/analytics` (`frontend/src/analytics`)
+
+`AnalyticsApp` (side list, `#dash/…`, `#ds/…`, `#model` addresses), `DatasetEditor` (source, test, import, column
+model, import history), `ModelView` (relationships), `Dashboard` (12-column grid, drag/resize, cross-filter chips,
+slicers), `VisualEditor` (visual type, fields wells, filters, format), `Visual` (ECharts 5 charts, KPI, table,
+slicer; the validated palette for light and dark), `PowerBiImport` (the .pbit/.pbix dialog: pages, tables → datasets; `pbix.js` takes only the report part out of a .pbix in the browser),
+`api.js` (fetch helper and the visual → query spec).
 
 ---
 
@@ -277,7 +311,9 @@ Two layers, both on the backend the client already has:
   `db/mongo.py` (`$jsonSchema` validators, indexes, unique `seq`). `services/records.py` writes them
   (`log_run`, `audit_event`).
 * **Typed entities** — `db/entities.py` (`get_entities()`): `rs_users`, `rs_api_keys`, `rs_folder_permissions`,
-  `rs_report_versions`, `rs_report_history`, `rs_job_schedules`, `rs_job_runs` with real columns (composite keys, indexes; JSON kept as text so
+  `rs_report_versions`, `rs_report_history`, `rs_job_schedules`, `rs_job_runs`, `rs_analytics_datasets`,
+  `rs_analytics_relationships`, `rs_analytics_dashboards`, `rs_analytics_refreshes` (SQL migration step 4, MongoDB
+  schema version 4) with real columns (composite keys, indexes; JSON kept as text so
   `$match` keys survive; unknown fields in an `extra` column). `db/upgrade.py` moves the older JSON documents
   into them at start-up (originals kept under `migrated/`). On SQL and MongoDB, `storage/routed.py` also
   sends the document keys of reports (`reports/<folder>/<ID>.json` → `rs_reports`), drafts (`workspace/…` →
@@ -332,8 +368,9 @@ Writes go through `_write_json_atomically` (temp file + rename), so a crash neve
 
 ## 8. Security model (summary — details in DEPLOYMENT.md)
 
-* Three credentials: admin token, designer token, report-access secret (signed links / header).
-* `/server` users with roles; sessions are HMAC-signed HttpOnly cookies (key: `REPORTING_SESSION_SECRET`, else
+* People sign in with named accounts and rights (Admin, Designer, Report Server, Analytics, Run reports; super
+  admins); systems use API keys (folders, IP, rate limit). The admin token is for automation and first setup only.
+* Sessions are HMAC-signed HttpOnly cookies (key: `REPORTING_SESSION_SECRET`, else
   derived from the admin token), revoked on logout and password change.
 * Areas can be switched off per instance; admin pages can be limited to IP ranges.
 * Queries are parsed as data and checked to be read-only; expressions are interpreted, never executed.
@@ -341,64 +378,9 @@ Writes go through `_write_json_atomically` (temp file + rename), so a crash neve
 
 ---
 
-## 9. Making it production ready
+## 9. SQL data adapters (PostgreSQL, MySQL/MariaDB, SQL Server, Oracle)
 
-### 9.1 Gaps found today
-
-| Gap | Risk | Fix |
-|---|---|---|
-| ~~`reporting_core.py` is 4 300 lines~~ | — | **Done:** split into `backend/app` (§3), behaviour unchanged, all tests green |
-| ~~State in process memory and JSON files~~ | — | **Done:** document store with a PostgreSQL backend, repository revision, shared sign-outs (§6); `deploy/docker-compose.yml` runs two instances |
-| ~~Dockerfile copied files that are not in git~~ | — | **Done:** multi-stage image from a clean checkout, no `data/` inside, liveness probe |
-| ~~Only MongoDB adapters~~ | — | **Done:** PostgreSQL, MySQL/MariaDB, SQL Server, Oracle (§9.3) |
-| ~~One dataset per report~~ | — | **Done:** sub-datasets for Table / Crosstab and the Table editor (§9.4) |
-| ~~Large reports run inside the HTTP request~~ | — | **Done:** "Run in background", schedules with e-mail, Runs list (`backend/app/jobs`) |
-| ~~No report versions~~ | — | **Done:** every save is a version; `/server` → Versions → View / Restore |
-| ~~No browser security headers~~ | — | **Done:** CSP, X-Frame-Options, nosniff, HSTS (opt-in), request size limit (`security/headers.py`) |
-| ~~No CI pipeline~~ | — | **Done:** `.github/workflows/ci.yml` — ruff, pytest, frontend build, Docker build and start |
-| Metrics only in logs | No alerting | `/metrics` (Prometheus) still to do; **`/ready`** (storage + scheduler) is done |
-
-### 9.2 Target structure
-
-**Status:** the backend part is done (see §3), including the database backend for `storage/`, all four SQL
-connectors, jobs and versions. `frontend/src/shared/` (theme, ThemeToggle) and `deploy/` (docker-compose, nginx)
-exist. Still to do: moving the designer files into `frontend/src/designer/` and the guides into `docs/`.
-
-```text
-backend/
-  app/
-    main.py                 create_app(): routers, middleware, lifespan
-    config.py               Settings (pydantic-settings) — the environment variables
-    security/               tokens, roles, sessions, signed links, ip policy
-    api/                    one router per area: generate, designer, workspace, repository,
-                            server_portal, connections, users, logs, health
-    services/               report_service, publish_service, run_service, history_service
-    connectors/             base.py (Connector protocol), mongodb.py, sql.py (PostgreSQL, MySQL,
-                            SQL Server, Oracle via SQLAlchemy), registry.py
-    queries/                mongo query parsing, Jasper runCommand, read-only checks, SQL checks
-    rendering/              design_model.py (validate), fill.py (_Render), components.py
-                            (table, crosstab, list, subreport), pdf.py, grid.py, tabular.py
-    expressions/            jexpr.py
-    importers/              jrxml.py
-    storage/                repository.py, workspace.py, users.py, history.py
-                            (file backend today, database backend next — same interface)
-  tests/
-frontend/
-  apps/designer, apps/server, apps/admin, apps/runner
-  shared/                   api clients, ContextMenu, Shell, styles, DbLogo
-deploy/
-  Dockerfile, docker-compose.yml (service + MongoDB + PostgreSQL), nginx.conf, k8s/ (optional)
-docs/
-  ARCHITECTURE.md, DEPLOYMENT.md, USER_GUIDE (Roman Urdu), API (OpenAPI)
-.github/workflows/ci.yml
-```
-
-Rules for the split: no behaviour change in the same pull request, tests stay green after every step, the
-public URLs and the JSON formats (report definition, design, `.mrd`) stay the same.
-
-### 9.3 Database connectors (PostgreSQL, MySQL/MariaDB, SQL Server, Oracle)
-
-**PostgreSQL is done** (driver: psycopg 3). How it works:
+PostgreSQL (driver: psycopg 3) works like this:
 
 | Piece | Where | What it does |
 |---|---|---|
@@ -413,7 +395,7 @@ Safety is two layers: the query check, and the read-only transaction in the data
 check — e.g. `nextval()` — is still refused; the tests prove it on a real PostgreSQL in CI). Give the adapter a
 database user with SELECT rights only.
 
-**MySQL / MariaDB, SQL Server and Oracle are done** too, in the same module (one `Dialect` each):
+MySQL / MariaDB, SQL Server and Oracle are in the same module (one `Dialect` each):
 
 | Kind | Driver | URL | Read-only / time limit | Read Fields |
 |---|---|---|---|---|
@@ -425,9 +407,9 @@ Placeholders follow the driver: `%(name)s` (psycopg, PyMySQL, pymssql) or `:name
 `col = ANY(array)` on PostgreSQL and `col IN (:a, :b, …)` elsewhere (at most 1000 values). CI tests MySQL on a real
 server (`MYSQL_TEST_URL`); SQL Server and Oracle are tested with stand-in drivers.
 
-### 9.4 Sub-datasets and the Table editor (Jasper's `Dataset1` and the "Table" tab)
+## 10. Sub-datasets and the Table editor (Jasper's `Dataset1` and the "Table" tab)
 
-**Done.** `design.datasets = [{ name, connectionId, queryLanguage, collection, querySource, fields, parameters }]`
+`design.datasets = [{ name, connectionId, queryLanguage, collection, querySource, fields, parameters }]`
 (Dataset and Query → **Datasets** tab). A Table or Crosstab gets `datasetName` and `datasetParameters` (expressions
 in the report's scope, like Jasper's dataset run); a dataset parameter without a value takes the report parameter of
 the same name. The query is checked like a report query when publishing (`definitions.compile_dataset`) and runs
@@ -436,13 +418,11 @@ adapter the designer preview shows sample records; a failing dataset prints its 
 
 Double-clicking a Table opens the **Table editor** (`TableEditor.jsx`): Column Header / Detail / Column Footer cells
 side by side, click to edit, drag a column edge to resize, add / move / delete columns, pick the dataset and map its
-parameters. Still open: List and Chart on a sub-dataset, column groups.
+parameters.
 
-### 9.5 Suggested order
+---
 
-1. ~~CI + backend split, services~~ — **done**.
-2. ~~PostgreSQL, MySQL, SQL Server, Oracle~~ — **done**.
-3. ~~Sub-datasets + Table editor~~ — **done** (List / Chart datasets open).
-4. ~~Database storage, report versions, several instances~~ — **done**.
-5. ~~Background jobs, scheduling and e-mail~~ — **done**; `/metrics` and alerting still open.
-6. ~~Responsive UI (web + mobile), light/dark theme~~ — **done** (`shared/theme.css`).
+## 11. Not built yet
+
+* `/metrics` (Prometheus) and alerting: today there are logs, `/health` and `/ready`.
+* List and Chart elements on a sub-dataset; column groups in the Table editor.

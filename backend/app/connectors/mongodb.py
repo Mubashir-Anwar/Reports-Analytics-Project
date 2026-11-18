@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import re
-from typing import Any
+from typing import Any, Iterator
 from urllib.parse import unquote, urlsplit
 
 from fastapi import HTTPException
@@ -48,6 +48,20 @@ def _check_mongo_connection(uri: str, database: str = "") -> str:
     finally:
         if client is not None:
             client.close()
+
+
+def iter_report_pipeline(collection: Any, pipeline: list[dict[str, Any]], *, max_time_ms: int, allow_disk_use: bool,
+                         batch_size: int = 2000) -> Iterator[dict[str, Any]]:
+    """Records of a pipeline read in batches from a cursor (big exports): only one batch is in memory at a time.
+    No read fallback here: a user without the aggregate permission gets the normal (limited) run instead."""
+    try:
+        cursor = collection.aggregate(pipeline, maxTimeMS=max_time_ms, allowDiskUse=allow_disk_use, batchSize=batch_size)
+    except PyMongoError as error:
+        if getattr(error, "code", None) == 13:
+            raise MongoReadAccessError("Big exports need the MongoDB 'aggregate' permission on the report's collections") from None
+        raise
+    with cursor:
+        yield from cursor
 
 
 def _execute_report_pipeline(

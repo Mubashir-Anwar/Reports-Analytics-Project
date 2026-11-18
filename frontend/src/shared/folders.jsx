@@ -119,7 +119,7 @@ export function Breadcrumbs({ path, onSelect, rootLabel = 'All reports' }) {
 }
 
 /** The folders directly inside `parent`, as tiles (click opens, right-click for actions). */
-export function SubfolderTiles({ folders, parent, count, onOpen, onMenu }) {
+export function SubfolderTiles({ folders, parent, count, onOpen, onMenu, itemWord = 'report' }) {
   const kids = childrenOf(withParents(folders), parent);
   if (!kids.length) return null;
   return (
@@ -127,7 +127,7 @@ export function SubfolderTiles({ folders, parent, count, onOpen, onMenu }) {
       {kids.map((path) => (
         <button key={path} type="button" className="fd-tile" onClick={() => onOpen(path)} onContextMenu={onMenu ? (event) => onMenu(event, path) : undefined} title={path}>
           <FolderIcon size={26} tone="tile" />
-          <span><b>{path.split('/').pop()}</b><small>{count ? `${count(path)} report${count(path) === 1 ? '' : 's'}` : 'Folder'}{childrenOf(folders, path).length ? ` · ${childrenOf(folders, path).length} folder${childrenOf(folders, path).length === 1 ? '' : 's'}` : ''}</small></span>
+          <span><b>{path.split('/').pop()}</b><small>{count ? `${count(path)} ${itemWord}${count(path) === 1 ? '' : 's'}` : 'Folder'}{childrenOf(folders, path).length ? ` · ${childrenOf(folders, path).length} folder${childrenOf(folders, path).length === 1 ? '' : 's'}` : ''}</small></span>
         </button>
       ))}
     </div>

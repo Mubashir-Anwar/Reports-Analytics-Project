@@ -9,7 +9,7 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-import designer_render as dr  # noqa: E402
+from backend.app.rendering import engine as dr  # noqa: E402
 from test_workspace_and_server import client, token  # noqa: E402,F401
 
 COLUMNS = ["Name", "Amount"]

@@ -55,9 +55,11 @@ def create_context() -> SimpleNamespace:
             LOG.info("Default MongoDB connection ready")
         except HTTPException as exc:
             LOG.warning("Default MongoDB connection unavailable: %s", exc.detail)
-        ctx.job_runner.start()  # scheduled reports and background runs
+        ctx.analytics_refresher.recover()  # imports cut off by a restart
+        ctx.job_runner.start()  # scheduled reports and background runs (its loop also starts due dataset refreshes)
         yield
         ctx.job_runner.stop()
+        ctx.analytics_refresher.stop()
         for client in state["clients"].values():
             client.close()
 
@@ -75,6 +77,12 @@ def create_context() -> SimpleNamespace:
     ctx = SimpleNamespace(**{name: value for name, value in locals().items() if not name.startswith('__')})
     bind_services(ctx)  # the helpers in backend/app/services, with ctx filled in
     ctx.job_runner = JobRunner(ctx)
+    from backend.app.analytics.refresher import Refresher  # noqa: PLC0415
+    ctx.analytics_refresher = Refresher(ctx)
+    from backend.app.services.capacity import RunGate  # noqa: PLC0415
+    ctx.run_gate = RunGate(settings.max_concurrent, settings.max_per_caller, settings.queue_wait_seconds)
+    LOG.info("At most %d reports at once in this process (%d per user), waiting up to %d s for a place",
+             settings.max_concurrent, settings.max_per_caller, settings.queue_wait_seconds)
     try:  # the repository revision we started with (see services/versions.refresh_if_changed)
         from backend.app.storage.store import get_store
         state["revision"] = (get_store().read_json("meta/repository-revision.json") or {}).get("revision")

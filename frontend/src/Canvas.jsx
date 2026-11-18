@@ -252,7 +252,7 @@ function CanvasToolbar({ count, lockedAll, actions, prefs, setPrefs, hasClipboar
   );
 }
 
-export default function Canvas({ design, selection, tool, zoom, setZoom, dispatch, actions, openMenu, onEditExpression, onPercentage, onWizard, onOpenTable, prefs, setPrefs, hasClipboard, onQuery, onTemplates }) {
+export default function Canvas({ design, selection, tool, zoom, setZoom, dispatch, actions, openMenu, onEditExpression, onPercentage, onWizard, onOpenTable, prefs, setPrefs, hasClipboard, onQuery, onTemplates, showToolbar = true }) {
   const bandRefs = useRef({});
   const scrollRef = useRef(null);
   const pageRef = useRef(null);
@@ -647,7 +647,7 @@ export default function Canvas({ design, selection, tool, zoom, setZoom, dispatc
 
   return (
     <div className="canvas-wrap">
-      <CanvasToolbar count={selectedEls.length} lockedAll={lockedAll} actions={actions} prefs={prefs} setPrefs={setPrefs} hasClipboard={hasClipboard} onQuery={onQuery} onTemplates={onTemplates} />
+      {showToolbar && <CanvasToolbar count={selectedEls.length} lockedAll={lockedAll} actions={actions} prefs={prefs} setPrefs={setPrefs} hasClipboard={hasClipboard} onQuery={onQuery} onTemplates={onTemplates} />}
       <div
         ref={scrollRef}
         className={`canvas-scroll ${prefs.showRulers ? 'with-rulers' : ''}`}

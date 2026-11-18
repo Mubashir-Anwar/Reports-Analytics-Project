@@ -2,6 +2,7 @@
 import { useEffect, useState } from 'react';
 import { api } from '../api.js';
 import { DbLogo, adapterTypeLabel } from '../shared/adapters.jsx';
+import CapacityCard from './CapacityCard.jsx';
 
 export default function OverviewTab({ who, notify, onOpen }) {
   const [data, setData] = useState(null);
@@ -42,6 +43,8 @@ export default function OverviewTab({ who, notify, onOpen }) {
           <span>{status ? `Storage: ${status.storage} · ` : ''}areas: {who.areas.join(', ')}</span>
         </section>
       </div>
+
+      <CapacityCard />
 
       <div className="grid-2">
         <section className="card">

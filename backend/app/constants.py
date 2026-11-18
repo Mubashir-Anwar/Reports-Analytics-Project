@@ -41,4 +41,5 @@ CONNECTION_ID_PATTERN = re.compile(r"^[a-z0-9][a-z0-9_-]{0,39}$")
 ENV_KEY_PATTERN = re.compile(r"^[A-Z][A-Z0-9_]{0,63}$")
 
 # The product name shown on pages and in the Postman environment (frontend: src/shared/brand.js).
-BRAND_NAME = "Folio Reports"
+BRAND_NAME = "Analysis"             # the default; Admin → Branding renames it (backend/app/branding.py)
+BRAND_TAGLINE = "Design · Publish · Deliver"

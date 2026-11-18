@@ -6,7 +6,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-import reporting_core as core  # noqa: E402
+import service_names as core  # noqa: E402
 
 GOOD = {"id": "GOOD_REPORT", "collection": "orders", "pipeline": [{"$match": {}}], "columns": ["a"]}
 

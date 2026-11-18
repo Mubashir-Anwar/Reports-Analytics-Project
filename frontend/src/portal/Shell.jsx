@@ -1,4 +1,4 @@
-/** Top bar of the React /server and /admin pages: the shared Folio Reports navigation bar. */
+/** Top bar of the React /server and /admin pages: the shared navigation bar. */
 import NavBar from '../shared/NavBar.jsx';
 
 export function Topbar({ current, children }) {

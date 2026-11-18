@@ -7,7 +7,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-import jexpr  # noqa: E402
+from backend.app.expressions import jexpr  # noqa: E402
 
 
 def run(text, fields=None, params=None):

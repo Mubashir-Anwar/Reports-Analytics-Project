@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import re
 import threading
+from pathlib import Path
 from typing import Any
 
 from backend.app.db.entities import JOB_RUNS, JOB_SCHEDULES, get_entities
@@ -19,7 +20,7 @@ OUTPUT_PREFIX = "jobs/output"
 
 # What a run or schedule holds when a field is empty (the table leaves empty fields out).
 RUN_DEFAULTS = {"jobId": "", "jobLabel": "", "startedAt": "", "finishedAt": "", "rowCount": 0, "error": "", "file": "", "size": 0,
-                "email": "", "parameters": {}}
+                "email": "", "parameters": {}, "spooled": False}
 SCHEDULE_DEFAULTS = {"nextRunAt": "", "lastRun": None, "parameters": {}, "enabled": False}
 
 
@@ -57,8 +58,20 @@ def write_output(name: str, body: bytes) -> None:
 
 
 def read_output(run: dict[str, Any]) -> bytes | None:
+    """The file of a normal run (kept in the system store). Big exports are on disk: see output_path."""
+    if run.get("spooled"):
+        return None
     key = output_key(run)
     return get_store().read_bytes(key) if key else None
+
+
+def output_path(run: dict[str, Any]) -> Path | None:
+    """The file of a big export (written to disk by rendering/spool.py), when it is still there."""
+    if not run.get("spooled") or output_key(run) is None:
+        return None
+    from backend.app.rendering.spool import export_path  # noqa: PLC0415
+    path = export_path(run["file"])
+    return path if path.is_file() else None
 
 
 def output_keys() -> list[str]:
@@ -67,8 +80,14 @@ def output_keys() -> list[str]:
 
 def _remove_file(run: dict[str, Any]) -> None:
     key = output_key(run)
-    if key is not None:
-        get_store().delete(key)
+    if key is None:
+        return
+    if run.get("spooled"):
+        path = output_path(run)
+        if path is not None:
+            path.unlink(missing_ok=True)
+        return
+    get_store().delete(key)
 
 
 def save_run(run: dict[str, Any], keep_for_job: int | None = None) -> None:

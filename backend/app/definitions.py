@@ -3,10 +3,7 @@ from __future__ import annotations
 
 import base64
 import copy
-import importlib
 import math
-import os
-import pkgutil
 import re
 from dataclasses import dataclass
 from datetime import date, datetime, timezone
@@ -406,18 +403,6 @@ def compile_dataset(dataset: dict[str, Any], report_id: str, connection_id: str)
 
 def discover_reports() -> dict[str, ReportDefinition]:
     registry: dict[str, ReportDefinition] = {}
-    if os.getenv("REPORTING_LOAD_BUILTIN_REPORTS", "false").lower() == "true":
-        import reports
-        for module_info in pkgutil.iter_modules(reports.__path__):
-            if module_info.name.startswith("_"):
-                continue
-            module = importlib.import_module(f"reports.{module_info.name}")
-            definition = getattr(module, "REPORT", None)
-            if not isinstance(definition, ReportDefinition):
-                raise RuntimeError(f"reports/{module_info.name}.py must define REPORT = ReportDefinition(...)")
-            if definition.report_id in registry:
-                raise RuntimeError(f"Duplicate report_id: {definition.report_id}")
-            registry[definition.report_id] = definition
     from backend.app.storage.store import get_store
     loaded_from: dict[str, str] = {}
     for key, payload in get_store().read_many("reports"):

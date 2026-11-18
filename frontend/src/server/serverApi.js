@@ -39,6 +39,13 @@ export const serverApi = {
   move: (id, folder) => call(`/api/server/reports/${encodeURIComponent(id)}/move`, { method: 'POST', body: { folder } }),
   upload: (body) => call('/api/server/upload', { method: 'POST', body }),
   connections: () => call('/api/server/connections'),
+  // dashboards (Analytics) published in the same folders
+  dashboard: (id) => call(`/api/server/dashboards/${encodeURIComponent(id)}`),
+  dashboardQuery: (id, queries, filters) => call(`/api/server/dashboards/${encodeURIComponent(id)}/query-batch`, { method: 'POST', body: { queries, filters } }),
+  dashboardFile: (id) => call(`/api/server/dashboards/${encodeURIComponent(id)}/file`),
+  moveDashboard: (id, folder) => call(`/api/server/dashboards/${encodeURIComponent(id)}/move`, { method: 'POST', body: { folder } }),
+  deleteDashboard: (id) => call(`/api/server/dashboards/${encodeURIComponent(id)}`, { method: 'DELETE', body: {} }),
+  uploadDashboard: (body) => call('/api/server/dashboards/upload', { method: 'POST', body }),
   testConnection: (id) => call(`/api/server/connections/${encodeURIComponent(id)}/test`, { method: 'POST', body: {} }),
   // folder permissions (administrators)
   permissions: (path) => call(`/api/server/permissions?path=${encodeURIComponent(path || '')}`),

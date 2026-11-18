@@ -5,7 +5,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-import reporting_core as core  # noqa: E402
+import service_names as core  # noqa: E402
 from test_workspace_and_server import ADMIN, PUBLISHED, client, draft, login, token  # noqa: E402,F401
 
 WITH_PARAM = {**PUBLISHED, "id": "R2", "title": "With question", "folder": "Finance",

@@ -1,7 +1,7 @@
 [project]
-name = "mongo-reporting-service"
+name = "analysis"
 version = "0.3.0"
-description = "Jaspersoft-style report designer and report server on FastAPI + React"
+description = "Analysis: Jaspersoft-style report designer and report server with Power BI-style analytics (FastAPI + React)"
 requires-python = ">=3.11"
 
 [tool.ruff]
@@ -19,9 +19,8 @@ force-sort-within-sections = false
 combine-as-imports = true
 
 [tool.ruff.lint.per-file-ignores]
-# compatibility modules re-export names on purpose
-"reporting_core.py" = ["F401", "E402", "I001"]
-"app.py" = ["F401"]
+# the tests' one-namespace helper re-exports names on purpose
+"tests/service_names.py" = ["F401", "E402", "I001"]
 # tests import shared pytest fixtures by name (F811) and set sys.path before importing (I001)
 "tests/*" = ["F811", "I001"]
 

@@ -12,8 +12,8 @@ from fastapi.testclient import TestClient
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-import designer_render as dr  # noqa: E402
-import reporting_core as core  # noqa: E402
+from backend.app.rendering import engine as dr  # noqa: E402
+import service_names as core  # noqa: E402
 
 ADMIN = "admin-test-token"
 SECRET = "s" * 40
@@ -256,7 +256,7 @@ def test_parameter_collection_with_allowed_values_is_limited_to_the_list():
 
 
 def test_jrxml_import_warns_about_collection_parameter():
-    import jrxml_import
+    from backend.app.importers import jrxml as jrxml_import
     from test_jrxml_import import MINI  # noqa: PLC0415 - reuse the existing fixture
 
     xml = MINI.replace("'collectionName' : $P{CollectionName}", "'collectionName' : 'Plans-$P{ProductCode}'")

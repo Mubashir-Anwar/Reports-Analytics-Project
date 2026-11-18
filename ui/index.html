@@ -4,15 +4,17 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="theme-color" content="#0c1425">
-  <title>Run reports · Folio Reports</title>
+  <title>Run reports · Analysis</title>
+  <script src="/assets/brand/theme.js"></script>
   <link rel="icon" type="image/svg+xml" href="/assets/brand/favicon.svg">
   <link rel="stylesheet" href="/assets/brand/navbar.css">
   <link rel="stylesheet" href="/assets/styles.css">
   <link rel="stylesheet" href="/assets/runner.css">
+  <link rel="stylesheet" href="/assets/brand/runner-dark.css">
 </head>
 <body class="runner-page">
   <header class="fx-nav" id="fx-nav">
-    <a class="fx-brand" href="/" title="Folio Reports — home"><img class="fx-logo" src="/assets/brand/logo.svg" alt=""><span class="fx-name"><b>Folio<span>Reports</span></b><small>Run reports</small></span></a>
+    <a class="fx-brand" href="/" title="Home"><img class="fx-logo" src="/assets/brand/logo.svg" alt=""><span class="fx-name"><b data-brand>Analysis</b><small>Run reports</small></span></a>
     <button type="button" class="fx-icon-btn fx-burger" aria-controls="fx-links" aria-label="Menu" data-nav-toggle>☰</button>
     <span class="fx-divider" aria-hidden="true"></span>
     <nav class="fx-links" id="fx-links" aria-label="Main navigation">
@@ -23,6 +25,9 @@
       <a class="fx-link" href="/admin" data-right="admin" hidden><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6zM12 2v3M12 19v3M4.2 4.2l2.1 2.1M17.7 17.7l2.1 2.1M2 12h3M19 12h3M4.2 19.8l2.1-2.1M17.7 6.3l2.1-2.1"/></svg><span>Admin</span></a>
     </nav>
     <div class="fx-actions">
+      <div class="lk" data-look>
+        <button type="button" class="lk-btn" aria-haspopup="dialog" aria-expanded="false" title="Theme: colours, light or dark" aria-label="Theme" data-look-toggle><svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3a9 9 0 1 0 0 18c1.1 0 1.7-.8 1.7-1.7 0-.5-.2-.9-.5-1.2-.3-.3-.5-.7-.5-1.2 0-.9.8-1.7 1.7-1.7H16a5 5 0 0 0 5-5C21 6.6 17 3 12 3z"/><circle cx="7.5" cy="11.5" r="1.2" fill="currentColor"/><circle cx="10" cy="7.5" r="1.2" fill="currentColor"/><circle cx="14.5" cy="7.5" r="1.2" fill="currentColor"/></svg></button>
+      </div>
       <details class="fx-user" data-user hidden>
         <summary class="fx-user-btn"><span class="fx-avatar" data-initials>?</span><span class="fx-user-name" data-username></span><span class="fx-caret" aria-hidden="true">▾</span></summary>
         <div class="fx-menu" role="menu">

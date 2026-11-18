@@ -4,7 +4,8 @@
 #   docker compose -f deploy/docker-compose.yml --env-file deploy/.env up -d --build
 #
 # Reports still read from your own MongoDB / SQL databases (data adapters); this PostgreSQL only stores the
-# service's own data: reports, versions, users, schedules, outputs, audit log.
+# service's own data: reports, versions, users, schedules, outputs, audit log. Analytics datasets (Parquet files)
+# are on the shared volume "analytics", so every instance reads the same imports.
 name: reporting
 
 services:
@@ -29,6 +30,8 @@ services:
     depends_on:
       storage-db:
         condition: service_healthy
+    volumes:
+      - analytics:/data/analytics
     environment: &app-env
       REPORTING_STORAGE: postgresql
       REPORTING_STORAGE_URL: postgresql://reporting:${STORAGE_DB_PASSWORD}@storage-db:5432/reporting
@@ -66,3 +69,4 @@ services:
 
 volumes:
   storage-db:
+  analytics:

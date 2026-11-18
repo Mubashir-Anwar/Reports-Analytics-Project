@@ -19,7 +19,7 @@ from fastapi.testclient import TestClient
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-import reporting_core as core  # noqa: E402
+import service_names as core  # noqa: E402
 import test_storage  # noqa: E402
 from backend.app import db as db_package  # noqa: E402
 from backend.app.db import model  # noqa: E402
@@ -339,6 +339,36 @@ def test_entities_contract(backend):
     assert store.delete_where(ent.FOLDER_PERMISSIONS, {"folder": "/"}) == 1
     with pytest.raises(ValueError):
         store.put(ent.USERS, {"username": ""})
+
+
+def test_analytics_entities(backend):
+    """Datasets, relationships, dashboards and import history keep nested JSON ("$" and "." keys) on every backend."""
+    from backend.app.db import entities as ent
+    store = ent.get_entities()
+    dataset = {"id": "ds_0123456789ab", "name": "Orders", "folder": "Analytics", "connectionId": "default",
+               "queryLanguage": "aggregation-json", "collection": "orders", "querySource": '[{"$match": {"a.b": 1}}]',
+               "columns": [{"name": "customer.city", "kind": "text", "role": "dimension"}], "refreshEveryMinutes": 60,
+               "status": "ready", "rowCount": 20000, "sizeBytes": 253000, "nextRefreshAt": "2026-01-01T11:00:00.000Z"}
+    store.put(ent.ANALYTICS_DATASETS, dataset)
+    assert store.get(ent.ANALYTICS_DATASETS, dataset["id"]) == dataset
+    store.put(ent.ANALYTICS_DATASETS, {**dataset, "status": "refreshing"})
+    assert store.get(ent.ANALYTICS_DATASETS, dataset["id"])["status"] == "refreshing" and len(store.find(ent.ANALYTICS_DATASETS)) == 1
+    relation = {"id": "rel_0123456789ab", "fromDataset": dataset["id"], "fromColumn": "Branch", "toDataset": "ds_b", "toColumn": "Code",
+                "active": True, "createdBy": "maya", "createdAt": "2026-01-01T10:00:00.000Z"}
+    store.put(ent.ANALYTICS_RELATIONSHIPS, relation)
+    assert store.get(ent.ANALYTICS_RELATIONSHIPS, relation["id"]) == relation
+    tiles = [{"id": "t1", "type": "column", "x": 0, "y": 0, "w": 6, "h": 4, "dataset": dataset["id"],
+              "groupBy": [{"column": "Date", "bucket": "month"}], "values": [{"column": "Amount", "agg": "sum"}]}]
+    board = {"id": "dash_0123456789ab", "name": "Sales", "folder": "Analytics", "tiles": tiles,
+             "filters": [{"column": "customer.city", "op": "in", "values": ["Lahore"]}], "owner": "maya", "updatedAt": "2026-01-01T10:00:00.000Z"}
+    store.put(ent.ANALYTICS_DASHBOARDS, board)
+    assert store.get(ent.ANALYTICS_DASHBOARDS, board["id"]) == board
+    for number in range(3):
+        store.put(ent.ANALYTICS_REFRESHES, {"id": f"rf_00000000000{number}", "datasetId": dataset["id"], "trigger": "manual",
+                                            "actor": "maya", "status": "success", "startedAt": f"2026-01-01T10:00:0{number}.000Z"})
+    found = store.find(ent.ANALYTICS_REFRESHES, {"datasetId": dataset["id"]}, order=("startedAt", True), limit=2)
+    assert [item["id"] for item in found] == ["rf_000000000002", "rf_000000000001"]
+    assert store.delete(ent.ANALYTICS_DASHBOARDS, board["id"]) and store.get(ent.ANALYTICS_DASHBOARDS, board["id"]) is None
 
 
 def test_older_documents_move_into_the_tables(backend):

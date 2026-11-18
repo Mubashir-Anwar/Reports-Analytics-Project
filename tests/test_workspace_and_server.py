@@ -8,7 +8,7 @@ from fastapi.testclient import TestClient
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-import reporting_core as core  # noqa: E402
+import service_names as core  # noqa: E402
 
 ADMIN = "admin-token-for-tests-0123456789"
 DESIGNER = "designer-token-for-tests-0123456789"

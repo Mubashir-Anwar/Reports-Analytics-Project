@@ -9,7 +9,7 @@ from openpyxl import load_workbook
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-import designer_render as dr  # noqa: E402
+from backend.app.rendering import engine as dr  # noqa: E402
 
 COLUMNS = ["Branch", "Name", "Amount", "Month"]
 ROWS = [{"Branch": f"B{i % 3}", "Name": f"Person {i}", "Amount": i * 10, "Month": f"M{i % 4}"} for i in range(60)]

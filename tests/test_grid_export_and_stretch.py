@@ -10,7 +10,7 @@ from openpyxl import load_workbook
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-import designer_render as dr  # noqa: E402
+from backend.app.rendering import engine as dr  # noqa: E402
 
 COLUMNS = ["Name", "Address"]
 LONG = "House 12, Street 5, Gulberg III, Lahore, Punjab, Pakistan, near the big mosque and the market"

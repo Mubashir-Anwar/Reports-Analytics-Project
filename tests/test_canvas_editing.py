@@ -4,7 +4,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-import designer_render as dr  # noqa: E402
+from backend.app.rendering import engine as dr  # noqa: E402
 
 COLUMNS = ["Name"]
 ROWS = [{"Name": "A"}, {"Name": "B"}]

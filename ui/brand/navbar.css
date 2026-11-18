@@ -99,3 +99,50 @@
 /* the plain-HTML account menu (Run reports page) is a <details> */
 details.fx-user > summary { list-style: none; }
 details.fx-user > summary::-webkit-details-marker { display: none; }
+
+/* Top bar in the accent colour (ui/brand/theme.js: html[data-bar="accent"]), like an Office title bar */
+:root { --fx-bar: #312e81; }
+:root[data-accent="blue"] { --fx-bar: #1a4fb4; }
+:root[data-accent="green"] { --fx-bar: #107c41; }
+:root[data-accent="teal"] { --fx-bar: #0f5e58; }
+:root[data-accent="orange"] { --fx-bar: #b23c0a; }
+:root[data-accent="rose"] { --fx-bar: #9f1239; }
+:root[data-accent="violet"] { --fx-bar: #5b21b6; }
+:root[data-bar="accent"] .fx-nav { --fx-bg: var(--fx-bar); --fx-bg-2: color-mix(in srgb, var(--fx-bar) 78%, #000); --fx-muted: rgb(255 255 255 / .78);
+  --fx-line: rgb(255 255 255 / .2); --fx-hover: rgb(255 255 255 / .13); --fx-on: rgb(255 255 255 / .2); --fx-accent: #ffffff; --fx-accent-2: #ffffff; }
+:root[data-bar="accent"] .fx-name b span { color: rgb(255 255 255 / .85); }
+:root[data-contrast="high"] .fx-nav { --fx-bg: #000; --fx-bg-2: #000; --fx-text: #fff; --fx-muted: #e5e7eb; --fx-line: rgb(255 255 255 / .45); }
+.fx-logo { filter: none; }
+.fx-brand .fx-logo { background: #fff; border-radius: 9px; padding: 3px; }
+/* the theme button of the plain-HTML page (Run reports) */
+.fx-nav .lk-btn { display: inline-grid; place-items: center; width: 34px; height: 34px; border-radius: 9px; border: 1px solid var(--fx-line); background: transparent; color: var(--fx-text); cursor: pointer; }
+.fx-nav .lk-btn:hover { background: var(--fx-hover); }
+
+/* ---------- theme menu (React: shared/ThemeMenu.jsx; Run reports: runner.js) ---------- */
+:root { --lk-accent: #4f46e5; }
+:root[data-accent="blue"] { --lk-accent: #2563eb; } :root[data-accent="green"] { --lk-accent: #15803d; } :root[data-accent="teal"] { --lk-accent: #0f766e; }
+:root[data-accent="orange"] { --lk-accent: #c2410c; } :root[data-accent="rose"] { --lk-accent: #e11d48; } :root[data-accent="violet"] { --lk-accent: #7c3aed; }
+.lk { position: relative; }
+.lk-panel { position: absolute; right: 0; top: calc(100% + 8px); z-index: 90; width: 340px; max-height: calc(100vh - 70px); overflow: auto; padding: 12px;
+  border-radius: 14px; background: var(--fx-menu); color: var(--fx-menu-text); border: 1px solid var(--fx-menu-line); box-shadow: 0 18px 48px rgb(15 23 42 / .28); display: grid; gap: 12px; font-size: 13px; }
+.lk-panel h3 { font-weight: 700; margin: 0; font-size: 11px; letter-spacing: .07em; text-transform: uppercase; color: var(--fx-menu-muted); }
+.lk-presets { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+.lk-preset { color: inherit; display: grid; gap: 6px; padding: 6px; border: 1px solid var(--fx-menu-line); border-radius: 10px; background: var(--fx-menu-hover); color: var(--fx-menu-text); cursor: pointer; text-align: left; font: inherit; }
+.lk-preset:hover { border-color: var(--lk-accent); }
+.lk-preset.on { border-color: var(--lk-accent); box-shadow: 0 0 0 2px color-mix(in srgb, var(--lk-accent) 35%, transparent); }
+.lk-preset b { font-size: 12.5px; }
+.lk-preset small { color: var(--fx-menu-muted); font-size: 11px; line-height: 1.25; }
+.lk-swatch { display: grid; grid-template-rows: 9px 1fr; height: 46px; border-radius: 7px; overflow: hidden; border: 1px solid rgb(0 0 0 / .12); }
+.lk-swatch i { display: block; }
+.lk-swatch span { display: grid; grid-template-columns: 30% 1fr; gap: 3px; padding: 4px; }
+.lk-swatch span i { border-radius: 3px; }
+.lk-row { display: flex; flex-wrap: wrap; gap: 6px; }
+.lk-seg { display: inline-flex; border: 1px solid var(--fx-menu-line); border-radius: 9px; overflow: hidden; }
+.lk-seg button { border: 0; background: var(--fx-menu); color: var(--fx-menu-text); padding: 6px 11px; cursor: pointer; font: inherit; font-size: 12.5px; }
+.lk-seg button + button { border-left: 1px solid var(--fx-menu-line); }
+.lk-seg button.on { background: var(--lk-accent); color: #ffffff; font-weight: 700; }
+.lk-dot { width: 28px; height: 28px; border-radius: 50%; border: 2px solid var(--fx-menu); box-shadow: 0 0 0 1px var(--fx-menu-line); cursor: pointer; padding: 0; }
+.lk-dot.on { box-shadow: 0 0 0 2px var(--fx-menu-text); }
+.lk-check { display: flex; align-items: center; gap: 8px; cursor: pointer; }
+.lk-check input { width: 16px; height: 16px; accent-color: var(--lk-accent); }
+@media (max-width: 640px) { .lk-panel { position: fixed; left: 8px; right: 8px; top: 58px; width: auto; } }

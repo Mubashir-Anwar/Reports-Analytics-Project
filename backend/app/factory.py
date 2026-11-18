@@ -13,6 +13,7 @@ from backend.app.context import create_context
 from backend.app.logs import HTTP_LOG
 from backend.app.routers import (
     admin_tools,
+    analytics,
     api_keys,
     connections,
     designer,
@@ -39,7 +40,7 @@ def make_app() -> FastAPI:
     lifespan = ctx.lifespan
     ui_directory = ctx.ui_directory
     app = FastAPI(
-        title="MongoDB Reporting Service", version=SERVICE_VERSION, lifespan=lifespan,
+        title="Analysis API", version=SERVICE_VERSION, lifespan=lifespan,
         docs_url="/docs" if docs_on else None, redoc_url="/redoc" if docs_on else None,
         openapi_url="/openapi.json" if docs_on else None,
     )
@@ -110,4 +111,5 @@ def make_app() -> FastAPI:
     public_api.register(app, ctx)
     embed.register(app, ctx)
     admin_tools.register(app, ctx)
+    analytics.register(app, ctx)
     return app

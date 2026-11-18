@@ -13,12 +13,14 @@ import SourceView from './SourceView.jsx';
 import ErrorDialog from './ErrorDialog.jsx';
 import TableEditor from './TableEditor.jsx';
 import NavBar from './shared/NavBar.jsx';
+import Ribbon from './Ribbon.jsx';
+import './ribbon.css';
 import TemplateGallery from './TemplateGallery.jsx';
-import { AdaptersPanel, Outline, Palette, ServerPanel, WorkspacePanel, publishState } from './panels.jsx';
+import { AdaptersPanel, Outline, Palette, ServerPanel, WorkspacePanel } from './panels.jsx';
 import { ZOOM_LIMITS, bandWidth, clampZoom, emptyDesign, findElement, getBand, setBand } from './designModel.js';
 import ComponentWizard from './ComponentWizard.jsx';
 import PublishDialog from './PublishDialog.jsx';
-import { MRD_ACCEPT, buildMrd, downloadText, fileKind, parseMrd } from './mrd.js';
+import { buildMrd, downloadText, fileKind, parseMrd } from './mrd.js';
 import { blankReport, initialState, reducer, reportPayload } from './store.js';
 import { readClipboard } from './arrange.js';
 
@@ -42,6 +44,20 @@ export default function App() {
   const [tab, setTab] = useState('setup');
   const [leftTab, setLeftTab] = useState('workspace');
   const [drawer, setDrawer] = useState(null); // small screens: 'left' | 'right' panel shown over the canvas
+  // wide screens: each panel can be hidden on its own (Ribbon → View → Panels) for a bigger canvas; kept per browser
+  const [panels, setPanels] = useState(() => {
+    const all = { explorer: true, outline: true, palette: true, properties: true };
+    try {
+      const saved = JSON.parse(localStorage.getItem('designer-panels') || '{}');
+      if ('left' in saved || 'right' in saved) {          // saved by the earlier two-button version
+        return { explorer: saved.left !== false, outline: saved.left !== false, palette: saved.right !== false, properties: saved.right !== false };
+      }
+      return { ...all, ...saved };
+    } catch { return all; }
+  });
+  useEffect(() => { try { localStorage.setItem('designer-panels', JSON.stringify(panels)); } catch { /* ignore */ } }, [panels]);
+  const showLeft = panels.explorer || panels.outline;
+  const showRight = panels.palette || panels.properties;
   const [publishing, setPublishing] = useState(null); // { folders, folder, replace, busy }
   const [zoom, setZoom] = useState(1);
   const [message, setMessage] = useState({ text: 'Ready', kind: '' });
@@ -301,6 +317,14 @@ export default function App() {
     }
   };
 
+  /** File → New: an empty report (in the given folder), then the layout gallery. */
+  const newReport = (folder) => {
+    if (state.dirty && !window.confirm('You have unsaved changes. Discard them?')) return;
+    dispatch({ type: 'NEW', folder });
+    setTab('setup');
+    setTemplates(true);
+  };
+
   const loadDemo = () => {
     dispatch({ type: 'NEW' });
     dispatch({ type: 'REPORT', patch: { title: 'Demo report', id: 'DEMO_REPORT', collection: 'demo', columns: DEMO_COLUMNS, parameters: [{ name: 'StartDate', type: 'date', label: 'Start date', required: true }, { name: 'EndDate', type: 'date', label: 'End date', required: true }], querySource: '' } });
@@ -387,42 +411,30 @@ export default function App() {
   return (
     <div className="app">
       <NavBar current="/designer" />
-      <header className="toolbar">
-        <button type="button" className="btn drawer-btn" aria-label="Reports, adapters and outline" aria-expanded={drawer === 'left'} onClick={() => setDrawer(drawer === 'left' ? null : 'left')}>☰</button>
-        <span className="doc-title" title={`${report.title || 'Untitled'}${report.folder ? ` — ${report.folder}` : ''}`}>📄 {report.title || 'Untitled'}{dirty ? ' •' : ''}{report.folder && <small className="hide-narrow">in {report.folder}</small>}</span>
-        <div className="spacer" />
-        <label className="btn" title="Open a .mrd report file, or import a Jaspersoft Studio .jrxml">📂<span className="lbl"> Open file…</span>
-          <input type="file" accept={MRD_ACCEPT} hidden onChange={(e) => { openFile(e.target.files[0]); e.target.value = ''; }} />
-        </label>
-        <button className="btn" onClick={saveFile} title="Download this report as one .mrd file (query, parameters, data adapter, design and images)">💾<span className="lbl"> Save as file</span></button>
-        <button className="btn hide-narrow" onClick={loadDemo} title="Demo design with sample fields">Demo design</button>
-        <button className="btn" disabled={!past.length} onClick={() => dispatch({ type: 'UNDO' })} title="Undo (Ctrl+Z)">↶<span className="lbl"> Undo</span></button>
-        <button className="btn" disabled={!future.length} onClick={() => dispatch({ type: 'REDO' })} title="Redo (Ctrl+Y)">↷<span className="lbl"> Redo</span></button>
-        <div className="zoom">
-          <button className="btn sm" title="Zoom out (Ctrl −, Ctrl + wheel)" onClick={() => setZoom((z) => clampZoom(z - ZOOM_LIMITS.step))}>−</button>
-          <button className="btn sm zoom-value" title="Reset to 100% (Ctrl 0)" onClick={() => setZoom(1)}>{Math.round(zoom * 100)}%</button>
-          <button className="btn sm" title="Zoom in (Ctrl +, Ctrl + wheel)" onClick={() => setZoom((z) => clampZoom(z + ZOOM_LIMITS.step))}>+</button>
-        </div>
-        {(() => { const s = report.isNew ? { icon: '○', label: 'Not saved yet', cls: 'draft' } : publishState(report.status); return <span className={`pub-chip ${s.cls}`} title={s.label}>{s.icon} {report.isNew ? 'Not saved' : s.cls === 'published' ? 'Published' : s.cls === 'changed' ? 'Changed' : 'Draft'}</span>; })()}
-        <button className="btn" onClick={save} title="Save in your designer workspace (Ctrl+S). The server is not changed.">Save</button>
-        <button className="btn primary" onClick={startPublish} title="Copy this report to a folder on the report server">⇪<span className="lbl"> Publish</span></button>
-        <button type="button" className="btn drawer-btn" aria-label="Palette and properties" aria-expanded={drawer === 'right'} onClick={() => setDrawer(drawer === 'right' ? null : 'right')}>⚙</button>
-      </header>
+      <Ribbon
+        state={state} dispatch={dispatch} actions={actions} zoom={zoom} setZoom={setZoom} prefs={canvasPrefs} setPrefs={setCanvasPrefs}
+        view={tab} setView={setTab} drawer={drawer} setDrawer={setDrawer} panels={panels} setPanels={setPanels}
+        hasClipboard={Boolean(readClipboard()?.items?.length)}
+        onNew={() => newReport(state.report.folder)} onOpenFile={openFile} onSave={save} onSaveFile={saveFile} onPublish={startPublish}
+        onDemo={loadDemo} onTemplates={() => setTemplates(true)} onQuery={(which) => setQueryTab(which || 'query')}
+        onAdapters={() => { setLeftTab('adapters'); setPanels((p) => ({ ...p, explorer: true })); setDrawer('left'); }}
+      />
 
-      <div className={`workspace ${drawer ? `show-${drawer}` : ''}`}>
+      <div className={`workspace ${drawer ? `show-${drawer}` : ''} ${showLeft ? '' : 'hide-left'} ${showRight ? '' : 'hide-right'}`}>
         {drawer && <button type="button" className="drawer-backdrop" aria-label="Close the panel" onClick={() => setDrawer(null)} />}
         <aside className="left">
-          <div className="dock">
+          <div className={`dock ${panels.explorer ? '' : 'off'}`} aria-label="Repository explorer">
+            <div className="dock-head">Repository explorer</div>
             <div className="dock-tabs">
               <button className={leftTab === 'workspace' ? 'on' : ''} onClick={() => setLeftTab('workspace')} title="Reports saved inside the designer">Workspace</button>
               <button className={leftTab === 'server' ? 'on' : ''} onClick={() => setLeftTab('server')} title="Published reports on the report server">Server</button>
               <button className={leftTab === 'adapters' ? 'on' : ''} onClick={() => setLeftTab('adapters')}>Data Adapters</button>
             </div>
-            {leftTab === 'workspace' && <WorkspacePanel report={report} onOpen={open} onNew={(folder) => { if (state.dirty && !window.confirm('You have unsaved changes. Discard them?')) return; dispatch({ type: 'NEW', folder }); setTab('setup'); setTemplates(true); }} notify={notify} refreshKey={refreshKey} onChanged={() => setRefreshKey((n) => n + 1)} />}
+            {leftTab === 'workspace' && <WorkspacePanel report={report} onOpen={open} onNew={newReport} notify={notify} refreshKey={refreshKey} onChanged={() => setRefreshKey((n) => n + 1)} />}
             {leftTab === 'server' && <ServerPanel report={report} onOpenFromServer={openFromServer} openMenu={openMenu} notify={notify} refreshKey={refreshKey} onChanged={() => setRefreshKey((n) => n + 1)} />}
             {leftTab === 'adapters' && <AdaptersPanel notify={notify} openMenu={openMenu} refreshKey={refreshKey} onChanged={() => setRefreshKey((n) => n + 1)} />}
           </div>
-          <div className="dock">
+          <div className={`dock ${panels.outline ? '' : 'off'}`}>
             <div className="dock-tabs"><button className="on">Outline</button></div>
             <Outline report={report} design={design} selection={selection} dispatch={dispatch} actions={actions} openMenu={openMenu} onDetectFields={() => setTab('setup')} onEditExpression={editExpression} />
           </div>
@@ -436,15 +448,15 @@ export default function App() {
           </div>
           <div className="stage">
             {tab === 'setup' && <SetupForm state={state} dispatch={dispatch} notify={notify} onTemplates={() => setTemplates(true)} refreshKey={refreshKey} />}
-            {tab === 'design' && <Canvas design={design} selection={selection} tool={tool} zoom={zoom} setZoom={setZoom} dispatch={dispatch} actions={actions} openMenu={openMenu} onEditExpression={editExpression} onPercentage={onPercentage} onWizard={onWizard} onOpenTable={setTableId} prefs={canvasPrefs} setPrefs={setCanvasPrefs} hasClipboard={Boolean(readClipboard()?.items?.length)} onQuery={() => setQueryTab('query')} onTemplates={() => setTemplates(true)} />}
+            {tab === 'design' && <Canvas design={design} selection={selection} tool={tool} zoom={zoom} setZoom={setZoom} dispatch={dispatch} actions={actions} openMenu={openMenu} onEditExpression={editExpression} onPercentage={onPercentage} onWizard={onWizard} onOpenTable={setTableId} prefs={canvasPrefs} setPrefs={setCanvasPrefs} hasClipboard={Boolean(readClipboard()?.items?.length)} onQuery={() => setQueryTab('query')} onTemplates={() => setTemplates(true)} showToolbar={false} />}
             {tab === 'source' && <SourceView state={state} dispatch={dispatch} notify={notify} />}
             {tab === 'preview' && <Preview state={state} notify={notify} />}
           </div>
         </main>
 
         <aside className="right">
-          <div className="dock"><div className="dock-tabs"><button className="on">Palette</button></div><Palette tool={tool} dispatch={dispatch} /></div>
-          <div className="dock grow"><div className="dock-tabs"><button className="on">Properties</button></div><Properties state={state} dispatch={dispatch} notify={notify} actions={actions} onEditExpression={editExpression} onOpenQuery={(t) => setQueryTab(t || 'query')} onOpenTable={setTableId} /></div>
+          <div className={`dock ${panels.palette ? '' : 'off'} ${panels.properties ? '' : 'grow'}`}><div className="dock-tabs"><button className="on">Palette</button></div><Palette tool={tool} dispatch={dispatch} /></div>
+          <div className={`dock grow ${panels.properties ? '' : 'off'}`}><div className="dock-tabs"><button className="on">Properties</button></div><Properties state={state} dispatch={dispatch} notify={notify} actions={actions} onEditExpression={editExpression} onOpenQuery={(t) => setQueryTab(t || 'query')} onOpenTable={setTableId} /></div>
         </aside>
       </div>
       <footer className={`status ${message.kind}`}>{message.text}</footer>

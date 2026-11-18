@@ -1,4 +1,4 @@
-# Testing Folio Reports yourself
+# Testing Analysis yourself
 
 A checklist for a test server (for example your own PC). Tick each line; every step says what you should see.
 It takes about an hour. Do **not** run section 8 (the Postman collection) against production: it creates and
@@ -8,7 +8,7 @@ deletes test reports, a user, an API key and a data adapter (all named `PM_…` 
 
 1. Get the latest code (`git pull`) and the packages: `.venv\Scripts\python.exe -m pip install -r requirements.txt`.
 2. Start the server (a restart is needed after every update):
-   `.venv\Scripts\python.exe -m uvicorn app:app --host 127.0.0.1 --port 8000`
+   `.venv\Scripts\python.exe -m uvicorn backend.app.main:app --host 127.0.0.1 --port 8000`
 3. The first lines of the log show the storage. With `REPORTING_STORAGE=sql` you may see one line
    *"Moved reports, drafts, folders and data adapters into their tables"* the first time; that is expected.
 4. Open http://127.0.0.1:8000/ready → `{"status": "ready", "storage": "sql", …}`.
@@ -18,7 +18,7 @@ deletes test reports, a user, an API key and a data adapter (all named `PM_…` 
 | Step | Expected |
 |---|---|
 | Open http://127.0.0.1:8000/designer while signed out | You land on **Sign in** |
-| Sign in as your super admin (ABCD) | You go back to the Designer; the bar at the top shows the Folio Reports logo and all five parts |
+| Sign in as your super admin (ABCD) | You go back to the Designer; the bar at the top shows the product logo and name (default **Analysis**) and all five parts |
 | Admin → Users & rights: create `t_designer` with only **Designer** | Saved; the chips show Designer only |
 | Sign out (your name at the top right → Sign out), sign in as `t_designer` | Only the Designer opens; the top bar shows only Designer |
 | As `t_designer`, open /admin, /server, /ui | "No access" page for each, with a link to the Designer |
@@ -106,8 +106,8 @@ Expected: the same things you did in sections 1–4. A backup from before the ta
 1. Seed the demo data once: `.venv\Scripts\python.exe tools\postman\seed_demo.py` (database `rs_postman_demo` in your local MongoDB).
 2. Environment: `username` = ABCD, `password` = ABCD's password, `adminToken` = `REPORTING_ADMIN_TOKEN` from `.env`,
    `mongoUri` = `mongodb://127.0.0.1:27017`.
-3. **Run collection** (all 15 folders, in order). Expected: 126 requests, 0 failed (Health may be 503 when no default
-   MongoDB is configured — the service itself is fine). Folder 15 removes everything it created.
+3. **Run collection** (all 16 folders, in order). Expected: 178 requests, 0 failed (Health may be 503 when no default
+   MongoDB is configured — the service itself is fine). Folder 12c removes the analytics datasets and dashboard it made; the last folder removes everything else.
 
 ## 9. A website calling by URL (Grizzly / any server)
 
@@ -128,3 +128,38 @@ Admin → **System database** → choose the type (SQL Server, PostgreSQL, MySQL
 fields (or paste a URL) → **Test connection** → **Use …**. The current data is copied (users, rights, keys, reports,
 folders, drafts, adapters, schedules, versions, run log, audit trail); `.env` is updated and the old one is kept as
 `.env.before-storage-<time>`. Restart the service. The old database is not changed, so you can switch back the same way.
+
+## 11. Analytics (dashboards)
+
+Needs the **Analytics** right; making datasets and relationships also needs **Designer** or **Admin**.
+
+1. Open `/analytics` → **Datasets + New**. Choose a data adapter, a collection and a query (or `[{"$match": {}}]`),
+   press **Test query** → the first records show with nested fields as `customer.city`-style columns.
+2. **Create and import** → the dataset shows *Queued*, then *Ready* with its record count and size. The **Columns** tab
+   lists each column as a dimension or a measure; change a label or role and save. **Refresh history** shows the import.
+3. Make a second dataset (for example branches with a `Code` column). **Model** → relate `Branch` to `Code`.
+4. **Dashboards + New** → **Edit** → add a card (KPI), a column chart by month, a bar chart using a column of the second
+   dataset, a donut, a table and a slicer. Drag and resize the tiles, **Save**.
+5. Click a bar → the other visuals filter to it and a chip shows the filter; tick a value in the slicer → both filters
+   apply. **Clear all** removes them.
+6. Delete a dataset a dashboard uses → it asks first (the server answers 409 without `force=true`).
+7. Signed in as a user without Designer/Admin: dashboards open and filter, but there is no **+ New** for datasets.
+8. **On /server**: the dashboard is listed in its folder next to the reports (📊). Click it → it opens read-only with
+   working filters and slicers; **← Back** returns. Right-click → **Download (.mdash)**, then **Add Resource** → choose that
+   file and another folder → the copy appears there (its datasets are reused, or imported when they are not on this server).
+   Right-click → **Cut**, right-click a folder → **Paste** moves it. Folder **Permissions** set to *none* for a user hide the
+   dashboard on /server and in /analytics. Deleting a folder lists its dashboards in the confirmation and deletes them.
+9. **Admin → Analytics** (an account with only the Admin right is enough): the cards show datasets, problems,
+   dashboards, imported records and free disk space. Change a dataset's **Schedule** (a shorter one than
+   `ANALYTICS_MIN_REFRESH_MINUTES` is not offered) → "next …" appears; **Import now** → the status turns to Importing,
+   then Ready, and the import is listed under **Recent imports**. **Change owner** of a dashboard to another user.
+   **Delete** a dataset a dashboard uses → the confirmation names the dashboard. **Remove leftover files** is enabled
+   only when there are files no dataset uses.
+10. **Power BI template**: in Power BI Desktop save a report with *File → Export → Power BI template*. In Analytics →
+   **Import** choose the `.pbit` → a dialog lists its pages (with what changes on each) and its tables. Match each table
+   to a dataset (or a new one on a data adapter), press **Import** → one dashboard per page opens, with its visuals at
+   about the same place. Then import a `.pbix` the same way: the dialog says *Import a Power BI report*, warns that
+   measures, column types and relationships are not in the file, and lists only the columns the visuals use; in the
+   browser's network tab the request carries only `parts` (`Report/…`), never the data.
+11. With an API key whose folders include the dataset's folder: `GET /api/v1/analytics/datasets` lists it and
+   `POST /api/v1/analytics/query` returns rows; a dataset in another folder answers 404.

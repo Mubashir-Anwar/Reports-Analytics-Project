@@ -350,3 +350,67 @@ fetch('/api/server/me', { credentials: 'same-origin', cache: 'no-store' })
     document.querySelectorAll('[data-user]').forEach((node) => { node.hidden = false; });
   })
   .catch(() => {});
+
+// Product name (Admin → Branding) and the theme menu (same settings as the other pages: ui/brand/theme.js).
+fetch('/api/branding', { credentials: 'same-origin' }).then((r) => (r.ok ? r.json() : null)).then((brand) => {
+  if (!brand?.name) return;
+  document.querySelectorAll('[data-brand]').forEach((el) => { el.textContent = brand.name; });
+  document.title = `Run reports · ${brand.name}`;
+}).catch(() => {});
+
+(() => {
+  const LOOK = window.ReportingLook;
+  const box = document.querySelector('[data-look]');
+  if (!LOOK || !box) return;
+  const button = box.querySelector('[data-look-toggle]');
+  const BAR = { indigo: '#312e81', blue: '#1a4fb4', green: '#107c41', teal: '#0f5e58', orange: '#b23c0a', rose: '#9f1239', violet: '#5b21b6' };
+  const make = (tag, props = {}, children = []) => {
+    const el = document.createElement(tag);
+    Object.entries(props).forEach(([key, value]) => {
+      if (key === 'class') el.className = value;
+      else if (key === 'text') el.textContent = value;
+      else if (key.startsWith('on')) el.addEventListener(key.slice(2), value);
+      else el.setAttribute(key, value);
+    });
+    children.forEach((child) => el.append(child));
+    return el;
+  };
+  const seg = (label, options, value, key) => make('div', { class: 'lk-seg', role: 'group', 'aria-label': label },
+    options.map(([id, text]) => make('button', { type: 'button', class: value === id ? 'on' : '', 'aria-pressed': String(value === id), text, onclick: () => render(LOOK.save({ [key]: id })) })));
+  let panel = null;
+  function render(look = LOOK.read()) {
+    if (!panel) return;
+    const preset = LOOK.presetOf(look);
+    panel.replaceChildren(
+      make('h3', { text: 'Themes' }),
+      make('div', { class: 'lk-presets' }, LOOK.PRESETS.map((item) => {
+        const dark = item.look.mode === 'dark' || (item.look.mode === 'system' && LOOK.isDark());
+        const accent = (LOOK.ACCENTS.find((a) => a.id === item.look.accent) || {}).color;
+        const swatch = make('span', { class: 'lk-swatch', 'aria-hidden': 'true', style: `background:${dark ? '#0b1120' : '#eef1f6'}` }, [
+          make('i', { style: `background:${item.look.contrast === 'high' ? '#000' : item.look.bar === 'accent' ? BAR[item.look.accent] : '#0c1425'}` }),
+          make('span', {}, [make('i', { style: `background:${dark ? '#1a2438' : '#fff'}` }), make('i', { style: `background:linear-gradient(${dark ? '#1a2438' : '#fff'} 0 55%, ${accent} 55% 75%, ${dark ? '#1a2438' : '#fff'} 75%)` })]),
+        ]);
+        return make('button', { type: 'button', class: `lk-preset ${preset === item.id ? 'on' : ''}`, 'aria-pressed': String(preset === item.id), title: item.text, onclick: () => render(LOOK.save(item.look)) },
+          [swatch, make('b', { text: item.label }), make('small', { text: item.text })]);
+      })),
+      make('h3', { text: 'Mode' }), seg('Mode', [['system', '◐ Auto'], ['light', '☀ Light'], ['dark', '☾ Dark']], look.mode, 'mode'),
+      make('h3', { text: 'Accent colour' }),
+      make('div', { class: 'lk-row', role: 'group', 'aria-label': 'Accent colour' }, LOOK.ACCENTS.map((item) => make('button', {
+        type: 'button', class: `lk-dot ${look.accent === item.id ? 'on' : ''}`, style: `background:${item.color}`, title: item.label, 'aria-label': item.label,
+        'aria-pressed': String(look.accent === item.id), onclick: () => render(LOOK.save({ accent: item.id })),
+      }))),
+      make('h3', { text: 'Title bar' }), seg('Title bar', [['dark', 'Dark'], ['accent', 'Accent colour']], look.bar, 'bar'),
+      make('label', { class: 'lk-check' }, [make('input', { type: 'checkbox', ...(look.contrast === 'high' ? { checked: '' } : {}), onchange: (e) => render(LOOK.save({ contrast: e.target.checked ? 'high' : 'normal' })) }), 'High contrast (strongest text and lines)']),
+    );
+  }
+  const close = () => { panel?.remove(); panel = null; button.setAttribute('aria-expanded', 'false'); };
+  button.addEventListener('click', () => {
+    if (panel) { close(); return; }
+    panel = make('div', { class: 'lk-panel', role: 'dialog', 'aria-label': 'Theme' });
+    box.append(panel);
+    button.setAttribute('aria-expanded', 'true');
+    render();
+  });
+  document.addEventListener('mousedown', (event) => { if (panel && !box.contains(event.target)) close(); });
+  document.addEventListener('keydown', (event) => { if (event.key === 'Escape') close(); });
+})();

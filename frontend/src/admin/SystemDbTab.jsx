@@ -1,4 +1,4 @@
-// /admin → System database: where Folio Reports keeps its own data (users, rights, reports, folders, run log,
+// /admin → System database: where the service keeps its own data (users, rights, reports, folders, run log,
 // audit trail). A super admin picks a relational or non-relational database, tests it, copies the data and
 // saves the choice; the service uses it after the next restart. The old database is not changed.
 import { useEffect, useState } from 'react';
@@ -50,7 +50,7 @@ export default function SystemDbTab({ notify }) {
   return (
     <div className="grid-2">
       <section className="card">
-        <div className="card-head"><div><p className="eyebrow">System database</p><h2>Where Folio Reports keeps its data</h2></div></div>
+        <div className="card-head"><div><p className="eyebrow">System database</p><h2>Where the service keeps its data</h2></div></div>
         <div className="sysdb-now">
           <span className="sysdb-logo"><DbLogo type={info.backend === 'mongodb' ? 'mongodb' : info.backend === 'files' ? 'postgresql' : (info.label || '').toLowerCase().includes('sql server') ? 'sqlserver' : (info.label || '').toLowerCase().includes('mysql') ? 'mysql' : (info.label || '').toLowerCase().includes('oracle') ? 'oracle' : 'postgresql'} size={34} /></span>
           <div>

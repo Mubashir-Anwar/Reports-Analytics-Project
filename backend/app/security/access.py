@@ -34,7 +34,7 @@ def path_area(path: str) -> str | None:
         return None                     # sign-in works whichever areas are switched on
     if path == "/server" or path.startswith("/server/") or path.startswith("/api/server/"):
         return "server"
-    if path == "/analytics" or path.startswith("/analytics/"):
+    if path == "/analytics" or path.startswith(("/analytics/", "/api/analytics/", "/api/v1/analytics/")):
         return "analytics"
     if path.startswith("/api/admin/"):
         return "management-api"

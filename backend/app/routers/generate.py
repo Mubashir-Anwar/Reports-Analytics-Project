@@ -16,6 +16,8 @@ from backend.app.constants import METADATA_KEYS, OUTPUT_FORMATS, REPORT_PATH, SI
 from backend.app.definitions import ReportDefinition, validate_parameters
 from backend.app.logs import LOG
 from backend.app.rendering.outputs import render_report_output
+from backend.app.security.access import client_address
+from backend.app.services.capacity import caller_of
 
 
 def register(app: FastAPI, ctx: SimpleNamespace) -> None:
@@ -82,11 +84,15 @@ def register(app: FastAPI, ctx: SimpleNamespace) -> None:
             audit.update(metadata)
             audit["parameters"] = {key: value.isoformat() if isinstance(value, date) else value for key, value in parameters.items()}
             # MongoDB pipeline or SQL query, on the report's own data adapter (413 above the row limit)
-            rows = run_report_rows(definition, parameters, definition.connection_id, max_rows=settings.max_rows, limit_rows=False)
-            rows = [{key: _row_value(row, key) for key in definition.columns} for row in rows]
-            body, media_type = render_report_output(definition, parameters, rows, output_format, subreport_loader(),
-                                                    dataset_loader(definition.connection_id, definition.report_id))
-            audit.update({"status": "success", "rowCount": len(rows)})
+            # one of the server's places for report runs (services/capacity.py): 503 "busy" instead of running out of memory
+            with ctx.run_gate.slot(caller_of(access, address=client_address(request))):
+                rows = run_report_rows(definition, parameters, definition.connection_id, max_rows=settings.max_rows, limit_rows=False)
+                rows = [{key: _row_value(row, key) for key in definition.columns} for row in rows]
+                body, media_type = render_report_output(definition, parameters, rows, output_format, subreport_loader(),
+                                                        dataset_loader(definition.connection_id, definition.report_id))
+                row_count = len(rows)
+                del rows
+            audit.update({"status": "success", "rowCount": row_count})
             if settings.audit_required:
                 # Fail closed: the report is released only after its run record is stored.
                 audit["durationMs"] = int((time.monotonic() - started) * 1000)

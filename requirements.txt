@@ -12,3 +12,4 @@ defusedxml>=0.7,<1.0
 cryptography>=43
 SQLAlchemy>=2.0,<2.1
 pyodbc>=5.1,<6.0  # SQL Server with Windows login (mssql+pyodbc://…trusted_connection=yes)
+duckdb>=1.4,<2.0  # analytics: datasets as Parquet files, queried in-process

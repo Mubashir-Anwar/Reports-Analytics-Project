@@ -6,8 +6,8 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-import designer_render as dr  # noqa: E402
-import jrxml_import  # noqa: E402
+from backend.app.rendering import engine as dr  # noqa: E402
+from backend.app.importers import jrxml as jrxml_import  # noqa: E402
 
 
 def label(text, height=16):

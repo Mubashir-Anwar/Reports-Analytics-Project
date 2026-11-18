@@ -12,7 +12,7 @@ from fastapi.testclient import TestClient
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-import reporting_core as core  # noqa: E402
+import service_names as core  # noqa: E402
 from backend.app.constants import LEGACY_PASSWORD_ITERATIONS, PASSWORD_ITERATIONS  # noqa: E402
 from backend.app.jobs import store as job_store  # noqa: E402
 from backend.app.jobs.runner import JobRunner  # noqa: E402
@@ -27,6 +27,7 @@ from test_workspace_and_server import ADMIN, client, login  # noqa: E402,F401
 PUBLIC = {("GET", "/"), ("GET", "/ui"), ("GET", "/designer"), ("GET", "/server"), ("GET", "/admin"), ("GET", "/ready"),
           ("GET", "/analytics"), ("GET", "/login"),
           ("GET", "/api/v1/openapi.json"),                       # describes the public API; no data
+          ("GET", "/api/branding"),                              # product name and tagline for the sign-in page; no data
           ("GET", "/health"), ("POST", "/api/server/logout"), ("GET", "/docs"), ("GET", "/redoc"),
           ("GET", "/openapi.json"), ("GET", "/docs/oauth2-redirect")}
 

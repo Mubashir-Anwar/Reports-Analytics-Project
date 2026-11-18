@@ -6,6 +6,7 @@ Schema changes are numbered steps in MIGRATIONS; rs_schema_version remembers the
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import threading
 from datetime import datetime, timezone
@@ -86,9 +87,22 @@ def entity_table(entity: Any) -> sa.Table:
         columns.append(sa.Column(column, column_type, primary_key=name in entity.key, nullable=not required,
                                  quote=True if column in ALWAYS_QUOTE else None))
     columns.append(sa.Column("extra", TEXT))
-    indexes = [sa.Index(f"ix_{entity.table}_{'_'.join(_snake(f) for f in fields)}"[:30], *[_snake(f) for f in fields])
-               for fields in entity.indexes]
+    indexes = [sa.Index(_index_name(entity.table, fields), *[_snake(f) for f in fields]) for fields in entity.indexes]
     return sa.Table(entity.table, metadata, *columns, *indexes)
+
+
+_INDEX_NAMES: dict[str, str] = {}
+
+
+def _index_name(table: str, fields: tuple[str, ...]) -> str:
+    """At most 30 characters (Oracle) and unique in the schema. Names that were already unique when cut to 30 stay as
+    they were (existing databases keep their indexes); a name that would repeat one gets a short hash instead."""
+    full = f"ix_{table}_{'_'.join(_snake(f) for f in fields)}"
+    name = full[:30]
+    if _INDEX_NAMES.get(name, full) != full:
+        name = f"{full[:21]}_{hashlib.sha1(full.encode()).hexdigest()[:8]}"
+    _INDEX_NAMES[name] = full
+    return name
 
 
 def _create_entities(connection: Any) -> None:
@@ -101,6 +115,7 @@ ENTITY_MIGRATIONS: list[tuple[int, str, Any]] = [
     (1, "users, API keys, folder permissions, report versions and history", _create_entities),
     (2, "schedules and job runs", _create_entities),      # create_all only adds the tables that are missing
     (3, "reports, drafts, folders and data sources", _create_entities),
+    (4, "analytics: datasets, relationships, dashboards and refreshes", _create_entities),
 ]
 
 _ENGINES: dict[str, sa.Engine] = {}

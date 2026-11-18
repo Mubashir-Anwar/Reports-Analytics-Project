@@ -3,6 +3,9 @@
   * GET  /api/admin/system-db             where the service keeps its own data now (and a saved choice for the next start)
   * POST /api/admin/system-db/test        connect to another database (SQL Server, PostgreSQL, MySQL, Oracle, SQLite, MongoDB)
   * POST /api/admin/system-db/switch      copy the current data there and save the choice (.env); used after a restart
+  * GET  /api/branding                    the product name and tagline (public: the sign-in page shows them)
+  * PUT  /api/admin/branding              rename the product (super admin)
+  * GET  /api/admin/capacity              how busy the report server is: places in use, waiting, turned away; limits
   * GET  /api/admin/postman/collection.json, /api/admin/postman/environment.json   the Postman files for this server
 
 Choosing the database is for super admins only (it holds every account and secret)."""
@@ -15,7 +18,8 @@ from typing import Any
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse
 
-from backend.app.constants import BRAND_NAME, PROJECT_ROOT
+from backend.app import branding
+from backend.app.constants import PROJECT_ROOT
 from backend.app.logs import LOG
 from backend.app.storage import switch
 
@@ -39,6 +43,44 @@ def register(app: FastAPI, ctx: SimpleNamespace) -> None:
             return switch.build_url(payload)
         except ValueError as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from None
+
+    @app.get("/api/branding")
+    def get_branding() -> dict[str, str]:
+        return branding.branding()
+
+    @app.put("/api/admin/branding")
+    async def put_branding(request: Request) -> dict[str, str]:
+        require_admin(request)
+        session = getattr(request.state, "session", None)
+        if session is not None and not session.get("superAdmin"):
+            raise HTTPException(status_code=403, detail="Only a super admin may rename the product")
+        ctx.require_json_request(request)
+        payload = await json_body(request)
+        before = branding.branding()
+        try:
+            saved = branding.save_branding(payload.get("name", ""), payload.get("tagline", ""))
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from None
+        ctx.audit_event(request, "branding.changed", saved["name"], {"before": before, "after": saved})
+        return saved
+
+    @app.get("/api/admin/capacity")
+    def capacity(request: Request) -> dict[str, Any]:
+        """Places for report runs in this process (services/capacity.py), background workers and the row limits."""
+        require_admin(request)
+        from backend.app.jobs import store as job_store  # noqa: PLC0415
+        from backend.app.rendering.spool import export_directory  # noqa: PLC0415
+        settings = ctx.settings
+        active = [run for run in job_store.load_runs() if run.get("status") in ("queued", "running")]
+        return {
+            "now": ctx.run_gate.stats(),
+            "background": {"workers": ctx.job_runner.workers, "queued": sum(r["status"] == "queued" for r in active),
+                           "running": sum(r["status"] == "running" for r in active)},
+            "limits": {"maxRows": settings.max_rows, "queryTimeMs": settings.max_time_ms, "exportMaxRows": settings.export_max_rows,
+                       "exportTimeMs": settings.export_max_time_ms, "maxConcurrent": settings.max_concurrent,
+                       "maxPerCaller": settings.max_per_caller, "queueWaitSeconds": settings.queue_wait_seconds},
+            "exportDirectory": str(export_directory()),
+        }
 
     @app.get("/api/admin/system-db")
     def system_db(request: Request) -> dict[str, Any]:
@@ -98,6 +140,6 @@ def register(app: FastAPI, ctx: SimpleNamespace) -> None:
         for item in environment.get("values", []):
             if item.get("key") in fill:
                 item["value"] = fill[item["key"]]
-        environment["name"] = f"{BRAND_NAME} — {request.url.hostname}"
+        environment["name"] = f"{branding.brand_name()} — {request.url.hostname}"
         name = "Reporting-Service.postman_environment.json"
         return JSONResponse(environment, headers={"Content-Disposition": f'attachment; filename="{name}"'})

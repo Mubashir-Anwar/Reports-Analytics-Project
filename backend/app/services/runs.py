@@ -6,7 +6,7 @@ from __future__ import annotations
 import time
 from datetime import date, datetime, timezone
 from types import SimpleNamespace
-from typing import Any
+from typing import Any, Iterator
 
 from fastapi import HTTPException
 from fastapi.responses import Response
@@ -21,8 +21,9 @@ from backend.app.logs import LOG
 from backend.app.queries.mongo_query import resolve_collection
 from backend.app.rendering import engine as designer_render
 from backend.app.rendering.outputs import render_report_output
+from backend.app.services.capacity import caller_of
 
-__all__ = ['admin_parameters', 'run_report_rows', 'subreport_loader', 'dataset_loader', 'draft_definition', 'preview_definition', 'run_definition_file']
+__all__ = ['admin_parameters', 'run_report_rows', 'iter_report_rows', 'too_many_rows', 'subreport_loader', 'dataset_loader', 'draft_definition', 'preview_definition', 'run_definition_file']
 
 
 def admin_parameters(ctx: SimpleNamespace, payload: dict[str, Any], definition: ReportDefinition) -> dict[str, Any]:
@@ -41,7 +42,7 @@ def run_report_rows(ctx: SimpleNamespace, definition: ReportDefinition, paramete
         kind, url = ctx.sql_adapter(connection_id)
         rows = sql_connector.run_query(kind, url, definition.sql, parameters, max_rows=max_rows, timeout_ms=ctx.settings.max_time_ms)
         if not limit_rows and len(rows) > max_rows:
-            raise HTTPException(status_code=413, detail=f"The report is larger than the row limit ({max_rows})")
+            raise HTTPException(status_code=413, detail=too_many_rows(ctx, max_rows))
         return rows[:max_rows] if limit_rows else rows
     if ctx.adapter_kind(connection_id) != "mongodb":
         raise HTTPException(status_code=422, detail=f"Data adapter '{connection_id}' is a SQL database; this report has a MongoDB query")
@@ -55,8 +56,39 @@ def run_report_rows(ctx: SimpleNamespace, definition: ReportDefinition, paramete
         max_rows=max_rows,
     )
     if not limit_rows and len(rows) > max_rows:
-        raise HTTPException(status_code=413, detail=f"The report is larger than the row limit ({max_rows})")
+        raise HTTPException(status_code=413, detail=too_many_rows(ctx, max_rows))
     return rows
+
+
+def too_many_rows(ctx: SimpleNamespace, max_rows: int) -> str:
+    return (f"The report has more than {max_rows:,} records, the most one run makes straight away. Run it in the "
+            f"background instead (/server: Run in background; API: POST /api/v1/reports/<id>/jobs): CSV and Excel files "
+            f"of up to {ctx.settings.export_max_rows:,} records are then written to disk while the records are read. "
+            f"Or narrow the parameters (a shorter date range).")
+
+
+def iter_report_rows(ctx: SimpleNamespace, definition: ReportDefinition, parameters: dict[str, Any], connection_id: str, *,
+                     limit: int, timeout_ms: int | None = None) -> Iterator[dict[str, Any]]:
+    """The report's records one by one, read from the database in batches (big exports: memory stays small).
+    Stops with ValueError after `limit` records. Uses the longer REPORT_EXPORT_MAX_TIME_MS time limit (or timeout_ms)."""
+    timeout = timeout_ms or ctx.settings.export_max_time_ms
+    if definition.query_language == "sql":
+        kind, url = ctx.sql_adapter(connection_id)
+        rows: Iterator[dict[str, Any]] = sql_connector.iter_query(kind, url, definition.sql, parameters, timeout_ms=timeout)
+    else:
+        if ctx.adapter_kind(connection_id) != "mongodb":
+            raise ValueError(f"Data adapter '{connection_id}' is a SQL database; this report has a MongoDB query")
+        client, database = ctx.get_connection(connection_id)
+        pipeline = [*definition.pipeline_builder(parameters), {"$limit": limit + 1}]
+        rows = mongodb.iter_report_pipeline(client[database][resolve_collection(definition.collection, parameters)], pipeline,
+                                            max_time_ms=timeout, allow_disk_use=ctx.settings.allow_disk_use)
+    for count, row in enumerate(rows, start=1):
+        if count > limit:
+            close = getattr(rows, "close", None)
+            if close:
+                close()
+            raise ValueError(f"The report has more than {limit:,} records (REPORT_EXPORT_MAX_ROWS); narrow the parameters")
+        yield row
 
 
 def subreport_loader(ctx: SimpleNamespace, allowed: Any = None) -> Any:
@@ -204,12 +236,16 @@ def run_definition_file(ctx: SimpleNamespace, definition: ReportDefinition, payl
         parameters = ctx.admin_parameters(payload, definition)
         audit.update({"format": output_format, "connectionId": connection_id,
                       "parameters": {k: v.isoformat() if isinstance(v, date) else v for k, v in parameters.items()}})
-        rows = ctx.run_report_rows(definition, parameters, connection_id, max_rows=ctx.settings.max_rows, limit_rows=False)
-        rows = [{key: _row_value(row, key) for key in definition.columns} for row in rows]
-        body, media_type = render_report_output(definition, parameters, rows, output_format,
-                                                ctx.subreport_loader(ctx.report_allowed_for(session)),
-                                                ctx.dataset_loader(connection_id, definition.report_id))
-        audit.update({"status": "success", "rowCount": len(rows)})
+        who = user or (ctx.caller_identity(request)[0] if request is not None else "")
+        with ctx.run_gate.slot(caller_of(access, who)):
+            rows = ctx.run_report_rows(definition, parameters, connection_id, max_rows=ctx.settings.max_rows, limit_rows=False)
+            rows = [{key: _row_value(row, key) for key in definition.columns} for row in rows]
+            body, media_type = render_report_output(definition, parameters, rows, output_format,
+                                                    ctx.subreport_loader(ctx.report_allowed_for(session)),
+                                                    ctx.dataset_loader(connection_id, definition.report_id))
+            row_count = len(rows)
+            del rows
+        audit.update({"status": "success", "rowCount": row_count})
         return Response(body, media_type=media_type,
                         headers={"Content-Disposition": f'attachment; filename="{definition.report_id}.{output_format}"'})
     except HTTPException as exc:

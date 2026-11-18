@@ -19,6 +19,10 @@ data/workspace/
 data/history/
 data/audit/
 data/logs/
+data/exports/
+data/analytics/
+# everything else the service writes at run time (versions, records, jobs, migrated, meta, system-db files)
+data/*
 
 # deployment secrets and certificates
 deploy/.env
