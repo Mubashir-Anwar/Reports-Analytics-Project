@@ -5,6 +5,7 @@ import '../../../ui/brand/navbar.css';
 import { useBrand } from './brand.js';
 import { signOut, useMe } from './session.js';
 import ThemeMenu from './ThemeMenu.jsx';
+import TeamBar from './TeamBar.jsx';
 
 const ICONS = {
   designer: 'M4 20h4l10.5-10.5a2.1 2.1 0 0 0-3-3L5 17v3zM13.5 6.5l3 3',
@@ -113,6 +114,7 @@ export default function NavBar({ current, context, children }) {
       {context && <div className="fx-context">{context}</div>}
       <div className="fx-actions">
         {children}
+        {me && <TeamBar app={here?.icon || 'server'} />}
         <ThemeMenu />
         <UserMenu me={me} />
       </div>

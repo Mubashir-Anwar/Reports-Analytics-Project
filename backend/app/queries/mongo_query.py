@@ -193,7 +193,25 @@ def _extract_literal_array(source: str, start: int) -> tuple[str, int]:
     raise ValueError("The closing ] of the pipeline array is missing")
 
 
-def _parse_mongosh_literal(source: str) -> Any:
+class QuerySyntaxError(ValueError):
+    """A mistake in the query text with its place: line (1 = first line of the query), column and the text around it.
+    `insert` is set when one character is missing there (a comma), so an importer can repair it."""
+
+    def __init__(self, message: str, line: int, column: int, near: str, insert: tuple[int, str] | None = None):
+        super().__init__(f"{message} (query line {line}, column {column}, near: {near})")
+        self.line, self.column, self.near, self.insert = line, column, near, insert
+
+
+def _place(source: str, position: int, first_line: int = 1) -> tuple[int, int, str]:
+    position = max(0, min(position, len(source)))
+    line = source.count("\n", 0, position) + first_line
+    column = position - (source.rfind("\n", 0, position) + 1) + 1
+    before = source[max(0, position - 40):position].split("\n")[-1].lstrip()
+    after = source[position:position + 40].split("\n")[0].rstrip()
+    return line, column, f"{before} >>> {after}".strip()
+
+
+def _parse_mongosh_literal(source: str, first_line: int = 1) -> Any:
     """Parse a safe Mongo Shell object/array literal subset without evaluating JS."""
     token_pattern = re.compile(
         r"\s*(?:(?P<string>\"(?:\\.|[^\"\\])*\"|'(?:\\.|[^'\\])*')"
@@ -202,19 +220,30 @@ def _parse_mongosh_literal(source: str) -> Any:
         r"|(?P<identifier>[A-Za-z_$][A-Za-z0-9_$]*)"
         r"|(?P<punct>[{}\[\]:,()]))"
     )
-    tokens: list[tuple[str, str]] = []
+    def fail(message: str, at: int, insert: tuple[int, str] | None = None) -> None:
+        raise QuerySyntaxError(message, *_place(source, at, first_line), insert=insert)
+
+    tokens: list[tuple[str, str, int]] = []
     position = 0
     while position < len(source):
         if not source[position:].strip():
             break
         match = token_pattern.match(source, position)
         if not match:
-            snippet = source[position:position + 20].splitlines()[0]
-            raise ValueError(f"Unsupported Mongo Shell syntax near: {snippet!r}")
+            start = position + len(source[position:]) - len(source[position:].lstrip())
+            fail("This text is not allowed in a Mongo Shell query (only data: text in quotes, numbers, true/false/null, "
+                 "$P{…}, ISODate(…), ObjectId(…), NumberLong(…))", start)
         kind = next(key for key, value in match.groupdict().items() if value is not None)
-        tokens.append((kind, match.group(kind)))
+        tokens.append((kind, match.group(kind), match.start(kind)))
         position = match.end()
     cursor = 0
+
+    def at_cursor() -> int:
+        return tokens[cursor][2] if cursor < len(tokens) else len(source)
+
+    def after_previous() -> int:
+        kind, value, start = tokens[cursor - 1]
+        return start + len(value)
 
     def peek(value: str | None = None) -> bool:
         return cursor < len(tokens) and (value is None or tokens[cursor][1] == value)
@@ -222,40 +251,45 @@ def _parse_mongosh_literal(source: str) -> Any:
     def take(value: str | None = None) -> tuple[str, str]:
         nonlocal cursor
         if not peek(value):
-            expected = f" {value!r}" if value is not None else ""
-            raise ValueError(f"Mongo Shell literal: expected token{expected}")
+            if value == ":":
+                fail(f"A colon : is missing after the field name {tokens[cursor - 1][1]}", after_previous(), (after_previous(), ":"))
+            expected = f"{value!r}" if value is not None else "a value"
+            found = f"{tokens[cursor][1]!r}" if cursor < len(tokens) else "the end of the query"
+            fail(f"Expected {expected} but found {found}", at_cursor())
         token = tokens[cursor]
         cursor += 1
-        return token
+        return token[0], token[1]
 
     def parse_value() -> Any:
         kind, value = take()
         if value == "[":
+            opened = tokens[cursor - 1][2]
             result = []
             while not peek("]"):
                 if cursor >= len(tokens):
-                    raise ValueError("The closing ] of a Mongo Shell array is missing")
+                    fail("The [ opened here is never closed with ]", opened)
                 result.append(parse_value())
                 if peek(","):
                     take(",")
                     if peek("]"):
                         break
                 elif not peek("]"):
-                    raise ValueError("A comma is expected between Mongo Shell array values")
+                    fail("A comma is missing between two values of a list [ … ]: add , at the end of the value before", after_previous(), (after_previous(), ","))
             take("]")
             return result
         if value == "{":
+            opened = tokens[cursor - 1][2]
             result: dict[str, Any] = {}
             while not peek("}"):
                 if cursor >= len(tokens):
-                    raise ValueError("The closing } of a Mongo Shell object is missing")
+                    fail("The { opened here is never closed with }", opened)
                 key_kind, raw_key = take()
                 if key_kind == "string":
                     key = ast.literal_eval(raw_key)
                 elif key_kind == "identifier":
                     key = raw_key
                 else:
-                    raise ValueError("A Mongo Shell object key must be quoted text or a simple name")
+                    fail(f"A field name must be text in quotes (e.g. \"Branch\"), not {raw_key!r}", tokens[cursor - 1][2])
                 take(":")
                 result[str(key)] = parse_value()
                 if peek(","):
@@ -263,7 +297,7 @@ def _parse_mongosh_literal(source: str) -> Any:
                     if peek("}"):
                         break
                 elif not peek("}"):
-                    raise ValueError("A comma is expected between Mongo Shell object properties")
+                    fail(f"A comma is missing after the field \"{key}\": add , at the end of that line", after_previous(), (after_previous(), ","))
             take("}")
             return result
         if kind == "string":
@@ -298,13 +332,13 @@ def _parse_mongosh_literal(source: str) -> Any:
                     return {"$literalDate": argument}
                 if value == "ObjectId" and isinstance(argument, str) and re.fullmatch(r"[0-9a-fA-F]{24}", argument):
                     return {"$literalObjectId": argument}
-                raise ValueError(f"The Mongo Shell constructor {value}(...) is not a supported literal")
-            raise ValueError(f"The Mongo Shell value {value!r} is not a supported literal")
-        raise ValueError(f"The Mongo Shell token {value!r} is not supported")
+                fail(f"{value}(...) is not supported here; use ISODate(\"2024-01-31\"), ObjectId(\"…24 hex…\"), NumberInt(5) or NumberLong(5)", tokens[cursor - 1][2])
+            fail(f"{value} is not a value: put text in quotes (\"{value}\"), or use true, false or null", tokens[cursor - 1][2])
+        fail(f"{value!r} cannot stand here; a value is expected", tokens[cursor - 1][2])
 
     result = parse_value()
     if cursor != len(tokens):
-        raise ValueError(f"Extra token after the Mongo Shell literal: {tokens[cursor][1]!r}")
+        fail(f"The pipeline already ended before {tokens[cursor][1]!r}: remove the extra text, or a ] or }} too many before it", tokens[cursor][2])
     return result
 
 
@@ -438,7 +472,9 @@ def parse_query_source(language: str, source: str) -> list[dict[str, Any]]:
             raise ValueError(f"The Python pipeline could not be read: {exc}") from None
     elif (jasper := split_jasper_query(source)) is not None:
         # Jaspersoft Studio MongoDbQuery ({runCommand: {aggregate, pipeline}}) works in every text mode.
-        pipeline = _parse_mongosh_literal(jasper[1])
+        uncommented = _strip_query_comments(source)
+        found_at = uncommented.find(jasper[1])
+        pipeline = _parse_mongosh_literal(jasper[1], uncommented.count("\n", 0, found_at) + 1 if found_at >= 0 else 1)
     else:
         uncommented = _strip_query_comments(source)
         if language == "aggregation-json":
@@ -454,6 +490,7 @@ def parse_query_source(language: str, source: str) -> list[dict[str, Any]]:
                 match = re.match(r"\s*(?:(?:const|let|var)\s+)?pipeline\s*=\s*", uncommented)
             if language == "mongosh" and uncommented.strip().startswith("["):
                 literal = uncommented.strip()
+                array_start = uncommented.find("[")
                 remainder = ""
             elif not match:
                 raise ValueError(_unrecognised_query_message(language, uncommented))
@@ -467,7 +504,7 @@ def parse_query_source(language: str, source: str) -> list[dict[str, Any]]:
                 if not valid_remainder:
                     raise ValueError("Extra executable code after the pipeline literal is not allowed")
         if language in {"mongosh", "javascript"}:
-            pipeline = _parse_mongosh_literal(literal)
+            pipeline = _parse_mongosh_literal(literal, uncommented.count("\n", 0, array_start) + 1)
         else:
             try:
                 pipeline = json.loads(literal)
@@ -548,18 +585,44 @@ def _validate_read_only_pipeline(node: Any) -> None:
 
 
 def _infer_pipeline_columns(pipeline: list[dict[str, Any]]) -> list[str]:
-    """Infer the result fields from the last stage that defines an output shape."""
-    for stage in reversed(pipeline):
-        projection = stage.get("$project")
-        if isinstance(projection, dict):
-            return [
-                key for key, value in projection.items()
-                if not (key == "_id" and value in (0, False))
-            ]
-        group = stage.get("$group")
-        if isinstance(group, dict):
-            return list(group.keys())
-        count_field = stage.get("$count")
-        if isinstance(count_field, str) and count_field:
-            return [count_field]
-    return []
+    """Infer the result fields by following the stages that shape the output.
+
+    $project/$group/$count/$facet set the shape; later $addFields/$set/$lookup/$unset change it.
+    Returns [] when the shape cannot be known (no shaping stage, or $replaceRoot and the like).
+    """
+    columns: list[str] | None = None
+
+    def add(name: str) -> None:
+        if columns is not None and name and name not in columns:
+            columns.append(name)
+
+    for stage in pipeline:
+        if not isinstance(stage, dict) or len(stage) != 1:
+            continue
+        (key, value), = stage.items()
+        if key == "$project" and isinstance(value, dict):
+            kept = {k: v for k, v in value.items() if not (k == "_id" and v in (0, False))}
+            if kept and all(v in (0, False) for v in kept.values()):     # exclusion projection
+                if columns is not None:
+                    columns = [c for c in columns if c not in kept and c.split(".")[0] not in kept]
+            else:
+                columns = list(kept)
+        elif key == "$group" and isinstance(value, dict):
+            columns = list(value)
+        elif key == "$count" and isinstance(value, str) and value:
+            columns = [value]
+        elif key == "$facet" and isinstance(value, dict):
+            columns = list(value)
+        elif key == "$sortByCount":
+            columns = ["_id", "count"]
+        elif key in ("$addFields", "$set") and isinstance(value, dict):
+            for name in value:
+                add(name.split(".")[0])
+        elif key == "$lookup" and isinstance(value, dict) and isinstance(value.get("as"), str):
+            add(value["as"].split(".")[0])
+        elif key == "$unset" and columns is not None:
+            names = [value] if isinstance(value, str) else value if isinstance(value, list) else []
+            columns = [c for c in columns if c not in names]
+        elif key in ("$replaceRoot", "$replaceWith", "$bucket", "$bucketAuto"):
+            columns = None
+    return columns or []

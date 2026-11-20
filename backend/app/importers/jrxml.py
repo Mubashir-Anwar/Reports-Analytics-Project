@@ -128,11 +128,31 @@ def translate_expression(expression: str, aliases: dict[str, tuple[str, str]], w
     if jexpr.check_syntax(java_text):
         return "=" + java_text, ""
     tokens = TOKEN.findall(source)
-    warnings.append(f"{where}: the Java expression could not be translated; write it again in the designer: {source[:90]}")
+    warnings.append(f"{where}: the Java expression could not be translated; write it again in the designer: {source[:400]}")
     if tokens:
         kind, name = tokens[0]
         return clean(f"${kind}{{{name}}}"), ""
     return "", ""
+
+
+def java_condition(expression: str, aliases: dict[str, tuple[str, str]], warnings: list[str], where: str) -> str:
+    """A Java expression used as it is (Print When, Pattern Expression): kept when the safe expression
+    language understands it, otherwise left out with a warning."""
+    source = (expression or "").strip()
+    if not source:
+        return ""
+
+    def alias_token(match: re.Match) -> str:
+        kind, name = match.group(1), match.group(2)
+        if kind == "P" and name in aliases and aliases[name][0] in ("start", "end"):
+            return "$P{" + aliases[name][1] + "}"
+        return match.group(0)
+
+    text = TOKEN.sub(alias_token, source)
+    if jexpr.check_syntax(text):
+        return text[:500]
+    warnings.append(f"{where}: the Java expression could not be translated; write it again in the designer: {source[:400]}")
+    return ""
 
 
 # ------------------------------------------------------------------ styles
@@ -162,9 +182,35 @@ def _collect_styles(root: ET.Element) -> dict[str, dict[str, Any]]:
     return styles
 
 
+def _image_file_name(expression: str) -> str:
+    """The file an <imageExpression> points at: "logo.png", "repo:/images/logo.png", $P{dir} + "logo.png" -> logo.png."""
+    literals = re.findall(r'"((?:[^"\\]|\\.)*)"', expression)
+    candidates = [text for text in literals if re.search(r"\.(png|jpe?g|gif|svg|bmp)$", text, re.I)] or literals
+    if not candidates:
+        return ""
+    return re.split(r"[\\/:]", candidates[-1].strip())[-1]
+
+
+IMAGE_DATA_URL = re.compile(r"^data:image/(png|jpeg);base64,[A-Za-z0-9+/=]+$")
+
+
+def clean_resources(resources: Any) -> dict[str, str]:
+    """Image files sent with a .jrxml ({file name: PNG/JPEG data URL}); anything else is left out."""
+    if not isinstance(resources, dict):
+        return {}
+    out: dict[str, str] = {}
+    for name, data in list(resources.items())[:50]:
+        if isinstance(name, str) and isinstance(data, str) and IMAGE_DATA_URL.fullmatch(data) and len(data) < 3_500_000:
+            out[re.split(r"[\\/]", name)[-1][:200]] = data
+    return out
+
+
 class _Ctx:
-    def __init__(self, styles, aliases, warnings):
+    def __init__(self, styles, aliases, warnings, resources=None):
         self.styles, self.aliases, self.warnings, self.counter = styles, aliases, warnings, 0
+        self.places: dict[str, str] = {}      # warning -> id of the design element it is about (the first one)
+        # image files sent with the .jrxml: lower-case file name -> (original name, data URL)
+        self.resources = {name.lower(): (name, data) for name, data in (resources or {}).items()}
 
     def new_id(self) -> str:
         self.counter += 1
@@ -228,15 +274,66 @@ def _convert_element(node: ET.Element, ctx: _Ctx, band_name: str, dx: float = 0,
     if kind == "staticText":
         element["text"] = _text(_kid(node, "text"))
     elif kind == "textField":
+        before = len(ctx.warnings)
         expr, pattern = translate_expression(_text(_kid(node, "textFieldExpression")), ctx.aliases, ctx.warnings, band_name)
+        for warning in ctx.warnings[before:]:
+            ctx.places.setdefault(warning, element["id"])
         element.update({"expression": expr, "pattern": node.get("pattern") or pattern, "blankWhenNull": _is_true(node.get("isBlankWhenNull", "false"))})
-        if node.get("textAdjust") == "StretchHeight":
-            ctx.warnings.append(f"{band_name}: textAdjust=StretchHeight is not supported yet; the height stays fixed (long text may be cut off)")
     elif kind == "line":
         element.update({"borderColor": element["borderColor"] or element["color"], "borderWidth": width or 1, "height": max(_num(rep.get("height"), 0), 0.01)})
     elif kind == "image":
-        element["src"] = ""
-        ctx.warnings.append(f"{band_name}: the image resource was not imported; upload the image again in the designer")
+        reference = _text(_kid(node, "imageExpression")).strip()
+        name = _image_file_name(reference)
+        found = ctx.resources.get(name.lower()) if name else None
+        element.update({"src": found[1] if found else "", "srcName": found[0] if found else name, "reference": reference[:300]})
+        if not found:
+            what = f"'{name}'" if name else f"from the expression {reference[:80]!r}" if reference else "(no image expression)"
+            ctx.warnings.append(f"{band_name}: image {what} was not included; choose it together with the .jrxml, or upload it in the designer")
+    if kind in ("staticText", "textField"):
+        # Jasper 6.10+ textAdjust="StretchHeight", older isStretchWithOverflow="true" -> "Stretch with overflow"
+        element["stretch"] = node.get("textAdjust") == "StretchHeight" or _is_true(node.get("isStretchWithOverflow", "false"))
+        element["textAdjust"] = node.get("textAdjust") if node.get("textAdjust") in ("CutText", "StretchHeight", "ScaleFont") else (
+            "StretchHeight" if element["stretch"] else "CutText")
+        if text_el is not None:
+            if text_el.get("rotation") in ("Left", "Right", "UpsideDown"):
+                element["rotation"] = text_el.get("rotation")
+            paragraph = _kid(text_el, "paragraph")
+            if paragraph is not None:
+                if paragraph.get("lineSpacing") in ("Single", "1_1_2", "Double", "AtLeast", "Fixed", "Proportional"):
+                    element["lineSpacing"] = paragraph.get("lineSpacing")
+                for attribute, name in (("lineSpacingSize", "lineSpacingSize"), ("firstLineIndent", "firstLineIndent"),
+                                        ("leftIndent", "leftIndent"), ("rightIndent", "rightIndent"),
+                                        ("spacingBefore", "spacingBefore"), ("spacingAfter", "spacingAfter"),
+                                        ("tabStopWidth", "tabStopWidth")):
+                    if paragraph.get(attribute) is not None:
+                        element[name] = _num(paragraph.get(attribute))
+        box = _kid(node, "box")
+        if box is not None and box.get("padding") is not None:
+            element["padding"] = _num(box.get("padding"), 2)
+    if kind == "textField":
+        raw_pattern = _text(_kid(node, "patternExpression")).strip()
+        if raw_pattern:
+            element["patternExpression"] = java_condition(raw_pattern, ctx.aliases, ctx.warnings, f"{band_name} pattern expression")
+    # Appearance: Position Type, Stretch Type, Transparent, Key and the print details (Jaspersoft Studio names)
+    if rep.get("positionType") in ("Float", "FixRelativeToTop", "FixRelativeToBottom"):
+        element["positionType"] = rep.get("positionType")
+    if rep.get("stretchType") in ("NoStretch", "RelativeToTallestObject", "RelativeToBandHeight", "ContainerHeight", "ContainerBottom"):
+        element["stretchType"] = rep.get("stretchType")
+    if mode == "Transparent" and back:
+        element["transparent"] = True
+    if rep.get("key"):
+        element["key"] = rep.get("key")[:120]
+    if rep.get("isPrintRepeatedValues") is not None and not _is_true(rep.get("isPrintRepeatedValues")):
+        element["printRepeatedValues"] = False
+    for attribute, name in (("isRemoveLineWhenBlank", "removeLineWhenBlank"), ("isPrintInFirstWholeBand", "printInFirstWholeBand"),
+                            ("isPrintWhenDetailOverflows", "printWhenDetailOverflows")):
+        if _is_true(rep.get(attribute, "false")):
+            element[name] = True
+    if rep.get("printWhenGroupChanges"):
+        element["printWhenGroupChanges"] = rep.get("printWhenGroupChanges")
+    print_when = _text(_kid(rep, "printWhenExpression")).strip()
+    if print_when:
+        element["printWhenExpression"] = java_condition(print_when, ctx.aliases, ctx.warnings, f"{band_name} print when")
     return element
 
 
@@ -389,6 +486,11 @@ def _extract_query(query_text: str) -> tuple[str, str]:
         # JasperReports Mongo find style: { collectionName: 'x', findQuery: {...}, sort/limit/fields optional }
         name = re.search(r"""['"]?collectionName['"]?\s*:\s*['"]([^'"]+)['"]""", text)
         collection = name.group(1) if name else ""
+        # Jaspersoft's aggregate form: { collectionName: 'x', aggregate: [ ...stages... ] }
+        aggregate = re.search(r"""['"]?aggregate['"]?\s*:\s*\[""", text)
+        if aggregate:
+            literal, _end = core._extract_literal_array(text, aggregate.end() - 1)
+            return collection, literal
         stages = []
         for key, stage in (("findQuery", "$match"), ("sort", "$sort"), ("limit", "$limit"), ("fields", "$project"), ("projection", "$project")):
             found = re.search(r"""['"]?""" + key + r"""['"]?\s*:\s*""", text)
@@ -411,7 +513,7 @@ def _extract_query(query_text: str) -> tuple[str, str]:
     return collection, literal
 
 
-def import_jrxml(xml_text: str) -> dict[str, Any]:
+def import_jrxml(xml_text: str, resources: dict[str, str] | None = None) -> dict[str, Any]:
     core = _query_api()
 
     if len(xml_text.encode("utf-8")) > MAX_JRXML_BYTES:
@@ -502,7 +604,20 @@ def import_jrxml(xml_text: str) -> dict[str, Any]:
                    else '{"$paramIn": "' + aliases[m.group(1)][1] + '"}') if m.group(1) in aliases else m.group(0),
         literal,
     )
-    pipeline = core.parse_query_source("mongosh", literal)
+    # Jaspersoft Studio is lenient with a missing comma or colon; repair those (and say where) instead of refusing the file
+    from backend.app.queries.mongo_query import QuerySyntaxError
+    for _attempt in range(50):
+        try:
+            pipeline = core.parse_query_source("mongosh", literal)
+            break
+        except QuerySyntaxError as exc:
+            if not exc.insert:
+                raise ValueError(f"The query of the JRXML has a mistake that could not be repaired: {exc}") from None
+            at, char = exc.insert
+            literal = literal[:at] + char + literal[at:]
+            warnings.append(f"Query line {exc.line}: a missing '{char}' was added (near: {exc.near}). Check the query on the Setup tab.")
+    else:
+        raise ValueError("The query of the JRXML has too many mistakes (missing commas) to repair; fix it in Jaspersoft Studio first")
     param_names = {p["name"] for p in user_params}
     core._validate_pipeline_parameter_names(pipeline, param_names)
     core._validate_read_only_pipeline(pipeline)
@@ -519,7 +634,7 @@ def import_jrxml(xml_text: str) -> dict[str, Any]:
             warnings.append(f"The collection name is built from the parameter {name}; give {name} its allowedValues (a list of allowed values) before saving")
 
     # --- design
-    ctx = _Ctx(styles, aliases, warnings)
+    ctx = _Ctx(styles, aliases, warnings, clean_resources(resources))
     table_info: dict[str, Any] = {}
     bands: dict[str, Any] = {}
     for key in ("title", "pageHeader", "columnHeader", "detail", "columnFooter", "pageFooter", "lastPageFooter",
@@ -552,10 +667,16 @@ def import_jrxml(xml_text: str) -> dict[str, Any]:
     group_footers: dict[str, Any] = {}
     for group in _kids(root, "group"):
         gname = group.get("name", "")
-        expr, _pattern = translate_expression(_text(_kid(group, "groupExpression")), aliases, warnings, f"group {gname}")
+        raw_expr = _text(_kid(group, "groupExpression")).strip()
+        expr, _pattern = translate_expression(raw_expr, aliases, [], f"group {gname}")
         token = TOKEN.fullmatch(expr)
         if not token or token.group(1) != "F":
-            warnings.append(f"Group {gname}: only a $F{{field}} group expression is supported; the group was skipped")
+            printed = any(len(band) for holder_name in ("groupHeader", "groupFooter")
+                          for holder in [_kid(group, holder_name)] if holder is not None
+                          for band in [_kid(holder, "band")] if band is not None)
+            if printed:                       # an empty group (often TAB_GROUP of a table) changes nothing: no warning
+                warnings.append(f"Group {gname}: groups by \"{raw_expr[:200] or '(nothing)'}\", which is not a single field; "
+                                f"the group was skipped. To group the report, add a group on a field in Design → Outline → Groups")
             continue
         groups.append({"name": gname, "field": token.group(2)})
         for holder_name, out in (("groupHeader", group_headers), ("groupFooter", group_footers)):
@@ -602,10 +723,14 @@ def import_jrxml(xml_text: str) -> dict[str, Any]:
                 for kind, name in TOKEN.findall(el.get("expression", "")):
                     if kind == "F":
                         used.add(name)
-    for name in sorted(used - set(columns)):
+    query_columns = set(columns)
+    for name in sorted(used - query_columns):
         columns.append(name)
         if columns_from_design:
             continue
+        parts = name.split(".")
+        if any(".".join(parts[:i]) in query_columns for i in range(1, len(parts))):
+            continue                                # nested inside a field the query returns (DeclineDetail.Comments)
         warnings.append(f"Field '{name}' is not in the query output; it will be empty in the report")
     design["sort"] = [s for s in sort if s["field"] in columns] if sort else []
     if len(design["sort"]) != len(sort):
@@ -635,5 +760,6 @@ def import_jrxml(xml_text: str) -> dict[str, Any]:
     unique_warnings = list(dict.fromkeys(warnings))  # same message from many cells -> once
     return {
         "report": report, "design": design, "warnings": unique_warnings,
+        "warningElements": {w: ctx.places[w] for w in unique_warnings if w in ctx.places},
         "hints": {"dataAdapter": properties.get("com.jaspersoft.studio.data.defaultdataadapter", ""), "jasperName": root.get("name", "")},
     }

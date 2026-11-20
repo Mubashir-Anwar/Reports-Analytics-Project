@@ -11,11 +11,13 @@ from fastapi.staticfiles import StaticFiles
 from backend.app.constants import SERVICE_VERSION
 from backend.app.context import create_context
 from backend.app.logs import HTTP_LOG
+from backend.app.offload import ThreadedRoute
 from backend.app.routers import (
     admin_tools,
     analytics,
     api_keys,
     connections,
+    deliveries,
     designer,
     embed,
     generate,
@@ -23,14 +25,17 @@ from backend.app.routers import (
     pages,
     public_api,
     repository,
+    server_logs,
     server_portal,
     system,
+    team,
     users,
     workspace,
 )
 from backend.app.security import audit_trail
 from backend.app.security.access import client_address, enabled_areas, management_ip_allowed, path_area
 from backend.app.security.headers import add_security_headers, too_large
+from backend.app.services.request_log import RequestLog
 
 
 def make_app() -> FastAPI:
@@ -44,6 +49,10 @@ def make_app() -> FastAPI:
         docs_url="/docs" if docs_on else None, redoc_url="/redoc" if docs_on else None,
         openapi_url="/openapi.json" if docs_on else None,
     )
+    # async handlers run in worker threads: one long export must not freeze every other request
+    app.router.route_class = ThreadedRoute
+    # every request is recorded in the system database (Report Server → Logs → Requests)
+    ctx.request_log = RequestLog(lambda request: ctx.caller_identity(request))
     app.state.ctx = ctx  # tests and tools reach the shared context (e.g. the job runner) here
     app.mount("/assets", StaticFiles(directory=str(ui_directory)), name="assets")
 
@@ -94,6 +103,11 @@ def make_app() -> FastAPI:
             # 503 = a MongoDB/data source problem, already explained in its own log line; 500 = a real bug.
             level = logging.ERROR if status >= 500 and status != 503 else logging.WARNING if status >= 400 and status != 404 else logging.INFO
             HTTP_LOG.log(level, "%s %s -> %s in %d ms (client %s)", request.method, path, response.status_code, duration, client)
+        try:
+            length = response.headers.get("content-length")
+            ctx.request_log.record(request, response.status_code, duration, client, int(length) if length and length.isdigit() else None)
+        except Exception:  # noqa: BLE001 - recording must never break a request
+            HTTP_LOG.exception("Could not record the request")
         return response
 
     # every area's endpoints; registration order = route matching order (same as the old make_app())
@@ -112,4 +126,7 @@ def make_app() -> FastAPI:
     embed.register(app, ctx)
     admin_tools.register(app, ctx)
     analytics.register(app, ctx)
+    deliveries.register(app, ctx)
+    server_logs.register(app, ctx)
+    team.register(app, ctx)
     return app

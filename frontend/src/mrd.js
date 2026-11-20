@@ -3,6 +3,31 @@
 // uploaded to the report server (Add Resource). Same format as the server's report definition XML.
 
 export const MRD_ACCEPT = '.mrd,.jrxml,.xml,application/xml,text/xml';
+/** Open file / Upload also take the pictures a .jrxml uses (choose them together with it). */
+export const MRD_WITH_IMAGES_ACCEPT = `${MRD_ACCEPT},.png,.jpg,.jpeg,image/png,image/jpeg`;
+
+const IS_IMAGE = /\.(png|jpe?g)$/i;
+
+/**
+ * Split chosen files into the report file and its pictures: { report: File|null, images: { 'logo.png': dataURL }, skipped: [names] }.
+ * Pictures over 2.4 MB are skipped (the server keeps up to 2.5 MB each).
+ */
+export async function splitReportFiles(fileList) {
+  const files = Array.from(fileList || []);
+  const report = files.find((f) => !IS_IMAGE.test(f.name)) || null;
+  const images = {};
+  const skipped = [];
+  for (const file of files.filter((f) => IS_IMAGE.test(f.name))) {
+    if (file.size > 2_400_000) { skipped.push(file.name); continue; }
+    images[file.name] = await new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(String(reader.result));
+      reader.onerror = reject;
+      reader.readAsDataURL(file);
+    });
+  }
+  return { report, images, skipped };
+}
 
 export function buildMrd(definition) {
   const doc = document.implementation.createDocument('', '', null);

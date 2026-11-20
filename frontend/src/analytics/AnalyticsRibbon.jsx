@@ -1,0 +1,176 @@
+// The Analytics ribbon (like the Designer's): tabs Home, Insert, Query, Data and View with grouped buttons.
+// Buttons call the page's own actions; a dashboard and the query editor listen for window events
+// ('bi-command' and 'bi-query'), so nothing here has its own logic.
+import { useEffect, useState } from 'react';
+import { RIcon } from '../Ribbon.jsx';
+import { TypeIcon, VISUAL_TYPES } from './VisualEditor.jsx';
+import '../ribbon.css';
+
+const KEY = 'analytics-ribbon';
+const send = (name, detail) => window.dispatchEvent(new CustomEvent(name, { detail }));
+
+const Big = ({ icon, label, onClick, disabled, primary, title, children }) => (
+  <button type="button" className={`rb-big ${primary ? 'primary' : ''}`} title={title || label} onClick={onClick} disabled={disabled}>
+    {children || <RIcon name={icon} size={24} />}<span>{label}</span>
+  </button>
+);
+const Small = ({ icon, label, onClick, disabled, title, children }) => (
+  <button type="button" className="rb-sm" title={title || label} onClick={onClick} disabled={disabled}>
+    {children || <RIcon name={icon} size={16} />}<span>{label}</span>
+  </button>
+);
+const Group = ({ label, children }) => (
+  <div className="rb-group" role="group" aria-label={label}>
+    <div className="rb-items">{children}</div>
+    <div className="rb-label">{label}</div>
+  </div>
+);
+const Stack = ({ children }) => <div className="rb-stack">{children}</div>;
+
+export default function AnalyticsRibbon({ info, view, go, onNewDashboard, onImport, onRefreshAll, onReload, readyCount }) {
+  const [ui, setUi] = useState(() => {
+    try { return { tab: 'home', collapsed: false, ...JSON.parse(localStorage.getItem(KEY) || '{}') }; } catch { return { tab: 'home', collapsed: false }; }
+  });
+  const [dash, setDash] = useState({ open: false, editing: false, mayChange: false });
+  const [queryLive, setQueryLive] = useState(false);
+  useEffect(() => {
+    const follow = (event) => setQueryLive(Boolean(event.detail?.live));
+    window.addEventListener('bi-query-state', follow);
+    return () => window.removeEventListener('bi-query-state', follow);
+  }, []);
+  useEffect(() => { try { localStorage.setItem(KEY, JSON.stringify(ui)); } catch { /* private mode */ } }, [ui]);
+  useEffect(() => {
+    const follow = (event) => setDash({ open: false, editing: false, mayChange: false, ...(event.detail || {}) });
+    window.addEventListener('bi-dashboard-state', follow);
+    return () => window.removeEventListener('bi-dashboard-state', follow);
+  }, []);
+  // opening a query shows the Query tab, a dashboard being edited the Insert tab
+  useEffect(() => { if (view.kind === 'q') setUi((u) => ({ ...u, tab: 'query' })); }, [view.kind, view.id]);
+  useEffect(() => { if (dash.editing) setUi((u) => ({ ...u, tab: u.tab === 'query' ? 'insert' : u.tab })); }, [dash.editing]);
+
+  const model = info.mayModel;
+  const onDash = view.kind === 'dash' && dash.open;
+  const onQuery = view.kind === 'q';
+  const tabs = [['home', 'Home'], ['insert', 'Insert'], ['query', 'Query'], ['data', 'Data'], ['view', 'View']];
+  const pick = (tab) => setUi((u) => ({ tab, collapsed: u.tab === tab ? !u.collapsed : false }));
+
+  const body = {
+    home: (
+      <>
+        <Group label="New">
+          <Big icon="newDoc" label="Dashboard" onClick={onNewDashboard} title="A new, empty dashboard" />
+          {model && <Big icon="datasets" label="Dataset" onClick={() => go('ds/new')} title="Import data from a data adapter" />}
+          {model && <Big icon="code" label="Query" onClick={() => go('q/new')} title="Write a DAX or SQL query over the datasets" />}
+        </Group>
+        {model && (
+          <Group label="Files">
+            <Big icon="open" label="Import" onClick={onImport} title="A dashboard file (.mdash) or a Power BI report (.pbix) or template (.pbit)" />
+          </Group>
+        )}
+        <Group label="Dashboard">
+          <Big icon="canvas" label={dash.editing ? 'Editing' : 'Edit'} onClick={() => send('bi-command', { cmd: 'edit' })} disabled={!onDash || dash.editing || !dash.mayChange} />
+          <Stack>
+            <Small icon="save" label="Save" onClick={() => send('bi-command', { cmd: 'save' })} disabled={!onDash || !dash.editing} />
+            <Small icon="undo" label="Cancel" onClick={() => send('bi-command', { cmd: 'cancel' })} disabled={!onDash || !dash.editing} />
+            <Small icon="reset" label="Reload data" onClick={() => send('bi-command', { cmd: 'reload' })} disabled={!onDash} />
+          </Stack>
+        </Group>
+        <div className="rb-note">{onDash ? (dash.editing ? 'Editing: add visuals from Insert, drag them on the grid, then Save.' : 'Click a bar or a slice to filter the rest of the dashboard.') : 'Open a dashboard on the left, or start a new one.'}</div>
+      </>
+    ),
+    insert: (
+      <>
+        <Group label="Visuals">
+          <div className="rb-gallery many">
+            {VISUAL_TYPES.map(([id, name, path]) => (
+              <button key={id} type="button" className="rb-tile" disabled={!onDash || !dash.mayChange} title={`Add a ${name.toLowerCase()} to the dashboard`}
+                onClick={() => send('bi-command', { cmd: 'add', type: id })}>
+                <span className="rb-tile-icon"><TypeIcon path={path} size={20} /></span><span>{name}</span>
+              </button>
+            ))}
+          </div>
+        </Group>
+        <div className="rb-note">{onDash ? (dash.mayChange ? 'The visual is added below the others; choose its fields in the pane that opens.' : 'You may not change this dashboard.') : 'Open a dashboard first.'}</div>
+      </>
+    ),
+    query: (
+      <>
+        <Group label="Query">
+          <Big icon="code" label="New" onClick={() => go('q/new')} disabled={!model} title="A new DAX / SQL query" />
+          <Big icon="demo" label="Run" primary onClick={() => send('bi-query', { cmd: 'run' })} disabled={!onQuery} title="Run (Ctrl+Enter)" />
+          <Stack>
+            <Small icon="save" label="Save" onClick={() => send('bi-query', { cmd: 'save' })} disabled={!onQuery || !model} />
+            <Small icon="duplicate" label="Save as copy" onClick={() => send('bi-query', { cmd: 'saveAs' })} disabled={!onQuery || !model} />
+            <Small icon="download" label="Rows as CSV" onClick={() => send('bi-query', { cmd: 'csv' })} disabled={!onQuery} />
+          </Stack>
+        </Group>
+        <Group label="Over the datasets">
+          <Stack>
+            <Small label="DAX" onClick={() => send('bi-query', { cmd: 'mode', mode: 'dax' })} disabled={!onQuery || !model}><b className="rb-txt">ƒx</b></Small>
+            <Small label="SQL" onClick={() => send('bi-query', { cmd: 'mode', mode: 'sql' })} disabled={!onQuery || !model}><RIcon name="db" size={16} /></Small>
+          </Stack>
+        </Group>
+        <Group label="On a database (live)">
+          <Stack>
+            <Small label="Mongo Shell" onClick={() => send('bi-query', { cmd: 'mode', mode: 'src:mongosh' })} disabled={!onQuery || !model}><b className="rb-txt">{'{ }'}</b></Small>
+            <Small label="Aggregation JSON" onClick={() => send('bi-query', { cmd: 'mode', mode: 'src:aggregation-json' })} disabled={!onQuery || !model}><b className="rb-txt">[ ]</b></Small>
+            <Small label="Python pipeline" onClick={() => send('bi-query', { cmd: 'mode', mode: 'src:python' })} disabled={!onQuery || !model}><b className="rb-txt">py</b></Small>
+          </Stack>
+          <Stack>
+            <Small label="JavaScript" onClick={() => send('bi-query', { cmd: 'mode', mode: 'src:javascript' })} disabled={!onQuery || !model}><b className="rb-txt">js</b></Small>
+            <Small label="Database SQL" onClick={() => send('bi-query', { cmd: 'mode', mode: 'src:sql' })} disabled={!onQuery || !model}><RIcon name="db" size={16} /></Small>
+            <Small icon="datasets" label="Make a dataset" onClick={() => send('bi-query', { cmd: 'dataset' })} disabled={!onQuery || !model || !queryLive} />
+          </Stack>
+        </Group>
+        <div className="rb-note">DAX / SQL read the imported datasets (fast). MongoDB and Database SQL read the data adapter live (first rows); “Make a dataset” imports all rows for dashboards.</div>
+      </>
+    ),
+    data: (
+      <>
+        {model && (
+          <Group label="Datasets">
+            <Big icon="datasets" label="New dataset" onClick={() => go('ds/new')} />
+            <Big icon="reset" label="Import all again" onClick={onRefreshAll} disabled={!readyCount} title="Read every dataset again from its data adapter (in the background)" />
+          </Group>
+        )}
+        <Group label="Model">
+          <Big icon="plug" label="Relationships" onClick={() => go('model')} title="Relate datasets on a shared column" />
+        </Group>
+        <Group label="Refresh">
+          <Big icon="reset" label="Refresh lists" onClick={onReload} />
+        </Group>
+      </>
+    ),
+    view: (
+      <>
+        <Group label="Go to">
+          <Big icon="layouts" label="Home" onClick={() => go('')} />
+          <Big icon="plug" label="Model" onClick={() => go('model')} />
+          {model && <Big icon="code" label="Queries" onClick={() => go('q/new')} />}
+        </Group>
+        <Group label="Other pages">
+          <Big icon="canvas" label="Designer" onClick={() => window.open('/designer', '_self')} />
+          <Big icon="explorer" label="Report Server" onClick={() => window.open('/server', '_self')} />
+        </Group>
+      </>
+    ),
+  };
+
+  return (
+    <header className={`ribbon bi-ribbon ${ui.collapsed ? 'collapsed' : ''}`}>
+      <div className="rb-bar">
+        <span className="rb-doc"><RIcon name="layouts" size={16} /><b>Analytics</b><small className="hide-narrow">{info.user}</small></span>
+        <div className="rb-tabs" role="tablist" aria-label="Ribbon">
+          {tabs.map(([id, label]) => (
+            <button key={id} type="button" role="tab" aria-selected={ui.tab === id} className={ui.tab === id ? 'on' : ''} onClick={() => pick(id)}>{label}</button>
+          ))}
+        </div>
+        <div className="rb-quickbar">
+          <button type="button" className="rb-quick" title={ui.collapsed ? 'Show the ribbon' : 'Hide the ribbon'} aria-label={ui.collapsed ? 'Show the ribbon' : 'Hide the ribbon'}
+            onClick={() => setUi((u) => ({ ...u, collapsed: !u.collapsed }))}><RIcon name={ui.collapsed ? 'chevronDown' : 'chevronUp'} /></button>
+        </div>
+      </div>
+      {!ui.collapsed && <div className="rb-body" role="tabpanel">{body[ui.tab]}</div>}
+    </header>
+  );
+}

@@ -73,7 +73,7 @@ export default function PublishDialog({ publishing, setPublishing, report, desig
               <dt>Fields</dt><dd>{report.columns.length}</dd>
               <dt>Design</dt><dd>{summary.bands.length} bands, {summary.elements} elements{summary.components.length ? ` · ${summary.components.map(([l, n]) => `${n} ${l}`).join(', ')}` : ''}</dd>
               {summary.subreports.length > 0 && <><dt>Subreports</dt><dd>{summary.subreports.join(', ')} <small>(must be on the server too)</small></dd></>}
-              <dt>Run it at</dt><dd><code>/server</code> · <code>/generate/{report.id}.pdf</code></dd>
+              <dt>Run it at</dt><dd><code>/server</code> · <code>/generate/{report.id}.pdf{folder ? `?Folder=${folder}` : ''}</code></dd>
             </dl>
             {publishing.onServer && (
               <label className="modal-check warn-box"><input type="checkbox" checked={publishing.replace} onChange={(e) => set({ replace: e.target.checked })} /> {report.id} is already on the server — replace that version</label>

@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react';
 import { Notice } from '../portal/Shell.jsx';
 import { notADashboardFile } from '../analytics/api.js';
 import { serverApi } from './serverApi.js';
+import { splitReportFiles } from '../mrd.js';
 
 export default function UploadDialog({ folders, folder, onClose, onDone }) {
   const [file, setFile] = useState(null); // { name, text, kind }
@@ -16,8 +17,10 @@ export default function UploadDialog({ folders, folder, onClose, onDone }) {
   const [message, setMessage] = useState(null);
   useEffect(() => { serverApi.connections().then((d) => setConnections(d.connections)).catch(() => {}); }, []);
 
-  const choose = async (chosen) => {
-    if (!chosen) return;
+  const choose = async (list) => {
+    // the report file, plus the PNG/JPEG pictures a .jrxml uses (chosen together with it)
+    const { report: chosen, images, skipped } = await splitReportFiles(list);
+    if (!chosen) { setFile(null); setMessage({ text: 'Choose the .mrd, .jrxml or .mdash file too (pictures go together with a .jrxml)', kind: 'error' }); return; }
     const lower = chosen.name.toLowerCase();
     if (/\.(pbi[xtp]|zip)$/.test(lower) || chosen.size > 24_000_000) {
       setFile(null);
@@ -33,8 +36,9 @@ export default function UploadDialog({ folders, folder, onClose, onDone }) {
       return;
     }
     const kind = /<jasperReport[\s>]/.test(text) ? 'jrxml' : /<mongoReportDefinition[\s>]/.test(text) ? 'mrd' : '';
-    setFile({ name: chosen.name, text, kind });
-    setMessage(kind ? null : { text: 'This is not a .mrd, .jrxml or .mdash file', kind: 'error' });
+    setFile({ name: chosen.name, text, kind, images: kind === 'jrxml' ? images : {} });
+    setMessage(!kind ? { text: 'This is not a .mrd, .jrxml or .mdash file', kind: 'error' }
+      : skipped.length ? { text: `Left out (over 2.4 MB): ${skipped.join(', ')}`, kind: 'error' } : null);
     const id = text.match(/reportId="([^"]+)"/)?.[1] || text.match(/<jasperReport[^>]*\sname="([^"]+)"/)?.[1] || '';
     setNewId('');
     setFile((f) => ({ ...f, id }));
@@ -50,6 +54,7 @@ export default function UploadDialog({ folders, folder, onClose, onDone }) {
       }
       const result = await serverApi.upload({
         content: file.text, folder: target.trim() || 'General', replace,
+        ...(Object.keys(file.images || {}).length ? { resources: file.images } : {}),
         ...(newId.trim() ? { newId: newId.trim() } : {}), ...(connectionId ? { connectionId } : {}), ...(collection.trim() ? { collection: collection.trim() } : {}),
       });
       onDone(result);
@@ -62,8 +67,9 @@ export default function UploadDialog({ folders, folder, onClose, onDone }) {
       <form className="card dialog" onSubmit={upload} role="dialog" aria-label="Add resource">
         <div className="card-head"><div><p className="eyebrow">Add resource</p><h2>Upload a report or dashboard file</h2></div></div>
         <p className="muted" style={{ fontSize: 13 }}>A <b>.mrd</b> file holds the whole report (query, parameters, data adapter, design and images) — make one in the Designer with “Save as file” or download it here. A Jaspersoft Studio <b>.jrxml</b> is converted on upload. A <b>.mdash</b> file holds a dashboard with its datasets' definitions (no data): they are imported again here.</p>
-        <label className="field"><span>File</span><input type="file" accept=".mrd,.jrxml,.xml,.mdash" onChange={(e) => choose(e.target.files[0])} required /></label>
-        {file?.kind && <p className="muted" style={{ fontSize: 12 }}>{file.kind === 'dashboard' ? <>Dashboard <b>{file.id}</b> · {file.datasets} dataset(s)</> : <>{file.kind === 'mrd' ? 'Report file' : 'Jaspersoft JRXML'} · ID <code>{file.id || '?'}</code></>}</p>}
+        <label className="field"><span>File</span><input type="file" accept=".mrd,.jrxml,.xml,.mdash,.png,.jpg,.jpeg" multiple onChange={(e) => choose(e.target.files)} required /></label>
+        <p className="muted" style={{ fontSize: 12, marginTop: -6 }}>For a .jrxml, select its PNG/JPEG pictures together with it (Ctrl+click): they are saved inside the report, and the report's “Files in this report” list shows which file each image uses.</p>
+        {file?.kind && <p className="muted" style={{ fontSize: 12 }}>{file.kind === 'dashboard' ? <>Dashboard <b>{file.id}</b> · {file.datasets} dataset(s)</> : <>{file.kind === 'mrd' ? 'Report file' : 'Jaspersoft JRXML'} · ID <code>{file.id || '?'}</code>{Object.keys(file.images || {}).length ? <> · pictures: {Object.keys(file.images).join(', ')}</> : null}</>}</p>}
         <label className="field"><span>Folder</span>
           <input list="upload-folders" value={target} onChange={(e) => setTarget(e.target.value)} required />
           <datalist id="upload-folders">{folders.map((f) => <option key={f} value={f} />)}</datalist>

@@ -20,13 +20,14 @@ from backend.app.analytics import settings
 from backend.app.db.entities import (
     ANALYTICS_DASHBOARDS,
     ANALYTICS_DATASETS,
+    ANALYTICS_QUERIES,
     ANALYTICS_REFRESHES,
     ANALYTICS_RELATIONSHIPS,
     get_entities,
 )
 from backend.app.storage.files import normalize_folder_path
 
-ID_PATTERN = re.compile(r"^(ds|rel|dash|rf)_[a-f0-9]{12}$")
+ID_PATTERN = re.compile(r"^(ds|rel|dash|rf|qry)_[a-f0-9]{12}$")
 TILE_ID = re.compile(r"^[A-Za-z0-9_-]{1,40}$")
 LANGUAGES = ("aggregation-json", "mongosh", "javascript", "python", "sql")      # the designer's query languages
 KINDS = ("number", "text", "date", "bool")
@@ -147,26 +148,38 @@ def relationships() -> list[dict[str, Any]]:
     return get_entities().find(ANALYTICS_RELATIONSHIPS)
 
 
-def clean_relationship(payload: dict[str, Any]) -> dict[str, Any]:
+def clean_relationship(payload: dict[str, Any], current: dict[str, Any] | None = None) -> dict[str, Any]:
+    """{fromDataset, fromColumn, toDataset, toColumn, cardinality, active}. The "to" side is usually the list (one)."""
     if not isinstance(payload, dict):
         raise ValueError("Send the relationship as a JSON object")
+    merged = {**(current or {}), **payload}
     sides = {}
     for side in ("from", "to"):
-        item = dataset(str(payload.get(f"{side}Dataset", "")))
+        item = dataset(str(merged.get(f"{side}Dataset", "")))
         if item is None:
             raise ValueError(f"Choose the {side} dataset")
-        column = str(payload.get(f"{side}Column", ""))
+        column = str(merged.get(f"{side}Column", ""))
         if column not in {col["name"] for col in item.get("columns") or []}:
             raise ValueError(f"'{column}' is not a column of {item['name']} (refresh the dataset first)")
         sides[side] = (item["id"], column)
     if sides["from"][0] == sides["to"][0]:
         raise ValueError("A relationship joins two different datasets")
+    active = merged.get("active", True) is not False
     for rel in relationships():
+        if current and rel["id"] == current.get("id"):
+            continue
         pair = {(rel["fromDataset"], rel["toDataset"]), (rel["toDataset"], rel["fromDataset"])}
-        if (sides["from"][0], sides["to"][0]) in pair:
-            raise ValueError("These two datasets are already related; delete that relationship first")
+        if (sides["from"][0], sides["to"][0]) in pair and active and rel.get("active") is not False:
+            raise ValueError("These two datasets already have an active relationship; make one of them inactive (or delete it) first")
+    cardinality = str(merged.get("cardinality") or "many-to-one")
+    if cardinality not in ("many-to-one", "one-to-one", "one-to-many", "many-to-many"):
+        raise ValueError("cardinality must be many-to-one, one-to-one, one-to-many or many-to-many")
     return {"fromDataset": sides["from"][0], "fromColumn": sides["from"][1], "toDataset": sides["to"][0],
-            "toColumn": sides["to"][1], "active": True}
+            "toColumn": sides["to"][1], "active": active, "cardinality": cardinality}
+
+
+def relationship(rel_id: str) -> dict[str, Any] | None:
+    return next((rel for rel in relationships() if rel["id"] == rel_id), None)
 
 
 def save_relationship(record: dict[str, Any]) -> dict[str, Any]:
@@ -312,6 +325,56 @@ def clean_dashboard(payload: dict[str, Any], current: dict[str, Any] | None = No
     return {"name": _text(merged.get("name"), "Name", 120, True), "folder": _folder(merged.get("folder")),
             "description": _text(merged.get("description"), "Description", 500), "tiles": clean_tiles,
             "filters": [clean_filter(item, f"filters[{i}]") for i, item in enumerate(filters)]}
+
+
+# ------------------------------------------------------------------ saved queries (Analytics → Queries)
+def queries() -> list[dict[str, Any]]:
+    return sorted(get_entities().find(ANALYTICS_QUERIES), key=lambda item: item.get("name", "").lower())
+
+
+def saved_query(query_id: str) -> dict[str, Any] | None:
+    if not ID_PATTERN.fullmatch(str(query_id or "")) or not str(query_id).startswith("qry_"):
+        return None
+    return get_entities().get(ANALYTICS_QUERIES, query_id)
+
+
+def save_query(record: dict[str, Any]) -> dict[str, Any]:
+    get_entities().put(ANALYTICS_QUERIES, record)
+    return record
+
+
+def delete_query(query_id: str) -> bool:
+    return saved_query(query_id) is not None and get_entities().delete(ANALYTICS_QUERIES, query_id)
+
+
+QUERY_LANGUAGES = ("dax", "sql", "source")
+
+
+def clean_query(payload: Any, current: dict[str, Any] | None = None, adapters: dict[str, str] | None = None) -> dict[str, Any]:
+    """A saved query: DAX or SQL over the datasets, or "source": a read-only query run on a data adapter itself
+    (MongoDB: Mongo Shell, Aggregation JSON, Python or JavaScript pipeline; or the database's own SQL)."""
+    if not isinstance(payload, dict):
+        raise ValueError("Send the query as a JSON object")
+    merged = {**(current or {}), **payload}
+    language = str(merged.get("language") or "dax").lower()
+    if language not in QUERY_LANGUAGES:
+        raise ValueError("language must be dax, sql (over the datasets) or source (on a data adapter)")
+    text = str(merged.get("text") or "")
+    if not text.strip():
+        raise ValueError("The query is empty")
+    if len(text) > 100_000 or (language != "source" and len(text) > 20_000):
+        raise ValueError("The query is too long (DAX/SQL: 20,000 characters, database queries: 100,000)")
+    out = {"name": _text(merged.get("name"), "Name", 120, True), "folder": _folder(merged.get("folder")),
+           "description": _text(merged.get("description"), "Description", 500), "language": language, "text": text}
+    if language == "source":
+        if adapters is None:
+            raise ValueError("The data adapters could not be read")
+        source = clean_source({"connectionId": merged.get("connectionId"), "queryLanguage": merged.get("queryLanguage"),
+                               "collection": merged.get("collection"), "querySource": text}, adapters)
+        out.update({"connectionId": source["connectionId"], "queryLanguage": source["queryLanguage"], "collection": source["collection"]})
+    else:
+        out.update({"connectionId": "", "queryLanguage": "", "collection": ""})
+    return out
 
 
 # ------------------------------------------------------------------ refresh log

@@ -75,13 +75,55 @@ def test_decimal_and_date_patterns():
     assert jexpr.DateFormatter("EEEE, d MMMM yyyy hh:mm a").format(datetime(2026, 11, 9, 15, 4)) == "Monday, 9 November 2026 03:04 PM"
 
 
+def test_lookup_lists_maps_and_indexing():
+    """$lookup results come back as lists of documents: $F{Region}[0].get("Name") (Groovy-style reports)."""
+    row = {"Region": [{"Code": "R1", "Name": "North"}], "segment": [], "Detail": {"Reasons": ["Bad CNIC"]},
+           "Codes": ["DDESales"], "basic": [{"Name": "Other than Basic Card"}]}
+    assert run('$F{Region}[0].get("Name")', row) == "North"
+    assert run('$F{Region}.get(0)["Code"]', row) == "R1"
+    assert run('$F{Detail}.get("Reasons")[0]', row) == "Bad CNIC"
+    assert run('$F{Codes}[0] == "DDESales" ? "Data Entry Sales" : "-"', row) == "Data Entry Sales"
+    assert run('$F{Codes}[-1]', row) == "DDESales"
+    assert run('$F{segment}[0]', row) is None                    # Groovy: past the end -> null
+    with pytest.raises(jexpr.JExprError):
+        run('$F{segment}[0].get("Name")', row)                   # null.get() -> blank cell, not a crash
+    with pytest.raises(jexpr.JExprError):
+        run('$F{segment}.get(0)', row)                           # Java List.get is strict
+    basic = ('$F{basic} != null && $F{basic}.size() > 0 ? $F{basic}[0].get("Name").equals("Create Basic Card Only") ? "B"'
+             ' : $F{basic}[0].get("Name").equals("Other than Basic Card") ? "S" : "" : ""')
+    assert run(basic, row) == "S"
+    assert run(basic, {"basic": []}) == ""
+    assert run('$F{Detail}.containsKey("Reasons") && !$F{segment}.isEmpty() == false', row) is True
+    assert run('$F{Codes}.contains("DDESales")', row) is True
+
+
+def test_split_and_comments():
+    assert run('$F{h}.split(":")[0].trim()', {"h": "0123 : Main"}) == "0123"
+    assert run('$F{h}.split(":")[1]', {"h": "E77:Ali Khan"}) == "Ali Khan"
+    assert run('"a,b,,".split(",").size()', {}) == 2                # trailing empty strings dropped, like Java
+    assert run('"a,b,,".split(",", -1).size()', {}) == 4
+    assert run('"".split(",").size()', {}) == 1
+    assert run('// an old version\n$F{h} /* trailing */', {"h": "x"}) == "x"
+    assert run('"http://x"', {}) == "http://x"                       # // inside a string is text
+
+
 @pytest.mark.parametrize("bad", [
+    "$F{m}.getClass()", "$F{m}.keySet()", "$F{m}.put(\"a\", 1)", "$F{a}[0", "$F{n}[0]",
     "System.exit(0)", "$F{a}.getClass()", "Runtime.getRuntime()", "new java.io.File(\"x\")",
     "__import__('os')", "$F{a}.length", "(1+", "new Object()",
 ])
 def test_rejects_unsafe_or_unsupported(bad):
     with pytest.raises(jexpr.JExprError):
-        run(bad, {"a": "x"})
+        run(bad, {"a": "x", "m": {"k": "v"}, "n": 5})
+
+
+def test_java_time_and_groovy_single_quoted_text():
+    stamp = {"Done": "2026-03-05T14:07:00+05:00", "Name": "Ali Khan12"}
+    assert run('java.time.OffsetDateTime.parse($F{Done}).format(java.time.format.DateTimeFormatter.ofPattern("dd/MM/yyyy HH:mm"))',
+               stamp) == "05/03/2026 14:07"
+    assert run('java.time.LocalDate.parse("2026-03-05").plusDays(1).format(java.time.format.DateTimeFormatter.ofPattern("dd-MM-yyyy"))') == "06-03-2026"
+    assert run(r"$F{Name}.replaceAll('(?<=\\D)\\d+$', '')", stamp) == "Ali Khan"
+    assert run("'a' + 'bc'") == "abc"
 
 
 def test_limits():

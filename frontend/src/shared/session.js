@@ -39,3 +39,16 @@ export async function signOut() {
     window.location.assign('/login');
   }
 }
+
+/** fetch(), but a server that does not answer (stopped, restarting, network down) gives a clear message
+ * instead of the browser's "Failed to fetch". */
+export async function reach(path, options) {
+  try {
+    return await fetch(path, options);
+  } catch (error) {
+    if (error?.name === 'AbortError') throw error;
+    const failure = new Error('Cannot reach the reporting server: it is not running, is restarting, or the network is down. Start the service (uvicorn) and try again.');
+    failure.status = 0;
+    throw failure;
+  }
+}

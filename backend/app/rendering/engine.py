@@ -44,6 +44,12 @@ NO_DATA_TYPES = {"Auto", "NoPages", "BlankPage", "AllSectionsNoDetail", "NoDataS
 BARCODE_TYPES = {"qr", "code128", "code39", "ean13"}
 LINE_STYLES = {"solid": None, "dashed": (4, 3), "dotted": (1, 2)}
 EVALUATION_TIMES = {"Now", "Report", "Auto"}
+# Jaspersoft Studio → Appearance / Text Field properties
+POSITION_TYPES = {"Float", "FixRelativeToTop", "FixRelativeToBottom"}
+STRETCH_TYPES = {"NoStretch", "RelativeToTallestObject", "RelativeToBandHeight", "ContainerHeight", "ContainerBottom"}
+TEXT_ADJUSTS = {"CutText", "StretchHeight", "ScaleFont"}
+ROTATIONS = {"None", "Left", "Right", "UpsideDown"}
+LINE_SPACINGS = {"Single", "1_1_2", "Double", "AtLeast", "Fixed", "Proportional"}
 BOX_TYPES = {"rectangle", "ellipse", "frame"}
 CALCULATIONS = {"Sum", "Count", "Average", "Min", "Max", "First"}
 RESET_TYPES = {"Report", "Group"}
@@ -314,7 +320,7 @@ def validate_design(design: Any, columns: list[str], parameter_names: set[str]) 
         "ignorePagination": raw_page.get("ignorePagination") is True,
         # Excel/CSV: "grid" = the whole page laid out in cells like Jasper's XLSX exporter (headings, images,
         # every band); "table" = one header row and one row per record (best for data analysis).
-        "sheetLayout": "grid" if raw_page.get("sheetLayout") == "grid" else "table",
+        "sheetLayout": raw_page.get("sheetLayout") if raw_page.get("sheetLayout") in ("grid", "mixed") else "table",
         # designer only: vertical guide lines (x in px from the left margin), like Jaspersoft Studio's ruler guides
         # Report properties (Jaspersoft Studio: Report → Properties)
         "whenNoDataType": raw_page.get("whenNoDataType") if raw_page.get("whenNoDataType") in NO_DATA_TYPES else "Auto",
@@ -435,11 +441,43 @@ def validate_design(design: Any, columns: list[str], parameter_names: set[str]) 
                 raise ValueError(f"{band_name}: the Print When expression could not be understood: {print_when[:60]}")
             check_expression(print_when, f"{band_name} Print When")
         element["printWhenExpression"] = print_when
+        # Appearance: Position Type / Stretch Type ("" = the earlier automatic behaviour: float below a growing
+        # text, grow with a text on the same line), Transparent, Label / Key, print details (Jasper names)
+        element["positionType"] = raw.get("positionType") if raw.get("positionType") in POSITION_TYPES else ""
+        element["stretchType"] = raw.get("stretchType") if raw.get("stretchType") in STRETCH_TYPES else ""
+        element["transparent"] = raw.get("transparent") is True
+        element["label"] = re.sub(r"[\x00-\x1f]", "", str(raw.get("label") or ""))[:120]
+        element["key"] = re.sub(r"[\x00-\x1f]", "", str(raw.get("key") or ""))[:120]
+        element["printRepeatedValues"] = raw.get("printRepeatedValues", True) is not False
+        element["removeLineWhenBlank"] = raw.get("removeLineWhenBlank") is True
+        element["printInFirstWholeBand"] = raw.get("printInFirstWholeBand") is True
+        element["printWhenDetailOverflows"] = raw.get("printWhenDetailOverflows") is True
+        element["printWhenGroupChanges"] = str(raw.get("printWhenGroupChanges") or "")[:80]
+        if kind in ("staticText", "textField"):
+            # Text Field / Static Text: Text Adjust, Rotation and Paragraph
+            adjust = raw.get("textAdjust")
+            if adjust not in TEXT_ADJUSTS:
+                adjust = "StretchHeight" if element["stretch"] else "CutText"
+            element["textAdjust"] = adjust
+            element["stretch"] = adjust == "StretchHeight"
+            element["rotation"] = raw.get("rotation") if raw.get("rotation") in ROTATIONS else "None"
+            element["lineSpacing"] = raw.get("lineSpacing") if raw.get("lineSpacing") in LINE_SPACINGS else "Single"
+            element["lineSpacingSize"] = _num(raw.get("lineSpacingSize"), "lineSpacingSize", 0, 500, 1)
+            for name in ("firstLineIndent", "leftIndent", "rightIndent", "spacingBefore", "spacingAfter"):
+                element[name] = _num(raw.get(name), name, -500 if name == "firstLineIndent" else 0, 500, 0)
+            element["tabStopWidth"] = _num(raw.get("tabStopWidth"), "tabStopWidth", 1, 500, 40)
         if kind == "staticText":
             element["text"] = str(raw.get("text", ""))[:2000]
         elif kind == "textField":
             element["expression"] = str(raw.get("expression", ""))[:1000]
             element["pattern"] = str(raw.get("pattern", ""))[:60]
+            # Pattern Expression: a pattern that depends on the record, e.g. $F{Currency} == "USD" ? "$ #,##0.00" : "Rs #,##0"
+            pattern_expression = str(raw.get("patternExpression", "") or "").strip()[:500]
+            if pattern_expression:
+                if not jexpr.check_syntax(pattern_expression):
+                    raise ValueError(f"{band_name}: the Pattern Expression could not be understood: {pattern_expression[:60]}")
+                check_expression(pattern_expression, f"{band_name} Pattern Expression")
+            element["patternExpression"] = pattern_expression
             element["blankWhenNull"] = raw.get("blankWhenNull", True) is True
             # Jasper Evaluation Time: Now = while filling; Report/Auto = variables take their final (report-end) value
             element["evaluationTime"] = raw.get("evaluationTime") if raw.get("evaluationTime") in EVALUATION_TIMES else "Now"
@@ -464,6 +502,11 @@ def validate_design(design: Any, columns: list[str], parameter_names: set[str]) 
                 if size > 2_500_000 or counter["image_bytes"] > 8_000_000:
                     raise ValueError("Keep the images under 8 MB in total (up to 2.5 MB each)")
             element["src"] = src
+            # where the picture came from, shown on the server's resource page (the bytes are in src)
+            element["srcName"] = re.sub(r"[\x00-\x1f]", "", str(raw.get("srcName") or ""))[:200]
+            url = str(raw.get("srcUrl") or "").strip()
+            element["srcUrl"] = url[:500] if re.match(r"^https?://", url, re.I) else ""
+            element["reference"] = re.sub(r"[\x00-\x1f]", "", str(raw.get("reference") or ""))[:300]
         elif kind == "chart":
             chart_type = str(raw.get("chartType", "bar"))
             if chart_type not in CHART_TYPES:
@@ -723,12 +766,23 @@ def _parse_datetime(value: Any) -> datetime | None:
     return None
 
 
+def _string_width(text: str, font: str, size: float) -> float:
+    from reportlab.pdfbase.pdfmetrics import stringWidth
+    return stringWidth(text, font, size)
+
+
+def is_date_pattern(pattern: str) -> bool:
+    """SimpleDateFormat (dd/MM/yyyy, MMM-yy, HH:mm) rather than DecimalFormat (#,##0.00, 0.00E0)."""
+    bare = re.sub(r"'[^']*'", "", pattern or "")
+    return bool(re.search(r"[yMdHhmsEakS]", bare)) and not re.search(r"[#0]", bare)
+
+
 def format_value(value: Any, pattern: str) -> str:
     if value is None:
         return ""
     if pattern:
         try:
-            if re.search(r"yyyy|dd|MM|HH|hh", pattern):
+            if is_date_pattern(pattern):
                 if isinstance(value, (datetime, date)) or _parse_datetime(value) is not None:
                     return jexpr.DateFormatter(pattern).format(value)
             elif re.search(r"[#0]", pattern) and not isinstance(value, bool) and _to_number(value) is not None:
@@ -895,6 +949,8 @@ class _Render:
         self.depth = 0  # subreport nesting level
         self.early_exit = False  # the report printed only the No Data band or a blank page
         self.x_offset = 0.0  # a subreport's bands are shifted to the subreport element's x
+        self.repeat_memo: dict[str, tuple[Any, int]] = {}  # element id -> (last printed value, page) for Print Repeated Values
+        self.changed_groups: set[str] = set()  # groups that changed at the current record
 
     # ---- data helpers
     def _with_calculated(self, row: dict[str, Any]) -> dict[str, Any]:
@@ -979,11 +1035,51 @@ class _Render:
         except jexpr.JExprError:
             return True
 
+    def shown(self, element: dict[str, Any], row: dict[str, Any] | None) -> bool:
+        """Is the element printed for this record? Print When Expression, then Jasper's "Print Repeated Values"
+        (off: a value equal to the one printed before is left out), unless it is the first whole band on a new
+        page ("Print In First Whole Band") or its group just changed ("Print When Group Changes")."""
+        if not self.print_when(element, row):
+            return False
+        if element.get("printRepeatedValues", True):
+            return True
+        memo = self.repeat_memo.get(element["id"])
+        if memo is None or memo[0] != self.repeat_key(element, row):
+            return True
+        if element.get("printInFirstWholeBand") and memo[1] != self.page_number:
+            return True
+        return bool(element.get("printWhenGroupChanges")) and element["printWhenGroupChanges"] in self.changed_groups
+
+    def repeat_key(self, element: dict[str, Any], row: dict[str, Any] | None) -> Any:
+        if element["type"] in ("textField", "barcode"):
+            return self.evaluate(element, row)
+        return element.get("text", "") if element["type"] == "staticText" else "static"
+
+    def printing(self, element: dict[str, Any], row: dict[str, Any] | None) -> bool:
+        """shown(), and remember the printed value for "Print Repeated Values"."""
+        if not self.shown(element, row):
+            return False
+        if not element.get("printRepeatedValues", True):
+            self.repeat_memo[element["id"]] = (self.repeat_key(element, row), self.page_number)
+        return True
+
+    def pattern_for(self, element: dict[str, Any], resolve) -> str:
+        """The Pattern, or what the Pattern Expression gives for this record."""
+        pattern = element.get("pattern", "")
+        if element.get("patternExpression"):
+            try:
+                dynamic = jexpr.evaluate(element["patternExpression"], resolve)
+            except jexpr.JExprError:
+                dynamic = None
+            if dynamic not in (None, ""):
+                pattern = str(dynamic)[:60]
+        return pattern
+
     def evaluate(self, element: dict[str, Any], row: dict[str, Any] | None) -> str:
         expression = element.get("expression", "")
-        pattern = element.get("pattern", "")
         found = TOKEN_RE.fullmatch(expression.strip())
         resolve = self.resolver(element, row)
+        pattern = self.pattern_for(element, resolve)
         if expression.lstrip().startswith("="):
             value: Any = eval_expression(expression.lstrip()[1:], resolve)
             text = format_value(value, pattern)
@@ -1009,24 +1105,85 @@ class _Render:
     def element_text(self, element: dict[str, Any], row: dict[str, Any] | None) -> str:
         return element.get("text", "") if element["type"] == "staticText" else self.evaluate(element, row)
 
-    def text_height(self, element: dict[str, Any], text: str) -> float:
-        """Height the text needs inside the element's width (same wrapping as draw_text / draw_paragraph)."""
-        pad = element.get("padding", 2)
-        size, width = element["fontSize"], max(element["width"] - 2 * pad, 1)
+    @staticmethod
+    def leading(element: dict[str, Any], size: float) -> float:
+        """Paragraph → Line Spacing (Jasper): Single, 1½, Double, Proportional (× size), Fixed / At Least (points)."""
+        base, amount = size * 1.2, element.get("lineSpacingSize", 1) or 1
+        spacing = element.get("lineSpacing", "Single")
+        if spacing == "1_1_2":
+            return base * 1.5
+        if spacing == "Double":
+            return base * 2
+        if spacing == "Proportional":
+            return base * amount
+        if spacing == "Fixed":
+            return max(amount, 1)
+        if spacing == "AtLeast":
+            return max(base, amount)
+        return base
+
+    def plain_lines(self, element: dict[str, Any], text: str, size: float, width: float) -> list[tuple[str, float, bool, bool]]:
+        """Wrapped lines as (text, indent, first line of a paragraph, last line of a paragraph):
+        Left / Right Indent narrow the box, First Line Indent moves each paragraph's first line, tabs jump to
+        the next Tab Stop."""
+        from reportlab.lib.utils import simpleSplit
+        name = self.font(element)
+        left, right, first = element.get("leftIndent", 0), element.get("rightIndent", 0), element.get("firstLineIndent", 0)
+        tab = element.get("tabStopWidth", 40) or 40
+        space = max(_string_width(" ", name, size), 0.1)
+        room = max(width - left - right, 1)
+        lines: list[tuple[str, float, bool, bool]] = []
+        for paragraph in str(text).split("\n"):
+            if "\t" in paragraph:
+                out = ""
+                for index, part in enumerate(paragraph.split("\t")):
+                    if index:
+                        used = _string_width(out, name, size)
+                        next_stop = (used // tab + 1) * tab
+                        out += " " * max(1, round((next_stop - used) / space))
+                    out += part
+                paragraph = out
+            head = simpleSplit(paragraph, name, size, max(room - first, 1)) or [""]
+            rest = paragraph[len(head[0]):].lstrip(" ") if len(head) > 1 else ""
+            tail = simpleSplit(rest, name, size, room) if rest else []
+            parts = [head[0], *tail]
+            for index, line in enumerate(parts):
+                lines.append((line, left + (first if index == 0 else 0), index == 0, index == len(parts) - 1))
+        return lines
+
+    def paragraph_style(self, element: dict[str, Any], size: float):
+        from reportlab.lib.enums import TA_CENTER, TA_JUSTIFY, TA_LEFT, TA_RIGHT
+        from reportlab.lib.styles import ParagraphStyle
+        return ParagraphStyle(
+            "element", fontName=self.family(element)[0], fontSize=size, leading=self.leading(element, size),
+            textColor=self.hex(element.get("color") or "#000000"),
+            alignment={"left": TA_LEFT, "center": TA_CENTER, "right": TA_RIGHT, "justified": TA_JUSTIFY}[element["align"]],
+            leftIndent=element.get("leftIndent", 0), rightIndent=element.get("rightIndent", 0),
+            firstLineIndent=element.get("firstLineIndent", 0),
+            spaceBefore=element.get("spacingBefore", 0), spaceAfter=element.get("spacingAfter", 0),
+        )
+
+    def block_height(self, element: dict[str, Any], text: str, size: float, width: float) -> float:
+        """Height of the text block (without the padding) at this font size."""
         if element.get("markup", "none") != "none" or element["align"] == "justified":
-            from reportlab.lib.styles import ParagraphStyle
             from reportlab.platypus import Paragraph
-            style = ParagraphStyle("measure", fontName=self.family(element)[0], fontSize=size, leading=size * 1.2)
+            style = self.paragraph_style(element, size)
             try:
                 _w, block = Paragraph(markup_to_paragraph(text, element.get("markup", "none"), size), style).wrap(width, 1_000_000)
             except Exception:  # noqa: BLE001 - malformed markup: measure the plain text
                 block = 0.0
-            return block + 2 * pad
-        from reportlab.lib.utils import simpleSplit
-        lines = 0
-        for paragraph in str(text).split("\n"):
-            lines += max(1, len(simpleSplit(paragraph, self.font(element), size, width)))
-        return lines * size * 1.2 + 2 * pad
+            return block + style.spaceBefore + style.spaceAfter
+        lines = self.plain_lines(element, text, size, width)
+        paragraphs = sum(1 for line in lines if line[2])
+        extra = paragraphs * (element.get("spacingBefore", 0) + element.get("spacingAfter", 0))
+        return len(lines) * self.leading(element, size) + extra
+
+    def text_height(self, element: dict[str, Any], text: str) -> float:
+        """Height the text needs inside the element's width (same wrapping as draw_text / draw_paragraph)."""
+        if element.get("rotation", "None") in ("Left", "Right"):
+            return element["height"]  # turned text runs along the height: the box does not grow
+        pad = element.get("padding", 2)
+        return self.block_height(element, text, element["fontSize"], max(element["width"] - 2 * pad, 1)) + 2 * pad
 
     def band_layout(self, band: dict[str, Any], row: dict[str, Any] | None) -> tuple[float, list[tuple[float, float]]]:
         """(band height, [(y, height) per element]) after "Stretch With Overflow".
@@ -1037,37 +1194,85 @@ class _Render:
         elements = band["elements"]
         boxes = [(e["y"], e["height"]) for e in elements]
         growth: list[tuple[float, float, float]] = []  # (top, original bottom, extra height)
+        blanks = [e for e in elements if e.get("removeLineWhenBlank") and e["type"] not in NOT_DRAWN]
+        hidden = {id(e) for e in blanks if not self.shown(e, row)}
         for index, element in enumerate(elements):
-            if not element.get("stretch"):
+            if not element.get("stretch") or id(element) in hidden:
                 continue
             needed = self.text_height(element, self.element_text(element, row))
             if needed > element["height"] + 0.5:
                 boxes[index] = (element["y"], needed)
                 growth.append((element["y"], element["y"] + element["height"], needed - element["height"]))
-        if not growth:
+        # "Remove Line When Blank": a hidden element's line closes up when nothing else printed is on it
+        removed: list[tuple[float, float]] = []
+        for element in blanks:
+            if id(element) not in hidden or element["height"] <= 0:
+                continue
+            top, bottom = element["y"], element["y"] + element["height"]
+            if not any(other is not element and id(other) not in hidden and other["type"] not in NOT_DRAWN
+                       and other["y"] < bottom and other["y"] + max(other["height"], 0.01) > top for other in elements):
+                removed.append((top, bottom))
+        removed.sort()
+        merged: list[list[float]] = []
+        for top, bottom in removed:
+            if merged and top <= merged[-1][1]:
+                merged[-1][1] = max(merged[-1][1], bottom)
+            else:
+                merged.append([top, bottom])
+
+        def closed_above(y: float) -> float:
+            return sum(max(0.0, min(bottom, y) - top) for top, bottom in merged)
+
+        special = any(e.get("positionType") or e.get("stretchType") for e in elements)
+        if not growth and not merged and not special:
             return band["height"], boxes
         result = []
-        for (y, h), element in zip(boxes, elements):
-            extra_same_line = max((g for top, _b, g in growth if abs(top - element["y"]) <= 1), default=0.0)
-            if not element.get("stretch") and extra_same_line and element["type"] in ("staticText", "textField", "rectangle", "line"):
-                if element["type"] != "line" or element["height"] > 1:  # a horizontal line keeps its height
-                    h = element["height"] + extra_same_line
-            shift = max((g for _top, bottom, g in growth if element["y"] >= bottom - 0.5), default=0.0)
-            result.append((y + shift, h))
+        later: list[int] = []  # depend on the band's final height
+        for index, ((y, h), element) in enumerate(zip(boxes, elements)):
+            position, stretch = element.get("positionType", ""), element.get("stretchType", "")
+            if stretch == "RelativeToTallestObject":
+                for top, bottom, g in growth:
+                    if top < element["y"] + element["height"] and bottom > element["y"]:
+                        h = max(h, bottom + g - element["y"])
+            elif not stretch and not element.get("stretch"):  # automatic: grow with a text on the same line
+                extra_same_line = max((g for top, _b, g in growth if abs(top - element["y"]) <= 1), default=0.0)
+                if extra_same_line and element["type"] in ("staticText", "textField", "rectangle", "line"):
+                    if element["type"] != "line" or element["height"] > 1:  # a horizontal line keeps its height
+                        h = element["height"] + extra_same_line
+            if position == "FixRelativeToTop":
+                shift = 0.0
+            else:  # Float, or automatic: below a growing element it moves down
+                shift = max((g for _top, bottom, g in growth if element["y"] >= bottom - 0.5), default=0.0)
+            result.append((y + shift - closed_above(element["y"]), h))
+            if position == "FixRelativeToBottom" or stretch in ("RelativeToBandHeight", "ContainerHeight", "ContainerBottom"):
+                later.append(index)
         original_bottom = max((e["y"] + e["height"] for e in elements), default=0.0)
         trailing = max(0.0, band["height"] - original_bottom)
-        height = max(band["height"], max(y + h for y, h in result) + trailing)
+        closed = closed_above(float("inf"))
+        shown_boxes = [box for box, element in zip(result, elements) if id(element) not in hidden]
+        height = max(band["height"] - closed, max((y + h for y, h in shown_boxes), default=0.0) + trailing)
+        grown = height - band["height"]
+        for index in later:
+            element, (y, h) = elements[index], result[index]
+            if element.get("positionType") == "FixRelativeToBottom":
+                y = element["y"] + grown           # keeps its distance from the band's bottom
+            if element.get("stretchType") in ("RelativeToBandHeight", "ContainerHeight"):
+                h = element["height"] + max(grown, 0.0)
+            elif element.get("stretchType") == "ContainerBottom":
+                h = max(element["height"], height - y)
+            result[index] = (y, h)
         return height, result
 
     def band_height(self, band: dict[str, Any], row: dict[str, Any] | None) -> float:
-        return self.band_layout(band, row)[0] if any(e.get("stretch") for e in band["elements"]) else band["height"]
+        changes = any(e.get("stretch") or e.get("removeLineWhenBlank") or e.get("positionType") or e.get("stretchType") for e in band["elements"])
+        return self.band_layout(band, row)[0] if changes else band["height"]
 
     def draw_band(self, canvas, band: dict[str, Any], top: float, row: dict[str, Any] | None, scope_rows=None, engine=None) -> None:
         eng = engine or self  # a subreport's bands are evaluated by the subreport's own engine
         left = eng.page["margins"]["left"] + eng.x_offset
         _height, boxes = eng.band_layout(band, row)
         for element, (y, h) in zip(band["elements"], boxes):
-            if element["type"] in NOT_DRAWN or not eng.print_when(element, row):
+            if element["type"] in NOT_DRAWN or not eng.printing(element, row):
                 continue
             eng.draw_element(canvas, element, left + element["x"], top + y, row, scope_rows, h)
 
@@ -1332,6 +1537,7 @@ class _Render:
                     if old != new:
                         changed_from = level
                         break
+            self.changed_groups = {g["name"] for g in self.groups[changed_from:]}
             if previous is not None:
                 for level in range(len(self.groups) - 1, changed_from - 1, -1):
                     name = self.groups[level]["name"]
@@ -1359,17 +1565,18 @@ class _Render:
         w, h = element["width"], element["height"] if height is None else height
         y = height_page - y_top - h  # bottom-left origin
         kind = element["type"]
-        if kind in ("rectangle", "frame", "ellipse") or (kind in ("staticText", "textField", "barcode") and (element["backColor"] or element["borderWidth"])):
+        back = None if element.get("transparent") else element["backColor"]  # Appearance → Transparent
+        if kind in ("rectangle", "frame", "ellipse") or (kind in ("staticText", "textField", "barcode") and (back or element["borderWidth"])):
             canvas.saveState()
-            if element["backColor"]:
-                canvas.setFillColor(self.hex(element["backColor"]))
+            if back:
+                canvas.setFillColor(self.hex(back))
             if element["borderWidth"]:
                 self.stroke(canvas, element)
             shape = canvas.ellipse if kind == "ellipse" else None
             if shape:
-                canvas.ellipse(x, y, x + w, y + h, stroke=1 if element["borderWidth"] else 0, fill=1 if element["backColor"] else 0)
+                canvas.ellipse(x, y, x + w, y + h, stroke=1 if element["borderWidth"] else 0, fill=1 if back else 0)
             else:
-                canvas.rect(x, y, w, h, stroke=1 if element["borderWidth"] else 0, fill=1 if element["backColor"] else 0)
+                canvas.rect(x, y, w, h, stroke=1 if element["borderWidth"] else 0, fill=1 if back else 0)
             canvas.restoreState()
         if element.get("borders"):  # a separate border per side (Jasper Borders tab)
             canvas.saveState()
@@ -1433,25 +1640,20 @@ class _Render:
 
     def draw_paragraph(self, canvas, element, text, x, y, w, h) -> None:
         """Markup (HTML / styled) or justified text: laid out with a ReportLab Paragraph inside the element box."""
-        from reportlab.lib.enums import TA_CENTER, TA_JUSTIFY, TA_LEFT, TA_RIGHT
-        from reportlab.lib.styles import ParagraphStyle
         from reportlab.platypus import Paragraph
         size, pad = element["fontSize"], element.get("padding", 2)
         body = markup_to_paragraph(text, element.get("markup", "none"), size)
         for flag, tag in (("underline", "u"), ("italic", "i"), ("bold", "b")):
             if element.get(flag):
                 body = f"<{tag}>{body}</{tag}>"
-        style = ParagraphStyle(
-            "element", fontName=self.family(element)[0], fontSize=size, leading=size * 1.2,
-            textColor=self.hex(element["color"]),
-            alignment={"left": TA_LEFT, "center": TA_CENTER, "right": TA_RIGHT, "justified": TA_JUSTIFY}[element["align"]],
-        )
+        style = self.paragraph_style(element, size)
         try:
             paragraph = Paragraph(body, style)
             _width, block = paragraph.wrap(max(w - 2 * pad, 1), 1_000_000)
         except Exception:  # noqa: BLE001 - malformed markup: fall back to the plain text
             paragraph = Paragraph(markup_to_paragraph(markup_to_text(text, element.get("markup", "none")), "none"), style)
             _width, block = paragraph.wrap(max(w - 2 * pad, 1), 1_000_000)
+        block += style.spaceBefore + style.spaceAfter
         if element.get("vAlign") == "middle":
             bottom = y + (h - block) / 2
         elif element.get("vAlign") == "bottom":
@@ -1462,50 +1664,80 @@ class _Render:
         path = canvas.beginPath()
         path.rect(x, y, w, h)
         canvas.clipPath(path, stroke=0, fill=0)
-        paragraph.drawOn(canvas, x + pad, bottom)
+        paragraph.drawOn(canvas, x + pad, bottom + style.spaceAfter)
         canvas.restoreState()
 
     def draw_text(self, canvas, element, text, x, y, w, h) -> None:
-        from reportlab.lib.utils import simpleSplit
+        rotation = element.get("rotation", "None")
+        if rotation in ("Left", "Right", "UpsideDown"):
+            # Text Field → Rotation: turn the canvas and draw the text in the turned box
+            canvas.saveState()
+            if rotation == "Left":        # reads from bottom to top
+                canvas.translate(x + w, y)
+                canvas.rotate(90)
+                box_w, box_h = h, w
+            elif rotation == "Right":     # reads from top to bottom
+                canvas.translate(x, y + h)
+                canvas.rotate(-90)
+                box_w, box_h = h, w
+            else:
+                canvas.translate(x + w, y + h)
+                canvas.rotate(180)
+                box_w, box_h = w, h
+            self.draw_text(canvas, {**element, "rotation": "None", "width": box_w, "height": box_h}, text, 0, 0, box_w, box_h)
+            canvas.restoreState()
+            return
+        if element.get("textAdjust") == "ScaleFont":
+            # Text Adjust → Scale Font: a smaller font until the whole text fits in the box
+            pad = element.get("padding", 2)
+            size = element["fontSize"]
+            while size > 4 and self.block_height(element, text, size, max(w - 2 * pad, 1)) > h - 2 * pad + 0.5:
+                size = max(4, size - 0.5)
+            element = {**element, "fontSize": size}
         if element.get("markup", "none") != "none" or element["align"] == "justified":
             self.draw_paragraph(canvas, element, text, x, y, w, h)
             return
         size, name, pad = element["fontSize"], self.font(element), element.get("padding", 2)
-        lines: list[str] = []
-        for paragraph in str(text).split("\n"):
-            lines.extend(simpleSplit(paragraph, name, size, max(w - 2 * pad, 1)) or [""])
-        leading = size * 1.2
+        lines = self.plain_lines(element, text, size, max(w - 2 * pad, 1))
+        leading = self.leading(element, size)
+        before, after = element.get("spacingBefore", 0), element.get("spacingAfter", 0)
+        right_indent = element.get("rightIndent", 0)
         canvas.saveState()
         path = canvas.beginPath()
         path.rect(x, y, w, h)
         canvas.clipPath(path, stroke=0, fill=0)
         canvas.setFillColor(self.hex(element["color"]))
         canvas.setFont(name, size)
-        block = len(lines) * leading
+        block = self.block_height(element, text, size, max(w - 2 * pad, 1))
         if element.get("vAlign") == "middle":
             top_edge = y + (h + block) / 2
         elif element.get("vAlign") == "bottom":
             top_edge = y + block + pad
         else:
             top_edge = y + h - pad
-        baseline = top_edge - size
-        for line in lines:
+        # the first baseline sits one font size below the top (Single spacing: as before); bigger spacing adds room above
+        cursor = top_edge - size - (leading - size * 1.2 if leading > size * 1.2 else 0)
+        for line, indent, first, last in lines:
+            if first:
+                cursor -= before
+            baseline = cursor
+            cursor -= leading
+            if last:
+                cursor -= after
             if baseline < y - size or baseline > y + h + size:
-                baseline -= leading
                 continue
             line_width = canvas.stringWidth(line, name, size)
             if element["align"] == "right":
-                start = x + w - pad - line_width
+                start = x + w - pad - right_indent - line_width
             elif element["align"] == "center":
-                start = x + (w - line_width) / 2
+                start = x + indent + (w - indent - right_indent - line_width) / 2
             else:
-                start = x + pad
+                start = x + pad + indent
             canvas.drawString(start, baseline, line)
             if element.get("underline") and line:
                 canvas.setStrokeColor(self.hex(element["color"]))
                 canvas.setLineWidth(max(0.5, size / 18))
                 canvas.line(start, baseline - size * 0.12, start + line_width, baseline - size * 0.12)
-            baseline -= leading
         canvas.restoreState()
 
     def chart_data(self, element) -> tuple[list[str], list[float]]:
@@ -1779,10 +2011,17 @@ def has_tabular_layout(design: dict[str, Any]) -> bool:
 
 
 def _numeric_format(pattern: str) -> str | None:
-    match = re.match(r"^(.*?)([#0,]+(?:\.[#0]+)?)(.*)$", pattern or "")
+    """Java DecimalFormat pattern → Excel number format (prefix/suffix quoted; 0.00E0 → 0.00E+0; a; negative part)."""
+    if ";" in (pattern or ""):
+        positive, negative = pattern.split(";", 1)
+        first = _numeric_format(positive)
+        second = _numeric_format(negative)
+        return f"{first};{second}" if first and second else first
+    match = re.match(r"^(.*?)([#0,]+(?:\.[#0]+)?)(E0+)?(.*)$", pattern or "")
     if not match:
         return None
-    prefix, core, suffix = match.groups()
+    prefix, core, exponent, suffix = match.groups()
+    core += f"E+{exponent[1:]}" if exponent else ""
     if suffix.strip() == "%":  # a percent pattern: Excel multiplies by 100 like Java's DecimalFormat
         return (f'"{prefix}"' if prefix else "") + core + suffix
     return (f'"{prefix}"' if prefix else "") + core + (f'"{suffix}"' if suffix else "")
@@ -1792,15 +2031,15 @@ def _cell_value(engine: "_Render", element: dict[str, Any], row: dict[str, Any])
     if element["type"] == "staticText":
         return markup_to_text(element.get("text", ""), element.get("markup", "none")), None
     expression = element.get("expression", "")
-    pattern = element.get("pattern", "")
     found = TOKEN_RE.fullmatch(expression.strip())
     raw: Any = None
     resolve = engine.resolver(element, row)
+    pattern = engine.pattern_for(element, resolve)
     if found:
         raw = resolve(found.group(1), found.group(2))
     elif expression.lstrip().startswith("="):
         raw = eval_expression(expression.lstrip()[1:], resolve)
-    if isinstance(raw, (int, float)) and not isinstance(raw, bool) and (not pattern or _numeric_format(pattern)) and not re.search(r"yyyy|dd|MM", pattern or ""):
+    if isinstance(raw, (int, float)) and not isinstance(raw, bool) and (not pattern or _numeric_format(pattern)) and not is_date_pattern(pattern):
         return raw, _numeric_format(pattern)
     return markup_to_text(engine.evaluate(element, row), element.get("markup", "none")), None
 
@@ -1828,6 +2067,7 @@ def _tabular(design, title, columns, rows, parameters):
         engine.report_count += 1
         engine.accumulate(row)
         data.append([_cell_value(engine, col["element"], row) for col in layout])
+    engine.page_number = engine.total_pages = 1      # one sheet: headings say "Page 1 of 1", not "Page 0 of 0"
     return engine, layout, data
 
 
@@ -1862,7 +2102,7 @@ class _GridCollector(_Render):
             return
         height, boxes = eng.band_layout(band, row)
         for element, (y, h) in zip(band["elements"], boxes):
-            if element["type"] in NOT_DRAWN or not eng.print_when(element, row):
+            if element["type"] in NOT_DRAWN or not eng.printing(element, row):
                 continue
             item = {"element": element, "x": element["x"] + eng.x_offset, "y": self.cursor + y, "w": element["width"], "h": h}
             if element["type"] == "barcode":  # the sheet gets the barcode's value as text
@@ -1940,7 +2180,6 @@ def render_grid_xlsx(design, title, columns, rows, parameters) -> bytes:
     """Jasper-style XLSX: the page layout in cells (merged where an element spans several), with fonts,
     colours, borders, lines and images — so the sheet looks like the PDF, headings included."""
     from openpyxl import Workbook
-    from openpyxl.styles import Border, PatternFill, Side
     from openpyxl.utils import get_column_letter
     items, xs, ys = _grid(design, title, columns, rows, parameters)
     book = Workbook()
@@ -1951,6 +2190,93 @@ def render_grid_xlsx(design, title, columns, rows, parameters) -> bytes:
         sheet.column_dimensions[get_column_letter(c)].width = max(0.5, (xs[c] - xs[c - 1]) / 5.25)
     for r in range(1, len(ys)):
         sheet.row_dimensions[r].height = max(1.0, ys[r] - ys[r - 1])
+    _paint_grid(sheet, items, ys)
+    sheet.page_setup.orientation = "landscape" if design["page"]["width"] > design["page"]["height"] else "portrait"
+    sheet.sheet_properties.pageSetUpPr.fitToPage = True
+    sheet.page_setup.fitToWidth = 1
+    sheet.page_setup.fitToHeight = 0
+    neutralize_formulas(sheet)
+    output = io.BytesIO()
+    book.save(output)
+    return output.getvalue()
+
+
+HEAD_BANDS = ("title", "pageHeader", "columnHeader")
+
+
+def render_mixed_xlsx(design, title, columns, rows, parameters) -> bytes:
+    """Headings like the PDF, data as a table. The Title, Page Header and Column Header are placed exactly as designed
+    (merged cells, fonts, colours, borders, images: e.g. a report-number box on the right); then every record is one
+    row in the columns of the Detail band, with a filter on the heading row and the panes frozen below it, so the data
+    can still be sorted and filtered in Excel."""
+    from openpyxl import Workbook
+    from openpyxl.utils import get_column_letter
+    bands = design["bands"]
+    every = [bands[key] for key in BAND_KEYS if bands.get(key)] + [b for side in ("groupHeaders", "groupFooters") for b in bands[side].values()]
+    collector = _GridCollector(design, title, columns, rows, parameters)
+    collector.skip = {id(band) for band in every if not any(band is bands[key] for key in HEAD_BANDS)}
+    collector.run(_NullCanvas())                      # records only the heading bands (the rest is skipped cheaply)
+    head = collector.items
+    engine, layout, data = _tabular(design, title, columns, rows, parameters)
+    detail = [col["element"] for col in layout]
+    # every heading element gets its own exact cell edges (pixel-perfect, e.g. "Report ID:" and its value side by
+    # side in a box on the right); a data column that a heading edge cuts through is merged across those cells
+    xs = _edges([0.0] + [e["x"] for e in detail] + [e["x"] + e["width"] for e in detail]
+                + [i["x"] for i in head] + [i["x"] + i["w"] for i in head])
+    ys = _edges([0.0] + [i["y"] for i in head] + [i["y"] + i["h"] for i in head])
+
+    def index(edges: list[float], value: float) -> int:
+        position = bisect.bisect_right(edges, round(value, 1) + 0.5) - 1
+        return max(0, min(position, len(edges) - 1))
+
+    for item in head:                                  # each heading element covers the data columns under it
+        item["c1"], item["r1"] = index(xs, item["x"]), index(ys, item["y"])
+        item["c2"] = max(item["c1"], index(xs, item["x"] + item["w"]) - 1)
+        item["r2"] = max(item["r1"], index(ys, item["y"] + item["h"]) - 1)
+    book = Workbook()
+    sheet = book.active
+    sheet.title = "Report"
+    for c in range(1, len(xs)):
+        sheet.column_dimensions[get_column_letter(c)].width = max(1.0, (xs[c] - xs[c - 1]) / 5.25)
+    for r in range(1, len(ys)):
+        sheet.row_dimensions[r].height = max(1.0, ys[r] - ys[r - 1])
+    _paint_grid(sheet, head, ys)
+    header_ids = {id(e) for e in bands["columnHeader"]["elements"]}
+    heading_rows = [item["r2"] + 1 for item in head if id(item["element"]) in header_ids]
+    first_data = max(len(ys), 1)                      # the row below the headings (1-based)
+    places = [index(xs, e["x"]) + 1 for e in detail]
+    ends = [max(place, index(xs, e["x"] + e["width"])) for place, e in zip(places, detail)]
+    for offset, record in enumerate(data):
+        row_number = first_data + offset
+        for place, end, element, (value, number_format) in zip(places, ends, detail, record):
+            cell = sheet.cell(row=row_number, column=place, value=value)
+            _xlsx_style(cell, element)
+            if number_format:
+                cell.number_format = number_format
+            if end > place:                            # same size on every row, so Excel can still sort
+                for extra in range(place + 1, end + 1):
+                    _xlsx_style(sheet.cell(row=row_number, column=extra), element)
+                sheet.merge_cells(start_row=row_number, start_column=place, end_row=row_number, end_column=end)
+    if heading_rows and detail:
+        header_row = max(heading_rows)
+        last = get_column_letter(max(ends))
+        sheet.auto_filter.ref = f"{get_column_letter(min(places))}{header_row}:{last}{max(header_row, first_data + len(data) - 1)}"
+        sheet.freeze_panes = sheet.cell(row=first_data, column=1)
+        single_sheet_print_setup(sheet, header_row)
+    neutralize_formulas(sheet)
+    output = io.BytesIO()
+    book.save(output)
+    return output.getvalue()
+
+
+def _paint_grid(sheet, items: list[dict[str, Any]], ys: list[float], row_offset: int = 0) -> None:
+    """Put grid items (with r1/c1/r2/c2) on the sheet: fills, borders, lines, texts (merged across their span) and
+    images. row_offset moves everything down (rows above are used for something else)."""
+    from openpyxl.styles import Border, PatternFill, Side
+    from openpyxl.utils import get_column_letter
+    if row_offset:
+        items = [{**item, "r1": item["r1"] + row_offset, "r2": item["r2"] + row_offset} for item in items]
+        ys = [ys[0]] * row_offset + ys
     occupied: set[tuple[int, int]] = set()
     images = 0
 
@@ -2021,14 +2347,9 @@ def render_grid_xlsx(design, title, columns, rows, parameters) -> bytes:
                 images += 1
             except Exception:  # noqa: BLE001 - Pillow missing or unreadable image: leave the cells empty
                 pass
-    sheet.page_setup.orientation = "landscape" if design["page"]["width"] > design["page"]["height"] else "portrait"
-    sheet.sheet_properties.pageSetUpPr.fitToPage = True
-    sheet.page_setup.fitToWidth = 1
-    sheet.page_setup.fitToHeight = 0
-    neutralize_formulas(sheet)
-    output = io.BytesIO()
-    book.save(output)
-    return output.getvalue()
+
+
+EXCEL_ROTATION = {"Left": 90, "Right": 180}  # Excel: 90 = up, 180 = down (upside down is not possible)
 
 
 def _xlsx_style(cell, element) -> None:
@@ -2038,8 +2359,9 @@ def _xlsx_style(cell, element) -> None:
                      italic=element["italic"], underline="single" if element.get("underline") else None,
                      color=element["color"].lstrip("#"))
     horizontal = "justify" if element["align"] == "justified" else element["align"]
-    cell.alignment = Alignment(horizontal=horizontal, vertical={"top": "top", "middle": "center", "bottom": "bottom"}[element.get("vAlign", "top")], wrap_text=True)
-    if element["backColor"]:
+    cell.alignment = Alignment(horizontal=horizontal, vertical={"top": "top", "middle": "center", "bottom": "bottom"}[element.get("vAlign", "top")], wrap_text=True,
+                               text_rotation=EXCEL_ROTATION.get(element.get("rotation", "None"), 0))
+    if element["backColor"] and not element.get("transparent"):
         cell.fill = PatternFill("solid", start_color=element["backColor"].lstrip("#"), end_color=element["backColor"].lstrip("#"))
     if element["borderWidth"]:
         side = Side(style="thin", color=(element["borderColor"] or "#000000").lstrip("#"))
@@ -2104,6 +2426,8 @@ def render_design_xlsx(design, title, columns, rows, parameters) -> bytes:
         raise RuntimeError("XLSX export needs: pip install openpyxl") from exc
     if design["page"].get("sheetLayout") == "grid":
         return render_grid_xlsx(design, title, columns, rows, parameters)
+    if design["page"].get("sheetLayout") == "mixed":
+        return render_mixed_xlsx(design, title, columns, rows, parameters)
     engine, layout, data = _tabular(design, title, columns, rows, parameters)
     book = Workbook()
     sheet = book.active
@@ -2116,8 +2440,9 @@ def render_design_xlsx(design, title, columns, rows, parameters) -> bytes:
                          italic=element["italic"], underline="single" if element.get("underline") else None,
                          color=element["color"].lstrip("#"))
         horizontal = "justify" if element["align"] == "justified" else element["align"]
-        cell.alignment = Alignment(horizontal=horizontal, vertical={"top": "top", "middle": "center", "bottom": "bottom"}[element.get("vAlign", "top")], wrap_text=True)
-        if element["backColor"]:
+        cell.alignment = Alignment(horizontal=horizontal, vertical={"top": "top", "middle": "center", "bottom": "bottom"}[element.get("vAlign", "top")], wrap_text=True,
+                                   text_rotation=EXCEL_ROTATION.get(element.get("rotation", "None"), 0))
+        if element["backColor"] and not element.get("transparent"):
             cell.fill = PatternFill("solid", start_color=element["backColor"].lstrip("#"), end_color=element["backColor"].lstrip("#"))
         if element["borderWidth"]:
             side = Side(style="thin", color=(element["borderColor"] or "#000000").lstrip("#"))

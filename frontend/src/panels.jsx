@@ -107,7 +107,7 @@ export function ServerPanel({ report, onOpenFromServer, notify, refreshKey, onCh
   };
   const removeReport = async (item) => {
     if (!window.confirm(`Remove '${item.title}' from the server? Your workspace copy is kept and can be published again.`)) return;
-    try { await api.deleteReport(item.id); await load(); onChanged?.(); notify('Report removed from the server', 'ok'); } catch (error) { notify(error.status === 403 ? 'Removing a report from the server needs the admin token' : error.message, 'error'); }
+    try { await api.deleteReport(item.id, item.folder); await load(); onChanged?.(); notify('Report removed from the server', 'ok'); } catch (error) { notify(error.status === 403 ? 'Removing a report from the server needs the admin token' : error.message, 'error'); }
   };
   const test = async (id) => {
     setStatus((s) => ({ ...s, [id]: { state: 'busy', text: 'Testing…' } }));
@@ -150,7 +150,7 @@ export function ServerPanel({ report, onOpenFromServer, notify, refreshKey, onCh
             {subfolders.map((child) => folderNode(child, depth + 1))}
             {folderAdapters.map((a) => adapterRow(a, depth + 1))}
             {folderReports.map((item) => (
-              <li key={item.id} className={`tree-row report ${report.id === item.id && !report.isNew ? 'active' : ''}`} style={{ paddingLeft: 6 + (depth + 1) * 14 }} onClick={() => onOpenFromServer(item)} onContextMenu={reportMenu(item)} title={`Published: ${item.title} — /generate/${item.id}.pdf. Click to open it in your workspace.`}>
+              <li key={item.id} className={`tree-row report ${report.id === item.id && report.folder === item.folder && !report.isNew ? 'active' : ''}`} style={{ paddingLeft: 6 + (depth + 1) * 14 }} onClick={() => onOpenFromServer(item)} onContextMenu={reportMenu(item)} title={`Published: ${item.title} — /generate/${item.id}.pdf. Click to open it in your workspace.`}>
                 <span className="node-label">🌐 {item.title}</span>
                 <button className="icon" title="Remove from the server (admin)" onClick={(e) => { e.stopPropagation(); removeReport(item); }}>✕</button>
               </li>
@@ -243,7 +243,7 @@ export function WorkspacePanel({ report, onOpen, onNew, notify, refreshKey, onCh
   const removeReport = async (item) => {
     const note = item.onServer ? ' The published copy stays on the server.' : ' It was never published, so this removes it completely.';
     if (!window.confirm(`Delete '${item.title}' from your workspace?${note}`)) return;
-    try { await api.deleteWorkspace(item.id); await load(); onChanged?.(); notify('Removed from the workspace', 'ok'); } catch (error) { notify(error.message, 'error'); }
+    try { await api.deleteWorkspace(item.id, item.folder); await load(); onChanged?.(); notify('Removed from the workspace', 'ok'); } catch (error) { notify(error.message, 'error'); }
   };
 
   const folderNode = (path, depth) => {
@@ -268,7 +268,7 @@ export function WorkspacePanel({ report, onOpen, onNew, notify, refreshKey, onCh
             {items.map((item) => {
               const s = publishState(item);
               return (
-                <li key={item.id} className={`tree-row report ${report.id === item.id && !report.isNew ? 'active' : ''}`} style={{ paddingLeft: 6 + (depth + 1) * 14 }} onClick={() => onOpen(item)} title={`${item.title} (${item.id}) — ${s.label}`}>
+                <li key={item.id} className={`tree-row report ${report.id === item.id && report.folder === item.folder && !report.isNew ? 'active' : ''}`} style={{ paddingLeft: 6 + (depth + 1) * 14 }} onClick={() => onOpen(item)} title={`${item.title} (${item.id}) — ${s.label}`}>
                   <span className="node-label"><span className={`pub ${s.cls}`}>{s.icon}</span> {item.title}</span>
                   <button className="icon" title="Delete from workspace" onClick={(e) => { e.stopPropagation(); removeReport(item); }}>✕</button>
                 </li>

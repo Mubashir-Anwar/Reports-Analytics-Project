@@ -2,7 +2,7 @@
 
 | File | What it is |
 |---|---|
-| `Reporting-Service.postman_collection.json` | 178 requests in 16 folders covering 157 of the 158 endpoints (incl. the public API, embedding and analytics; only the system-database switch is left out, because it changes where the server keeps its data), in an order that runs end to end (create → use → clean up). Every request checks its status; IDs, the API key and links are passed on through environment variables. |
+| `Reporting-Service.postman_collection.json` | 211 requests in 17 folders covering 173 of the 174 endpoints (incl. the public API, embedding and analytics; only the system-database switch is left out, because it changes where the server keeps its data), in an order that runs end to end (create → use → clean up). Every request checks its status; IDs, the API key and links are passed on through environment variables. |
 | `Local.postman_environment.json` | The variables. Fill in `password` and `adminToken`; the rest has local defaults. |
 
 Regenerate both after changing the API: `python tools/postman/build_collection.py`.
@@ -40,3 +40,25 @@ The signed-in user needs the Analytics right plus Designer or Admin (a super adm
 Note: `Health` may answer **503** when the server's default data adapter (`MONGODB_URI`) is not configured;
 the service itself is up. Do not run the collection against production: it creates and deletes reports, a user,
 an API key and a data adapter.
+
+## Many downloads at once (load test)
+
+Folder **12d Many downloads at once** runs the same report as CSV, Excel and PDF:
+
+* **Run now** requests wait for the file in the answer. Run the folder with the Collection Runner and set
+  *Iterations* (e.g. 20) to send that many runs; or press Send repeatedly on one request.
+* **Deliver later** requests send the header `X-Deliver: later`. The server answers at once with `202` and a
+  ticket (`delivery.id`), makes the file in the background — when every place for reports is taken it waits in a
+  queue instead of answering 429/503 — and you collect it from `GET /api/deliveries/{id}/file`
+  (`409` while it is still being made). `GET /api/deliveries` lists your tickets. The header works on
+  `/generate/{id}.{format}`, `/api/v1/reports/{id}/run`, `/api/server/reports/{id}/run`,
+  `/api/admin/reports/{id}/run`, `/api/admin/drafts/run` and `/api/admin/designer/render`.
+  Only the caller that asked (same API key or session) can collect a file; files are kept for 60 minutes
+  (`REPORTING_DELIVERY_KEEP_MINUTES`).
+
+From the command line, many at the same time with timings per format:
+
+```bash
+python tools/load_test.py --key <API key> --report PM_ORDERS --param Branch=KHI --formats csv,xlsx,pdf --hits 20 --concurrency 10
+python tools/load_test.py --key <API key> --report PM_ORDERS --param Branch=KHI --hits 50 --concurrency 25 --later
+```

@@ -110,6 +110,66 @@ def test_dotted_column_reads_nested_document():
     assert core._row_value({}, "Fields.A") is None
 
 
+def test_infer_columns_follows_stages_after_project():
+    pipeline = [
+        {"$match": {"x": 1}},
+        {"$project": {"_id": 0, "DeclineDetail": 1, "Fields": 1, "Status": 1}},
+        {"$lookup": {"from": "users", "localField": "a", "foreignField": "b", "as": "SENAME"}},
+        {"$unwind": "$SENAME"},
+        {"$addFields": {"segment": "$s", "supply.Name": "$n"}},
+        {"$unset": "Status"},
+    ]
+    assert core._infer_pipeline_columns(pipeline) == ["DeclineDetail", "Fields", "SENAME", "segment", "supply"]
+    assert core._infer_pipeline_columns([{"$project": {"_id": 0, "secret": 0}}]) == []     # exclusion: shape unknown
+    assert core._infer_pipeline_columns([{"$group": {"_id": "$a"}}, {"$replaceRoot": {"newRoot": "$x"}}]) == []
+    assert core._infer_pipeline_columns([{"$group": {"_id": "$a", "n": {"$sum": 1}}}]) == ["_id", "n"]
+
+
+NESTED = """<?xml version="1.0"?>
+<jasperReport xmlns="http://jasperreports.sourceforge.net/jasperreports" name="Nested" pageWidth="400" pageHeight="842" columnWidth="360" leftMargin="20" rightMargin="20" topMargin="20" bottomMargin="20">
+ <queryString language="MongoDbQuery"><![CDATA[{"runCommand": {"aggregate": "Cards", "pipeline": [
+   {"$project": {"DeclineDetail": 1, "Status": 1}},
+   {"$lookup": {"from": "Users", "localField": "u", "foreignField": "_id", "as": "SENAME"}}]}}]]></queryString>
+ <field name="DeclineDetail.Comments" class="java.lang.String"/>
+ <field name="SENAME" class="java.lang.Object"/>
+ <field name="Missing" class="java.lang.String"/>
+ <detail><band height="30">
+  <textField><reportElement x="0" y="0" width="100" height="20"/><textFieldExpression><![CDATA[$F{DeclineDetail.Comments}]]></textFieldExpression></textField>
+  <textField><reportElement x="100" y="0" width="100" height="20"/><textFieldExpression><![CDATA[$F{SENAME}]]></textFieldExpression></textField>
+  <textField><reportElement x="200" y="0" width="100" height="20"/><textFieldExpression><![CDATA[$F{Missing}]]></textFieldExpression></textField>
+ </band></detail></jasperReport>"""
+
+
+def test_nested_and_looked_up_fields_are_not_reported_missing():
+    warnings = [w for w in jrxml_import.import_jrxml(NESTED)["warnings"] if "not in the query output" in w]
+    assert warnings == ["Field 'Missing' is not in the query output; it will be empty in the report"]
+
+
+def test_stretch_height_becomes_stretch_with_overflow():
+    xml = NESTED.replace('<textField><reportElement x="0"', '<textField textAdjust="StretchHeight"><reportElement x="0"') \
+                .replace('<textField><reportElement x="100"', '<textField isStretchWithOverflow="true"><reportElement x="100"')
+    out = jrxml_import.import_jrxml(xml)
+    assert not [w for w in out["warnings"] if "Stretch" in w]
+    cells = out["design"]["bands"]["detail"]["elements"]
+    assert [c["stretch"] for c in cells] == [True, True, False]
+    rows = [{"DeclineDetail.Comments": "long text " * 60, "SENAME": "x", "Missing": None}, {"DeclineDetail.Comments": "short"}]
+    engine = dr._Render(out["design"], "t", out["report"]["columns"], rows, {}, 1)
+    band = out["design"]["bands"]["detail"]
+    tall, short = (engine.band_height(band, row) for row in engine.rows)
+    assert tall > band["height"] and short == band["height"]
+
+
+def test_collection_name_with_aggregate_array():
+    """Jaspersoft's other Mongo form: { collectionName: 'x', aggregate: [ ...stages... ] }."""
+    xml = NESTED.replace('{"runCommand": {"aggregate": "Cards", "pipeline": [', '{"collectionName": "Cards", "aggregate": [') \
+                .replace('"as": "SENAME"}}]}}', '"as": "SENAME"}}]}')
+    out = jrxml_import.import_jrxml(xml)
+    assert out["report"]["collection"] == "Cards"
+    assert "$lookup" in out["report"]["querySource"]
+    assert [w for w in out["warnings"] if "not in the query output" in w] == [
+        "Field 'Missing' is not in the query output; it will be empty in the report"]
+
+
 def test_java_expression_renders_in_csv():
     result = jrxml_import.import_jrxml(MINI.replace("'collectionName' : $P{CollectionName}", "'collectionName' : 'Plans-X'"))
     rep, design = result["report"], result["design"]
@@ -167,3 +227,34 @@ def test_table_inside_title_keeps_the_part_below_in_summary():
     rows = [{"Name": "N", "No": i} for i in range(3)]
     pdf = dr.render_design_pdf(out["design"], "L", out["report"]["columns"], rows, {"Code": "X"})
     assert pdf.startswith(b"%PDF")
+
+
+PNG_1PX = ("data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==")
+
+
+def test_image_files_chosen_with_the_jrxml_go_into_the_report():
+    """A .jrxml's pictures sent with it fill the image elements and keep the file name; a missing one is reported."""
+    images = ('<image><reportElement x="0" y="0" width="80" height="30"/>'
+              '<imageExpression><![CDATA[$P{ImgDir} + "repo:/images/Logo.PNG"]]></imageExpression></image>'
+              '<image><reportElement x="100" y="0" width="40" height="30"/>'
+              '<imageExpression><![CDATA["stamp.jpg"]]></imageExpression></image>')
+    xml = NESTED.replace("<detail><band", f"<title><band height=\"40\">{images}</band></title><detail><band", 1)
+    assert xml != NESTED
+    out = jrxml_import.import_jrxml(xml, {"C:/pics/logo.png": PNG_1PX, "bad.png": "data:text/html;base64,PGI+"})
+    logo, stamp = out["design"]["bands"]["title"]["elements"]
+    assert logo["src"] == PNG_1PX and logo["srcName"] == "logo.png" and "Logo.PNG" in logo["reference"]
+    assert not stamp.get("src")
+    assert any("stamp.jpg" in w and "not included" in w for w in out["warnings"])
+    assert not any("logo" in w.lower() for w in out["warnings"])
+    # the resource page lists which file each image uses
+    from types import SimpleNamespace
+    from backend.app.services.repository import design_summary
+    summary = design_summary(SimpleNamespace(), out["design"])
+    by_name = {i["elementId"]: i for i in summary["images"]}
+    assert [i["missing"] for i in summary["images"]] == [False, True]
+    assert by_name[logo["id"]]["name"] == "logo.png" and by_name[logo["id"]]["format"] == "png" and by_name[logo["id"]]["bytes"] > 0
+
+
+def test_clean_resources_drops_non_images():
+    assert jrxml_import.clean_resources({"a.png": PNG_1PX, "x.svg": "data:image/svg+xml;base64,AA==", 3: PNG_1PX}) == {"a.png": PNG_1PX}
+    assert jrxml_import.clean_resources(["a"]) == {}

@@ -1,7 +1,10 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { api } from './api.js';
 import { inferColumns } from './designModel.js';
 import { AdapterOptions, DbLogo } from './panels.jsx';
+import { checkSetup, optionalFilters, placeOf } from './errorHelp.js';
+import CodeArea, { selectLine } from './CodeArea.jsx';
+import FieldsEditor from './FieldsEditor.jsx';
 
 /** Report ID from the report name: letters/digits/_ in capitals, starting with a letter or digit. */
 export function reportIdFrom(title) {
@@ -28,7 +31,7 @@ const useAdapters = (notify, refreshKey) => {
 };
 
 /** Data adapter, collection, query and fields (Jasper: Dataset and Query → Query). */
-export function QueryEditor({ state, dispatch, notify, refreshKey }) {
+export function QueryEditor({ state, dispatch, notify, refreshKey, markLine, markNote }) {
   const { report } = state;
   const [busy, setBusy] = useState(false);
   const [adapters, loadAdapters] = useAdapters(notify, refreshKey);
@@ -61,13 +64,20 @@ export function QueryEditor({ state, dispatch, notify, refreshKey }) {
     set(patch);
   };
 
+  /** New parameters found in the query: Required, unless the report already treats an empty value as "all records". */
+  const askAbout = (added) => {
+    const fresh = added.map((name) => ({ name, type: 'string', label: name, required: true }));
+    const filters = optionalFilters({ ...report, parameters: [...report.parameters, ...fresh] });
+    return fresh.map((p) => (filters[p.name] ? { ...p, required: false } : p));
+  };
+
   const readSqlFields = async () => {
     setBusy(true);
     try {
       const result = await api.queryFields(report.connectionId, report.querySource);
       const knownParams = new Set(report.parameters.map((p) => p.name));
       const added = result.parameterNames.filter((name) => !knownParams.has(name));
-      set({ columns: result.columns, ...(added.length ? { parameters: [...report.parameters, ...added.map((name) => ({ name, type: 'string', label: name, required: true }))] } : {}) });
+      set({ columns: result.columns, ...(added.length ? { parameters: [...report.parameters, ...askAbout(added)] } : {}) });
       notify(`${result.columns.length} fields read from the database${added.length ? ` · new parameter(s) ${added.join(', ')} (type string — change it in Parameters if needed)` : ''}`, 'ok');
     } catch (error) { notify(`The fields could not be read: ${error.message}`, 'error'); } finally { setBusy(false); }
   };
@@ -81,7 +91,7 @@ export function QueryEditor({ state, dispatch, notify, refreshKey }) {
       const knownParams = new Set(report.parameters.map((p) => p.name));
       const added = (result.parameterNames || []).filter((name) => !knownParams.has(name));
       const patch = {};
-      if (added.length) patch.parameters = [...report.parameters, ...added.map((name) => ({ name, type: 'string', label: name, required: true }))];
+      if (added.length) patch.parameters = [...report.parameters, ...askAbout(added)];
       if (result.collection && !report.collection.trim()) patch.collection = result.collection;
       if (columns.length) patch.columns = columns;
       if (Object.keys(patch).length) set(patch);
@@ -100,7 +110,7 @@ export function QueryEditor({ state, dispatch, notify, refreshKey }) {
   return (
     <>
       <div className="form-grid">
-        <label>Data adapter <small>(the database connection this report reads from)</small>
+        <label data-focus="adapter">Data adapter <small>(the database connection this report reads from)</small>
           <span className="inline">
             {selected && <DbLogo type={selected.type || 'mongodb'} />}
             <select value={report.connectionId} onChange={(e) => chooseAdapter(e.target.value)} disabled={adapters === null}>
@@ -114,7 +124,7 @@ export function QueryEditor({ state, dispatch, notify, refreshKey }) {
           {selected && !selected.configured && <small className="err">This adapter has no saved connection URL yet. Add it in the Data Adapters tab or on /admin → Data sources.</small>}
           {adapters !== null && report.connectionId && !known && <small className="err">This adapter ID is not registered on this server. Choose one from the list.</small>}
         </label>
-        <label>Query language
+        <label data-focus="language">Query language
           <select value={report.queryLanguage} onChange={(e) => chooseLanguage(e.target.value)}>
             <optgroup label="MongoDB">
               <option value="mongosh">Mongo Shell</option><option value="aggregation-json">Aggregation JSON</option>
@@ -127,27 +137,26 @@ export function QueryEditor({ state, dispatch, notify, refreshKey }) {
           {kindMismatch && <small className="err">{isSql ? 'This is a SQL query: choose a SQL data adapter above (PostgreSQL, MySQL, SQL Server or Oracle).' : 'This adapter is a SQL database: choose a MongoDB adapter, or Query language SQL.'}</small>}
         </label>
         {!isSql && (
-          <label>Collection name <small>(only the name, e.g. Orders; filled in from a Jasper runCommand query)</small>
+          <label data-focus="collection">Collection name <small>(only the name, e.g. Orders; filled in from a Jasper runCommand query)</small>
             <input value={report.collection} onChange={(e) => set({ collection: e.target.value })} onBlur={(e) => { const clean = cleanCollection(e.target.value); if (clean !== e.target.value) set({ collection: clean }); }} placeholder="Collection name" />
           </label>
         )}
       </div>
       {isSql ? (
-        <label className="block">SQL query <small>(one SELECT; parameters: $P&#123;StartDate&#125;; a list filter: $X&#123;IN, branch, Branches&#125; — an empty list = no filter)</small>
-          <textarea className="code" rows={12} spellCheck={false} value={report.querySource} onChange={(e) => set({ querySource: e.target.value })} placeholder={'SELECT o.id, o.branch, o.amount, o.placed_on\nFROM orders o\nWHERE o.placed_on BETWEEN $P{StartDate} AND $P{EndDate}\n  AND $X{IN, o.branch, Branches}\nORDER BY o.placed_on'} />
-        </label>
+        <div className="block query-block">SQL query <small>(one SELECT; parameters: $P&#123;StartDate&#125;; a list filter: $X&#123;IN, branch, Branches&#125; — an empty list = no filter)</small>
+          <CodeArea focusName="query" markLine={markLine} markNote={markNote} rows={14} value={report.querySource} onChange={(e) => set({ querySource: e.target.value })} placeholder={'SELECT o.id, o.branch, o.amount, o.placed_on\nFROM orders o\nWHERE o.placed_on BETWEEN $P{StartDate} AND $P{EndDate}\n  AND $X{IN, o.branch, Branches}\nORDER BY o.placed_on'} />
+        </div>
       ) : (
-        <label className="block">Query <small>(parameters: $P&#123;StartDate&#125;; db.collection.aggregate([...]) or a Jaspersoft Studio &#123;"runCommand": &#123;"aggregate": …, "pipeline": [...]&#125;&#125; query)</small>
-          <textarea className="code" rows={12} spellCheck={false} value={report.querySource} onChange={(e) => set({ querySource: e.target.value })} placeholder={'db.getCollection("Orders").aggregate([\n  {"$match": {"Date": {"$gte": $P{StartDate}, "$lte": $P{EndDate}}}},\n  {"$project": {"Identifier": 1, "Branch": 1, "Amount": 1}}\n])'} />
-        </label>
+        <div className="block query-block">Query <small>(parameters: $P&#123;StartDate&#125;; db.collection.aggregate([...]) or a Jaspersoft Studio &#123;"runCommand": &#123;"aggregate": …, "pipeline": [...]&#125;&#125; query)</small>
+          <CodeArea focusName="query" markLine={markLine} markNote={markNote} rows={14} value={report.querySource} onChange={(e) => set({ querySource: e.target.value })} placeholder={'db.getCollection("Orders").aggregate([\n  {"$match": {"Date": {"$gte": $P{StartDate}, "$lte": $P{EndDate}}}},\n  {"$project": {"Identifier": 1, "Branch": 1, "Amount": 1}}\n])'} />
+        </div>
       )}
       <div className="row">
         <button className="btn primary" onClick={isSql ? readSqlFields : detect} disabled={busy || !report.querySource.trim() || (isSql && !report.connectionId)}>Read fields</button>
         <span className="muted">{isSql ? 'Asks the database for the columns (LIMIT 0): no rows are read, nothing is changed.' : 'The query is only parsed here, not executed.'}</span>
       </div>
-      <label className="block">Fields <small>— if reading fails, type them separated by commas</small>
-        <input value={report.columns.join(', ')} onChange={(e) => set({ columns: e.target.value.split(',').map((s) => s.trim()).filter(Boolean) })} />
-      </label>
+      <FieldsEditor columns={report.columns} design={state.design} calculated={(state.design?.calculatedFields || []).map((c) => c.name)}
+        onChange={(columns) => set({ columns })} />
     </>
   );
 }
@@ -195,7 +204,7 @@ export function ParametersEditor({ state, dispatch }) {
         <tbody>
           {report.parameters.map((p, i) => (
             // eslint-disable-next-line react/no-array-index-key -- a name can be edited, the position is the identity
-            <tr key={i}>
+            <tr key={i} data-focus={`param:${p.name}`}>
               <td><input value={p.name} onChange={(e) => patchParam(i, { name: e.target.value.replace(/[^A-Za-z0-9_]/g, '') })} /></td>
               <td><select value={p.type} onChange={(e) => patchParam(i, { type: e.target.value })}>{['date', 'string', 'integer', 'number', 'boolean'].map((t) => <option key={t}>{t}</option>)}</select></td>
               <td><input value={p.label || ''} onChange={(e) => patchParam(i, { label: e.target.value })} /></td>
@@ -219,7 +228,41 @@ export function ParametersEditor({ state, dispatch }) {
   );
 }
 
-export default function SetupForm({ state, dispatch, notify, onTemplates, refreshKey }) {
+/** Scroll to the place an error points to and highlight it: a query line is selected, a field is selected in Fields. */
+function useFocusPlace(root, focus) {
+  useEffect(() => {
+    if (!focus || !root.current) return undefined;
+    const box = root.current;
+    const esc = (v) => (window.CSS?.escape ? window.CSS.escape(v) : String(v).replace(/"/g, '\\"'));  // eslint-disable-line no-useless-escape
+    const element = (focus.target === 'parameters' && focus.name && box.querySelector(`[data-focus="param:${esc(focus.name)}"]`))
+      || box.querySelector(`[data-focus="${focus.target}"]`);
+    if (!element) return undefined;
+    const timer = setTimeout(() => {
+      element.scrollIntoView({ block: 'center', behavior: 'smooth' });
+      element.classList.add('focus-flash');
+      if (focus.target === 'query' && element.querySelector('textarea')) {
+        selectLine(element.querySelector('textarea'), focus.line || 1);
+      } else if (focus.target === 'fields') {
+        const chip = focus.name && [...element.querySelectorAll('[data-field]')].find((n) => n.dataset.field === focus.name);
+        if (chip) {
+          chip.closest('details')?.setAttribute('open', '');
+          chip.scrollIntoView({ block: 'center' });
+          chip.classList.add('focus-flash');
+          setTimeout(() => chip.classList.remove('focus-flash'), 4200);
+        } else element.querySelector('.fe-add input')?.focus({ preventScroll: true });
+      } else {
+        element.querySelector('input, select, textarea')?.focus({ preventScroll: true });
+      }
+    }, 60);
+    const off = setTimeout(() => element.classList.remove('focus-flash'), 4200);
+    return () => { clearTimeout(timer); clearTimeout(off); element.classList.remove('focus-flash'); };
+  }, [focus?.nonce]); // eslint-disable-line react-hooks/exhaustive-deps
+}
+
+export default function SetupForm({ state, dispatch, notify, onTemplates, refreshKey, focus, onFocus, onClearFocus }) {
+  const root = useRef(null);
+  useFocusPlace(root, focus);
+  const problems = checkSetup(state.report, state.design);
   const { report } = state;
   const set = (patch) => dispatch({ type: 'REPORT', patch });
   const [folders, setFolders] = useState([]);
@@ -228,8 +271,27 @@ export default function SetupForm({ state, dispatch, notify, onTemplates, refres
   const auto = report.isNew && !report.idManual;
 
   return (
-    <div className="setup">
-      <section className="card">
+    <div className="setup" ref={root}>
+      {focus?.note && (
+        <div className="fix-note" role="status">
+          <p><b>Fix here:</b> {placeOf(focus)}<br />{focus.note}</p>
+          <button type="button" className="icon" aria-label="Close" onClick={onClearFocus}>✕</button>
+        </div>
+      )}
+      {problems.length > 0 && (
+        <section className={`card setup-checks ${problems.some((p) => p.level === 'error') ? '' : 'clean'}`}>
+          <h3>Before you run: {problems.length} thing{problems.length > 1 ? 's' : ''} to check</h3>
+          <ul>
+            {problems.map((p) => (
+              <li key={`${p.text}-${p.place}`} className={p.level}>
+                <div><span>{p.text}</span><small>{p.fix} · {p.place}</small></div>
+                {p.focus && onFocus && <button type="button" className="btn sm" onClick={() => onFocus({ ...p.focus, note: `${p.text}. ${p.fix}` })}>Go there</button>}
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
+      <section className="card" data-focus="details">
         <h3><span className="step">1</span> Report details</h3>
         <div className="form-grid">
           <label>Report name<input value={report.title} onChange={(e) => set({ title: e.target.value, ...(auto ? { id: reportIdFrom(e.target.value) } : {}) })} placeholder="e.g. Branch wise amount report" /></label>
@@ -261,10 +323,11 @@ export default function SetupForm({ state, dispatch, notify, onTemplates, refres
 
       <section className="card">
         <h3><span className="step">2</span> Data adapter and query</h3>
-        <QueryEditor state={state} dispatch={dispatch} notify={notify} refreshKey={refreshKey} />
+        <QueryEditor state={state} dispatch={dispatch} notify={notify} refreshKey={refreshKey}
+          markLine={focus?.target === 'query' ? focus.line : undefined} markNote={focus?.note} markFixed={Boolean(focus?.fixed)} />
       </section>
 
-      <section className="card">
+      <section className="card" data-focus="parameters">
         <h3><span className="step">3</span> Parameters</h3>
         <ParametersEditor state={state} dispatch={dispatch} />
       </section>

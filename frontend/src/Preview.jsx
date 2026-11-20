@@ -7,17 +7,6 @@ const today = () => new Date().toISOString().slice(0, 10);
 const EXPORTS = [['pdf', 'PDF', '📄'], ['xlsx', 'Excel', '📊'], ['csv', 'CSV', '🧾']];
 const LIMITS = [['20', 'First 20 records'], ['all', 'All records']];
 
-function saveBlob(blob, name) {
-  const url = URL.createObjectURL(blob);
-  const link = document.createElement('a');
-  link.href = url;
-  link.download = name;
-  document.body.appendChild(link);
-  link.click();
-  link.remove();
-  window.setTimeout(() => URL.revokeObjectURL(url), 30_000);
-}
-
 /**
  * Like Jaspersoft Studio's Preview: a toolbar with the Data Adapter and the green Run button, the
  * Input Parameters panel on the left, the filled report in the viewer, and export buttons (PDF / Excel / CSV).
@@ -64,7 +53,7 @@ export default function Preview({ state, notify }) {
       let blob;
       if (limit === '20') {
         const data = await api.draftPreview(reportPayload(state), parameters, adapter);
-        runInfo = { mode: 'render', body: { design, columns: data.columns, rows: data.rows, parameters, title: report.title, reportId: report.id, connectionId: adapter }, text: `${adapterName} · first ${data.rows.length} of ${data.rowCount} records` };
+        runInfo = { mode: 'render', body: { design, columns: data.columns, rows: data.rows, parameters, title: report.title, reportId: report.id, folder: report.folder, connectionId: adapter }, text: `${adapterName} · first ${data.rows.length} of ${data.rowCount} records` };
         blob = await api.renderFile({ ...runInfo.body, format: 'pdf' });
       } else {
         runInfo = { mode: 'run', definition: reportPayload(state), parameters, connectionId: adapter, text: `${adapterName} · all records` };
@@ -90,11 +79,12 @@ export default function Preview({ state, notify }) {
     setBusy(`export-${format}`);
     try {
       const { run: r } = view;
-      const blob = r.mode === 'render'
-        ? await api.renderFile({ ...r.body, format })
-        : await api.draftRun(r.definition, { parameters: r.parameters, connectionId: r.connectionId, format });
-      saveBlob(blob, `${report.id || 'report'}.${format}`);
-      notify(`Exported ${report.id || 'report'}.${format}`, 'ok');
+      // made on the server in the background: the file is saved when ready, even if you go to another page
+      const name = `${report.id || 'report'}.${format}`;
+      const { queued } = r.mode === 'render'
+        ? await api.renderFileLater({ ...r.body, format }, name)
+        : await api.draftRunLater(r.definition, { parameters: r.parameters, connectionId: r.connectionId, format });
+      notify(queued ? `${name} is being made on the server — it downloads by itself when ready (you can keep working)` : `Exported ${name}`, 'ok');
     } catch (error) {
       notify(`Export failed: ${error.message}`, 'error');
     } finally { setBusy(''); }

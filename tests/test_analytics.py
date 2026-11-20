@@ -381,3 +381,135 @@ def test_admin_controls_analytics(bi):
     assert gone["dashboardsAffected"] == ["Sales"] and store.dataset(branches) is None
     events = [e["action"] for e in bi.get("/api/admin/audit-events?limit=50").json()["events"]]
     assert {"analytics.dashboard.owner_changed", "analytics.files.cleaned", "analytics.dataset.deleted"} <= set(events)
+
+
+def run_q(client, text, language="dax"):
+    response = client.post("/api/analytics/queries/run", json={"language": language, "text": text})
+    assert response.status_code == 200, response.text
+    return response.json()
+
+
+def test_dax_and_sql_queries_run_and_are_saved(bi):
+    make_dataset(bi, "Orders", "orders")
+    whole = run_q(bi, "EVALUATE 'Orders'")
+    assert whole["rowCount"] == 4 and "Amount" in [c["name"] for c in whole["columns"]]
+    by_branch = run_q(bi, """EVALUATE SUMMARIZECOLUMNS('Orders'[Branch], "Total", SUM('Orders'[Amount]), "Orders", COUNTROWS('Orders'))
+                             ORDER BY [Total] DESC""")
+    assert [c["name"] for c in by_branch["columns"]] == ["Branch", "Total", "Orders"]
+    assert by_branch["rows"] == [["KHI", 200, 1], ["LHR", 150.5, 2], ["ISB", 25, 1]]
+    filtered = run_q(bi, "EVALUATE FILTER('Orders', 'Orders'[Branch] IN {\"LHR\", \"ISB\"} && 'Orders'[Amount] >= 50)")
+    assert filtered["rowCount"] == 2
+    top = run_q(bi, "EVALUATE TOPN(1, 'Orders', 'Orders'[Amount], DESC)")
+    assert top["rows"][0][[c["name"] for c in top["columns"]].index("Branch")] == "KHI"
+    totals = run_q(bi, """EVALUATE ROW("All", SUM(Orders[Amount]), "LHR", CALCULATE(SUM(Orders[Amount]), Orders[Branch] = "LHR"),
+                                    "Share", DIVIDE(CALCULATE(SUM(Orders[Amount]), Orders[Branch] = "LHR"), SUM(Orders[Amount])))""")
+    assert totals["rows"][0][:2] == [375.5, 150.5] and round(totals["rows"][0][2], 3) == 0.401
+    gold = run_q(bi, """EVALUATE SUMMARIZECOLUMNS('Orders'[Branch], FILTER('Orders', 'Orders'[customer.tier] = "gold"), "N", COUNTROWS('Orders'))
+                        ORDER BY 'Orders'[Branch]""")
+    assert gold["rows"] == [["KHI", 1], ["LHR", 1]] and "WHERE" in gold["sql"]
+    sql = run_q(bi, 'SELECT Branch, SUM(Amount) AS total FROM "Orders" GROUP BY Branch ORDER BY total', "sql")
+    assert sql["rows"][0] == ["ISB", 25]
+    for text, language, word in (("EVALUATE 'Nope'", "dax", "no dataset called"),
+                                 ("EVALUATE SUMMARIZECOLUMNS('Orders'[Branch], \"x\", FOO('Orders'[Amount]))", "dax", "FOO"),
+                                 ("DROP TABLE x", "sql", "only reading"),
+                                 ("SELECT 1; SELECT 2", "sql", "one statement"),
+                                 ("SELECT * FROM read_csv('C:/Windows/win.ini')", "sql", "Only the datasets"),
+                                 ("SELECT * FROM 'C:/Windows/win.ini'", "sql", "could not run")):
+        refused = bi.post("/api/analytics/queries/run", json={"language": language, "text": text})
+        assert refused.status_code == 422 and word in refused.json()["detail"], (text, refused.text)
+    saved = bi.post("/api/analytics/queries", json={"name": "By branch", "language": "dax",
+                                                     "text": "EVALUATE SUMMARIZECOLUMNS('Orders'[Branch], \"T\", SUM('Orders'[Amount]))"})
+    assert saved.status_code == 200, saved.text
+    qid = saved.json()["query"]["id"]
+    assert [q["name"] for q in bi.get("/api/analytics/queries").json()["queries"]] == ["By branch"]
+    assert bi.put(f"/api/analytics/queries/{qid}", json={"name": "Branch totals"}).json()["query"]["name"] == "Branch totals"
+    make_user(bi, "viv", ["analytics"])                    # a viewer runs saved queries, but does not write them
+    sign_in(bi, "viv")
+    assert bi.post(f"/api/analytics/queries/{qid}/run", json={}).json()["rowCount"] == 3
+    assert bi.post("/api/analytics/queries/run", json={"text": "EVALUATE 'Orders'"}).status_code == 403
+    assert bi.delete(f"/api/analytics/queries/{qid}").status_code == 403
+    sign_in(bi, "maya")
+    assert bi.delete(f"/api/analytics/queries/{qid}").json()["deleted"] == qid
+    assert bi.get(f"/api/analytics/queries/{qid}").status_code == 404
+
+
+def test_database_queries_mongo_shell_json_and_python_run_and_are_saved(bi):
+    """language "source": a read-only MongoDB pipeline (any designer style) run on the data adapter itself."""
+    styles = {
+        "mongosh": 'db.getCollection("orders").aggregate([ { $match: { Branch: "LHR" } } ])',
+        "aggregation-json": '[{"$match": {"Branch": "LHR"}}]',
+        "python": 'pipeline = [{"$match": {"Branch": "LHR"}}]',
+    }
+    for dialect, text in styles.items():
+        ran = bi.post("/api/analytics/queries/run", json={"language": "source", "connectionId": "default",
+                                                           "queryLanguage": dialect, "collection": "orders", "text": text})
+        assert ran.status_code == 200, (dialect, ran.text)
+        body = ran.json()
+        assert body["rowCount"] == 4 and body["queryLanguage"] == dialect   # the fake source ignores the $match
+        assert {"name": "Amount", "type": "number"} in body["columns"]
+    writes = bi.post("/api/analytics/queries/run", json={"language": "source", "connectionId": "default", "queryLanguage": "aggregation-json",
+                                                          "collection": "orders", "text": '[{"$out": "stolen"}]'})
+    assert writes.status_code == 422 and "$out" in writes.json()["detail"]
+    broken = bi.post("/api/analytics/queries/run", json={"language": "source", "connectionId": "default", "queryLanguage": "mongosh",
+                                                          "collection": "orders", "text": '[ { "$match": { "a": 1 } } { "$limit": 5 } ]'})
+    assert broken.status_code == 422 and "query line 1" in broken.json()["detail"]
+
+    saved = bi.post("/api/analytics/queries", json={"name": "LHR orders", "language": "source", "connectionId": "default",
+                                                     "queryLanguage": "python", "collection": "orders", "text": styles["python"]})
+    assert saved.status_code == 200, saved.text
+    item = saved.json()["query"]
+    assert (item["language"], item["queryLanguage"], item["collection"]) == ("source", "python", "orders")
+    again = bi.get(f"/api/analytics/queries/{item['id']}").json()["query"]
+    assert again["connectionId"] == "default" and again["text"] == styles["python"]
+    assert bi.post(f"/api/analytics/queries/{item['id']}/run", json={}).json()["rowCount"] == 4
+    make_user(bi, "vic", ["analytics"])                    # a viewer may not read the database directly
+    sign_in(bi, "vic")
+    assert bi.post(f"/api/analytics/queries/{item['id']}/run", json={}).status_code == 403
+    sign_in(bi, "maya")
+    no_adapter = bi.post("/api/analytics/queries", json={"name": "x", "language": "source", "connectionId": "nope",
+                                                          "queryLanguage": "mongosh", "text": "[]"})
+    assert no_adapter.status_code == 422 and "not registered" in no_adapter.json()["detail"]
+
+
+def test_model_check_suggest_update_and_dax_across_related_tables(bi):
+    orders = make_dataset(bi, "Orders", "orders")["id"]
+    branches = make_dataset(bi, "Branches", "branches")["id"]
+    checked = bi.post("/api/analytics/relationships/check", json={"fromDataset": orders, "fromColumn": "Branch",
+                                                                   "toDataset": branches, "toColumn": "Code"})
+    assert checked.status_code == 200, checked.text
+    info = checked.json()
+    assert info["cardinality"] == "many-to-one" and info["fromMatchedPct"] == 100 and info["quality"] == "good"
+    assert info["from"]["distinct"] == 3 and info["to"]["unique"] is True
+    wrong = bi.post("/api/analytics/relationships/check", json={"fromDataset": orders, "fromColumn": "Amount",
+                                                                 "toDataset": branches, "toColumn": "Code"}).json()
+    assert wrong["matchedKeys"] == 0 and wrong["quality"] == "bad" and "do not join" in wrong["advice"][0]
+
+    # DAX before the relationship: a clear message where to fix it
+    lonely = bi.post("/api/analytics/queries/run", json={"language": "dax", "text":
+                     "EVALUATE SUMMARIZECOLUMNS('Branches'[Region], \"Total\", SUM('Orders'[Amount]))"})
+    assert lonely.status_code == 422 and "not related" in lonely.json()["detail"] and "Model" in lonely.json()["detail"]
+
+    rel = bi.post("/api/analytics/relationships", json={"fromDataset": orders, "fromColumn": "Branch", "toDataset": branches,
+                                                         "toColumn": "Code", "cardinality": "many-to-one"}).json()["relationship"]
+    assert rel["cardinality"] == "many-to-one" and rel["active"] is True
+    by_region = run_q(bi, "EVALUATE SUMMARIZECOLUMNS('Branches'[Region], \"Total\", SUM('Orders'[Amount]), \"Rows\", COUNTROWS('Orders')) ORDER BY [Total] DESC")
+    assert [c["name"] for c in by_region["columns"]] == ["Region", "Total", "Rows"]
+    assert by_region["rows"] == [["Sindh", 200, 1], ["Punjab", 150.5, 2], ["Capital", 25, 1]]
+    related = run_q(bi, "EVALUATE FILTER('Orders', RELATED('Branches'[Region]) = \"Punjab\")")
+    assert related["rowCount"] == 2 and not any("⟦" in c["name"] for c in related["columns"])
+    added = run_q(bi, "EVALUATE ADDCOLUMNS('Orders', \"Region\", RELATED('Branches'[Region]))")
+    assert "Region" in [c["name"] for c in added["columns"]]
+
+    # inactive: not followed any more
+    changed = bi.put(f"/api/analytics/relationships/{rel['id']}", json={"active": False})
+    assert changed.status_code == 200 and changed.json()["relationship"]["active"] is False
+    assert bi.post("/api/analytics/queries/run", json={"language": "dax", "text": "EVALUATE FILTER('Orders', RELATED('Branches'[Region]) = \"Punjab\")"}).status_code == 422
+    assert bi.put(f"/api/analytics/relationships/{rel['id']}", json={"cardinality": "sideways"}).status_code == 422
+    bi.put(f"/api/analytics/relationships/{rel['id']}", json={"active": True})
+
+    # suggestions: same-named key columns, checked on the data
+    bi.sources["visits"] = [{"Code": "LHR", "Visits": 3}, {"Code": "KHI", "Visits": 1}]
+    make_dataset(bi, "Visits", "visits")
+    suggested = bi.get("/api/analytics/relationships/suggest").json()["suggestions"]
+    pair = [s for s in suggested if {s["fromName"], s["toName"]} == {"Branches", "Visits"}]
+    assert pair and pair[0]["fromColumn"] == "Code" and pair[0]["matchedKeys"] == 2

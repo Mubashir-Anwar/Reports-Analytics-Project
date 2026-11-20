@@ -272,19 +272,19 @@ runForm.addEventListener('submit', async (event) => {
   setRunMessage('Running the report and preparing your download…', 'pending');
   try {
     const url = `/generate/${encodeURIComponent(selectedReport.id)}.${format}?${query.toString()}`;
-    const response = await fetch(url, { headers: accessHeaders({ Accept: 'application/octet-stream, application/json' }), credentials: 'same-origin' });
-    if (response.status === 401) { signInAgain(); throw new Error(ACCESS_MESSAGE); }
-    if (!response.ok) throw new Error(await readError(response));
-    const blob = await response.blob();
-    const objectUrl = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.href = objectUrl;
-    link.download = getDownloadName(response, `${selectedReport.id}.${format}`);
-    document.body.append(link);
-    link.click();
-    link.remove();
-    window.setTimeout(() => URL.revokeObjectURL(objectUrl), 1000);
-    setRunMessage(`${formatLabels[format] || format.toUpperCase()} report generated and downloaded.`, 'success');
+    // Made on the server in the background (X-Deliver: later): the file is saved when it is ready, on whatever
+    // page is open then, so you can run more reports or leave this page meanwhile. The panel shows progress.
+    const label = `${selectedReport.title || selectedReport.id}.${format}`;
+    let queued = false;
+    try {
+      ({ queued } = await window.fxDownloads.later(label, url, { headers: accessHeaders({ Accept: 'application/octet-stream, application/json' }) }));
+    } catch (error) {
+      if (error.status === 401) { signInAgain(); throw new Error(ACCESS_MESSAGE); }
+      throw error;
+    }
+    setRunMessage(queued
+      ? `${formatLabels[format] || format.toUpperCase()} report is being made on the server. It downloads by itself when ready — you can run another report or open other pages meanwhile.`
+      : `${formatLabels[format] || format.toUpperCase()} report generated and downloaded.`, 'success');
   } catch (error) {
     setRunMessage(error.message || 'Report could not be generated. Please try again.', 'error');
   } finally {

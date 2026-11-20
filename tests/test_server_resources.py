@@ -64,19 +64,22 @@ def test_edit_properties_updates_server_and_workspace_copy(client):
 def test_copy_move_download_and_upload(client):
     users(client)
     login(client, "dee", "dee-pass-12")
-    copied = client.post("/api/server/reports/R1/copy", json={"folder": "Archive"})
-    assert copied.status_code == 200 and copied.json()["report"]["id"] == "R1_COPY"
-    assert client.post("/api/server/reports/R1/copy", json={"newId": "R1_COPY"}).status_code == 409
+    copied = client.post("/api/server/reports/R1/copy", json={"folder": "Archive"})          # another folder: the ID stays
+    assert copied.status_code == 200 and copied.json()["report"]["ref"] == "Archive/R1"
+    assert client.get("/api/server/reports/R1").status_code == 409                          # now in two folders: say which
+    same = client.post("/api/server/reports/R1/copy?folder=General", json={"folder": "General"})
+    assert same.status_code == 200 and same.json()["report"]["id"] == "R1_COPY"
+    assert client.post("/api/server/reports/R1/copy?folder=General", json={"newId": "R1_COPY"}).status_code == 409
     moved = client.post("/api/server/reports/R1_COPY/move", json={"folder": "Finance/Old"})
     assert moved.json()["report"]["folder"] == "Finance/Old"
     repository = client.get("/api/server/repository").json()
     assert "Finance/Old" in repository["folders"] and {"R1", "R1_COPY"} <= {r["id"] for r in repository["reports"]}
 
-    file = client.get("/api/server/reports/R1/file")
+    file = client.get("/api/server/reports/R1/file?folder=General")
     assert file.status_code == 200 and file.headers["content-disposition"].endswith('R1.mrd"')
     content = file.text
     assert "mongoReportDefinition" in content
-    assert client.post("/api/server/upload", json={"content": content, "folder": "Imported"}).status_code == 409  # already there
+    assert client.post("/api/server/upload", json={"content": content, "folder": "Archive"}).status_code == 409  # already there
     uploaded = client.post("/api/server/upload", json={"content": content, "folder": "Imported", "newId": "R1_UP"})
     assert uploaded.status_code == 200 and uploaded.json()["report"]["folder"] == "Imported"
     replaced = client.post("/api/server/upload", json={"content": content, "folder": "General", "replace": True})

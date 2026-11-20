@@ -100,12 +100,16 @@ def test_designer_with_run_only_cannot_change(repo):
     assert repo.post("/api/server/folders", json={"path": "Finance/New"}).status_code == 403
     copied = repo.post("/api/server/reports/FIN/copy", json={"folder": "HR"})            # run on the source is enough to copy out
     assert copied.status_code == 200 and copied.json()["report"]["folder"] == "HR"
+    assert copied.json()["report"]["id"] == "FIN"                   # another folder: the copy keeps its ID (HR/FIN)
     mrd = repo.get("/api/server/reports/HR/file")
     assert mrd.status_code == 200
     upload = repo.post("/api/server/upload", json={"fileName": "x.mrd", "content": mrd.text, "folder": "Finance", "newId": "UP1"})
     assert upload.status_code == 403
-    replace = repo.post("/api/server/upload", json={"fileName": "x.mrd", "content": mrd.text, "folder": "HR", "newId": "FIN", "replace": True})
-    assert replace.status_code == 409                               # cannot overwrite a report it may not manage
+    replace = repo.post("/api/server/upload", json={"fileName": "x.mrd", "content": mrd.text, "folder": "Finance", "newId": "FIN", "replace": True})
+    assert replace.status_code == 403                               # cannot overwrite Finance/FIN, which it may not manage
+    own = repo.post("/api/server/upload", json={"fileName": "x.mrd", "content": mrd.text, "folder": "HR", "newId": "FIN", "replace": True})
+    assert own.status_code == 200                                   # HR/FIN is its own copy; Finance/FIN is untouched
+    assert repo.get("/api/server/reports/FIN?folder=Finance").json()["folder"] == "Finance"
 
 
 def test_user_rule_wins_over_role_rule_and_nearest_folder_wins(repo):

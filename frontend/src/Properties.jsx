@@ -6,10 +6,93 @@ import {
 import { selectedIds } from './arrange.js';
 import { CrosstabProps, DatasetProps, ListProps, NoteProps, SubreportProps, TableProps } from './ComponentProps.jsx';
 import { componentFields } from './DatasetsEditor.jsx';
+import PatternDialog, { patternSample } from './PatternDialog.jsx';
 
 /** Properties every element type has: with a multi-selection they are applied to all selected elements. */
 const COMMON_KEYS = new Set(['x', 'y', 'height', 'color', 'backColor', 'borderColor', 'borderWidth', 'lineStyle', 'borders', 'printWhenExpression',
-  'fontSize', 'fontName', 'bold', 'italic', 'underline', 'align', 'vAlign', 'padding', 'markup', 'stretch', 'locked']);
+  'fontSize', 'fontName', 'bold', 'italic', 'underline', 'align', 'vAlign', 'padding', 'markup', 'stretch', 'locked',
+  'positionType', 'stretchType', 'transparent', 'printRepeatedValues', 'removeLineWhenBlank', 'printInFirstWholeBand',
+  'printWhenDetailOverflows', 'printWhenGroupChanges', 'textAdjust', 'rotation', 'lineSpacing', 'lineSpacingSize',
+  'firstLineIndent', 'leftIndent', 'rightIndent', 'spacingBefore', 'spacingAfter', 'tabStopWidth']);
+
+/** Jaspersoft Studio → Appearance: Position Type and Stretch Type ("" = how this designer always worked). */
+const POSITION_TYPES = [['', 'Automatic (moves down below a growing text)'], ['Float', 'Float'], ['FixRelativeToTop', 'Fix Relative To Top'], ['FixRelativeToBottom', 'Fix Relative To Bottom']];
+const STRETCH_TYPES = [['', 'Automatic (grows with a text on its line)'], ['NoStretch', 'No Stretch'], ['RelativeToTallestObject', 'Relative To Tallest Object'],
+  ['RelativeToBandHeight', 'Relative To Band Height'], ['ContainerHeight', 'Container Height'], ['ContainerBottom', 'Container Bottom']];
+const TEXT_ADJUSTS = [['CutText', 'Cut Text'], ['StretchHeight', 'Stretch Height'], ['ScaleFont', 'Scale Font']];
+const LINE_SPACINGS = [['Single', 'Single'], ['1_1_2', '1.5 Lines'], ['Double', 'Double'], ['AtLeast', 'At Least'], ['Fixed', 'Fixed'], ['Proportional', 'Proportional']];
+const ROTATIONS = [['None', 'Abc', 'None'], ['Left', '⟲', 'Left (reads upwards)'], ['Right', '⟳', 'Right (reads downwards)'], ['UpsideDown', '⇅', 'Upside down']];
+
+/** A row of toggle buttons (text alignment, rotation). */
+function Toggles({ value, options, onChange }) {
+  return (
+    <span className="toggles">
+      {options.map(([id, label, title]) => <button type="button" key={id} title={title || label} className={`btn sm ${value === id ? 'on' : ''}`} onClick={() => onChange(id)}>{label}</button>)}
+    </span>
+  );
+}
+
+/** Text Field / Static Text: Text Adjust, alignment, rotation, font, markup and paragraph (like Jaspersoft Studio). */
+function TextFormat({ element, patch }) {
+  const adjust = element.textAdjust || (element.stretch ? 'StretchHeight' : 'CutText');
+  const spacing = element.lineSpacing || 'Single';
+  return (
+    <>
+      <Row label="Text Adjust">
+        <select value={adjust} onChange={(e) => patch({ textAdjust: e.target.value, stretch: e.target.value === 'StretchHeight' })}>
+          {TEXT_ADJUSTS.map(([id, label]) => <option key={id} value={id}>{label}</option>)}
+        </select>
+      </Row>
+      <p className="hint">{adjust === 'StretchHeight' ? 'Long text makes the box and its band taller, so nothing is cut off.' : adjust === 'ScaleFont' ? 'Long text gets a smaller font until it fits in the box.' : 'Text that does not fit in the box is cut off.'}</p>
+      <div className="prop-grid">
+        <Row label="Horizontal"><Toggles value={element.align} onChange={(align) => patch({ align })} options={[['left', '⇤', 'Left'], ['center', '↔', 'Center'], ['right', '⇥', 'Right'], ['justified', '☰', 'Justified']]} /></Row>
+        <Row label="Vertical"><Toggles value={element.vAlign || 'top'} onChange={(vAlign) => patch({ vAlign })} options={[['top', '⤒', 'Top'], ['middle', '↕', 'Middle'], ['bottom', '⤓', 'Bottom']]} /></Row>
+      </div>
+      <Row label="Rotation"><Toggles value={element.rotation || 'None'} onChange={(rotation) => patch({ rotation })} options={ROTATIONS} /></Row>
+      <div className="prop-section">Font</div>
+      <div className="prop-grid">
+        <Row label="Font name">
+          <select value={element.fontName || 'SansSerif'} onChange={(e) => patch({ fontName: e.target.value })}>
+            {FONT_NAMES.map((name) => <option key={name}>{name}</option>)}
+          </select>
+        </Row>
+        <Row label="Size"><Num value={element.fontSize} min={4} max={96} onChange={(fontSize) => patch({ fontSize })} /></Row>
+      </div>
+      <span className="toggles font-toggles">
+        <button type="button" className={`btn sm ${element.bold ? 'on' : ''}`} title="Bold" onClick={() => patch({ bold: !element.bold })}><b>B</b></button>
+        <button type="button" className={`btn sm ${element.italic ? 'on' : ''}`} title="Italic" onClick={() => patch({ italic: !element.italic })}><i>I</i></button>
+        <button type="button" className={`btn sm ${element.underline ? 'on' : ''}`} title="Underline" onClick={() => patch({ underline: !element.underline })}><u>U</u></button>
+      </span>
+      <Row label="Markup">
+        <select value={element.markup || 'none'} onChange={(e) => patch({ markup: e.target.value })}>
+          {MARKUPS.map(([id, label]) => <option key={id} value={id}>{label}</option>)}
+        </select>
+      </Row>
+      {element.markup && element.markup !== 'none' && (
+        <p className="hint">Formatted text: <code>&lt;b&gt;</code> <code>&lt;i&gt;</code> <code>&lt;u&gt;</code> <code>&lt;br&gt;</code> <code>&lt;font color size face&gt;</code> <code>&lt;span style&gt;</code> <code>&lt;p&gt;</code> <code>&lt;ul&gt;&lt;li&gt;</code>{element.markup === 'styled' ? <> and Jasper <code>&lt;style forecolor isBold size&gt;</code></> : null}. Excel and CSV get the plain text.</p>
+      )}
+      <div className="prop-section">Paragraph</div>
+      <div className="prop-grid">
+        <Row label="Line Spacing">
+          <select value={spacing} onChange={(e) => patch({ lineSpacing: e.target.value })}>
+            {LINE_SPACINGS.map(([id, label]) => <option key={id} value={id}>{label}</option>)}
+          </select>
+        </Row>
+        <Row label={spacing === 'Proportional' ? 'Line Spacing Size (×)' : 'Line Spacing Size (px)'}>
+          <Num value={element.lineSpacingSize ?? 1} min={0} max={500} step={spacing === 'Proportional' ? 0.1 : 1} onChange={(lineSpacingSize) => patch({ lineSpacingSize })} />
+        </Row>
+        <Row label="First Line Indent"><Num value={element.firstLineIndent ?? 0} min={-500} max={500} onChange={(firstLineIndent) => patch({ firstLineIndent })} /></Row>
+        <Row label="Left Indent"><Num value={element.leftIndent ?? 0} min={0} max={500} onChange={(leftIndent) => patch({ leftIndent })} /></Row>
+        <Row label="Right Indent"><Num value={element.rightIndent ?? 0} min={0} max={500} onChange={(rightIndent) => patch({ rightIndent })} /></Row>
+        <Row label="Padding"><Num value={element.padding ?? 2} min={0} max={50} onChange={(padding) => patch({ padding })} /></Row>
+        <Row label="Spacing Before"><Num value={element.spacingBefore ?? 0} min={0} max={500} onChange={(spacingBefore) => patch({ spacingBefore })} /></Row>
+        <Row label="Spacing After"><Num value={element.spacingAfter ?? 0} min={0} max={500} onChange={(spacingAfter) => patch({ spacingAfter })} /></Row>
+        <Row label="Tab Stop Width"><Num value={element.tabStopWidth ?? 40} min={1} max={500} onChange={(tabStopWidth) => patch({ tabStopWidth })} /></Row>
+      </div>
+      {['AtLeast', 'Fixed', 'Proportional'].includes(spacing) ? null : <p className="hint">Line Spacing Size is used by At Least, Fixed and Proportional.</p>}
+    </>
+  );
+}
 
 const clampPage = (value) => Math.round(Math.min(Math.max(Number(value) || PAGE_LIMITS.min, PAGE_LIMITS.min), PAGE_LIMITS.max));
 
@@ -40,6 +123,7 @@ export default function Properties({ state, dispatch, notify, actions, onEditExp
   const { design, report, selection } = state;
   const [shiftColumns, setShiftColumns] = useState(true);
   const [elementTab, setElementTab] = useState('');
+  const [patternOpen, setPatternOpen] = useState(false);
   const design$ = (update, key) => dispatch({ type: 'DESIGN', update, key });
 
   /* ---------- element (tabs like Jaspersoft Studio's Properties view) ---------- */
@@ -64,14 +148,34 @@ export default function Properties({ state, dispatch, notify, actions, onEditExp
     const upload = (file) => {
       if (!file) return;
       if (file.size > 2_400_000) { notify('The image must be smaller than 2.4 MB', 'error'); return; }
+      if (!['image/png', 'image/jpeg'].includes(file.type)) { notify('Use a PNG or JPEG picture', 'error'); return; }
       const reader = new FileReader();
-      reader.onload = () => patch({ src: String(reader.result) });
+      // the file name is kept with the picture: the server's resource page lists it
+      reader.onload = () => patch({ src: String(reader.result), srcName: file.name, srcUrl: '' });
       reader.readAsDataURL(file);
+    };
+    /** From URL: the browser downloads the picture once and stores it in the report (the URL is kept as its origin). */
+    const fromUrl = async (address) => {
+      const url = String(address || '').trim();
+      if (!/^https?:\/\//i.test(url)) { notify('Give a web address that starts with http:// or https://', 'error'); return; }
+      try {
+        const response = await fetch(url, { mode: 'cors', credentials: 'omit' });
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        const blob = await response.blob();
+        if (!['image/png', 'image/jpeg'].includes(blob.type)) { notify(`That address gives ${blob.type || 'an unknown type'}, not a PNG or JPEG picture`, 'error'); return; }
+        if (blob.size > 2_400_000) { notify('The image must be smaller than 2.4 MB', 'error'); return; }
+        const name = decodeURIComponent(new URL(url).pathname.split('/').pop() || '') || 'image';
+        const data = await new Promise((resolve, reject) => { const r = new FileReader(); r.onload = () => resolve(String(r.result)); r.onerror = reject; r.readAsDataURL(blob); });
+        patch({ src: data, srcName: name, srcUrl: url });
+        notify(`Picture ${name} stored in the report (from ${new URL(url).host})`, 'ok');
+      } catch {
+        notify('The browser could not download that picture (the site may not allow it). Save it on your computer and choose the file instead.', 'error');
+      }
     };
     const fieldNames = [...report.columns, ...design.calculatedFields.map((c) => c.name)];
     const specificTab = { textField: 'Text Field', staticText: 'Static Text', image: 'Image', chart: 'Chart', barcode: 'Barcode', table: 'Table', crosstab: 'Crosstab', list: 'List', subreport: 'Subreport', note: 'Note' }[element.type];
     const datasetTab = ['table', 'crosstab', 'list'].includes(element.type);
-    const tabs = [['appearance', 'Appearance'], ...(hasFont || ['table', 'crosstab'].includes(element.type) ? [['text', 'Text']] : []), ...(specificTab ? [['specific', specificTab]] : []), ...(datasetTab ? [['dataset', 'Dataset']] : []), ...(boxed && !['table', 'crosstab', 'subreport', 'note'].includes(element.type) ? [['borders', 'Borders']] : []), ['advanced', 'Advanced']];
+    const tabs = [['appearance', 'Appearance'], ...(element.type === 'barcode' || ['table', 'crosstab'].includes(element.type) ? [['text', 'Text']] : []),...(specificTab ? [['specific', specificTab]] : []), ...(datasetTab ? [['dataset', 'Dataset']] : []), ...(boxed && !['table', 'crosstab', 'subreport', 'note'].includes(element.type) ? [['borders', 'Borders']] : []), ['advanced', 'Advanced']];
     const tab = tabs.some(([id]) => id === elementTab) ? elementTab : (specificTab ? 'specific' : 'appearance');
     const borders = element.borders || { top: 0, right: 0, bottom: 0, left: 0 };
     const setSide = (side, value) => {
@@ -92,23 +196,74 @@ export default function Properties({ state, dispatch, notify, actions, onEditExp
 
         {tab === 'appearance' && (
           <>
-            <div className="prop-section">Location and size</div>
+            <div className="prop-section">Location</div>
             <div className="prop-grid">
-              <Row label="X"><Num value={element.x} onChange={(x) => patch({ x })} /></Row>
-              <Row label="Y"><Num value={element.y} onChange={(y) => patch({ y })} /></Row>
-              <Row label="Width"><Num value={element.width} min={1} onChange={(width) => design$((d) => resizeElement(d, bandKey, element.id, { width: Math.max(1, width) }, shiftColumns && !['frame', 'rectangle', 'ellipse', 'image'].includes(element.type)), `el-${element.id}-width`)} /></Row>
-              <Row label="Height"><Num value={element.height} min={0} onChange={(height) => patch({ height })} /></Row>
+              <Row label="X (px)"><Num value={element.x} onChange={(x) => patch({ x })} /></Row>
+              <Row label="Y (px)"><Num value={element.y} onChange={(y) => patch({ y })} /></Row>
+            </div>
+            <Row label="Position Type">
+              <select value={element.positionType || ''} onChange={(e) => patch({ positionType: e.target.value || undefined })}>
+                {POSITION_TYPES.map(([id, label]) => <option key={id} value={id}>{label}</option>)}
+              </select>
+            </Row>
+            <div className="prop-section">Size</div>
+            <div className="prop-grid">
+              <Row label="W (px)"><Num value={element.width} min={1} onChange={(width) => design$((d) => resizeElement(d, bandKey, element.id, { width: Math.max(1, width) }, shiftColumns && !['frame', 'rectangle', 'ellipse', 'image'].includes(element.type)), `el-${element.id}-width`)} /></Row>
+              <Row label="H (px)"><Num value={element.height} min={0} onChange={(height) => patch({ height })} /></Row>
             </div>
             {text && <label className="check-row" title="Like a table column: the same column in the header and the columns to the right move when the width changes. On the canvas, hold Alt while resizing to change only this element."><input type="checkbox" checked={shiftColumns} onChange={(e) => setShiftColumns(e.target.checked)} /> Width change moves the columns to the right</label>}
-            <div className="prop-section">Colors</div>
+            <Row label="Stretch Type">
+              <select value={element.stretchType || ''} onChange={(e) => patch({ stretchType: e.target.value || undefined })}>
+                {STRETCH_TYPES.map(([id, label]) => <option key={id} value={id}>{label}</option>)}
+              </select>
+            </Row>
+            {(element.positionType || element.stretchType) && (
+              <p className="hint">
+                {{ Float: 'Float: moves down when an element above it grows.', FixRelativeToTop: 'Fix Relative To Top: stays where it is, even when an element above grows.', FixRelativeToBottom: 'Fix Relative To Bottom: keeps its distance from the bottom of the band.' }[element.positionType] || ''}
+                {' '}
+                {{ NoStretch: 'No Stretch: keeps its height.', RelativeToTallestObject: 'Relative To Tallest Object: as tall as the tallest growing element beside it.', RelativeToBandHeight: 'Relative To Band Height: grows as much as the band grows.', ContainerHeight: 'Container Height: grows as much as the band grows.', ContainerBottom: 'Container Bottom: reaches down to the bottom of the band.' }[element.stretchType] || ''}
+              </p>
+            )}
+            <div className="prop-section">Color</div>
             <div className="prop-grid">
               {(hasFont || element.type === 'chart') && <Row label={element.type === 'chart' ? 'Series color' : 'Forecolor'}><input type="color" value={element.type === 'chart' && element.color === '#000000' ? '#2563eb' : element.color} onChange={(e) => patch({ color: e.target.value })} /></Row>}
               {boxed && element.type !== 'image' && (
-                <Row label="Backcolor"><span className="inline">
-                  <input type="color" value={element.backColor || '#ffffff'} onChange={(e) => patch({ backColor: e.target.value })} />
-                  <button className="btn sm" onClick={() => patch({ backColor: null })} title="Transparent">none</button></span></Row>
+                <Row label="Backcolor"><input type="color" value={element.backColor || '#ffffff'} onChange={(e) => patch({ backColor: e.target.value, transparent: false })} /></Row>
               )}
             </div>
+            {boxed && element.type !== 'image' && (
+              <label className="check-row" title="Like Jasper's Mode = Transparent: the background colour is not painted">
+                <input type="checkbox" checked={!element.backColor || Boolean(element.transparent)} onChange={(e) => patch(e.target.checked ? { transparent: true } : { transparent: false, backColor: element.backColor || '#ffffff' })} /> Transparent
+              </label>
+            )}
+            {!['break', 'note'].includes(element.type) && (
+              <>
+                <div className="prop-section">Style and Print Details</div>
+                <Row label="Label"><input value={element.label || ''} placeholder="A name for this element in the designer" onChange={(e) => patch({ label: e.target.value })} /></Row>
+                <Row label="Key"><input value={element.key || ''} placeholder="Jasper key (kept in the .jrxml / .mrd)" onChange={(e) => patch({ key: e.target.value })} /></Row>
+                <label className="check-row" title="Off: a value equal to the one printed just before is left out (e.g. a branch name only on its first row)">
+                  <input type="checkbox" checked={element.printRepeatedValues !== false} onChange={(e) => patch({ printRepeatedValues: e.target.checked })} /> Print Repeated Values
+                </label>
+                <label className="check-row" title="When this element is not printed and nothing else is on its line, the line closes up and what is below moves up">
+                  <input type="checkbox" checked={Boolean(element.removeLineWhenBlank)} onChange={(e) => patch({ removeLineWhenBlank: e.target.checked })} /> Remove Line When Blank
+                </label>
+                <label className="check-row" title="With Print Repeated Values off: print the value again on the first row of every new page">
+                  <input type="checkbox" checked={Boolean(element.printInFirstWholeBand)} onChange={(e) => patch({ printInFirstWholeBand: e.target.checked })} /> Print In First Whole Band
+                </label>
+                <div className="prop-section">Print When</div>
+                <label className="check-row" title="Jasper prints it again when a band continues on the next page. Bands here are never split over two pages, so this has no effect yet; it is kept for Jasper files.">
+                  <input type="checkbox" checked={Boolean(element.printWhenDetailOverflows)} onChange={(e) => patch({ printWhenDetailOverflows: e.target.checked })} /> Detail Overflows
+                </label>
+                <Row label="Group Changes">
+                  <select value={element.printWhenGroupChanges || ''} onChange={(e) => patch({ printWhenGroupChanges: e.target.value })} title="With Print Repeated Values off: print the value again when this group starts">
+                    <option value="">—</option>
+                    {design.groups.map((g) => <option key={g.name} value={g.name}>{g.name}</option>)}
+                  </select>
+                </Row>
+                {expressionRow('Print When Expression', 'printWhenExpression', '$F{Amount} > 0')}
+                <p className="hint">Printed only when this is true, e.g. <code>$F&#123;Status&#125;.equals("Approved")</code> or <code>$V&#123;PAGE_NUMBER&#125; == 1</code>. Empty = always.</p>
+              </>
+            )}
             {element.type === 'line' && (
               <>
                 <div className="prop-section">Line</div>
@@ -165,26 +320,38 @@ export default function Properties({ state, dispatch, notify, actions, onEditExp
         )}
 
         {tab === 'specific' && element.type === 'staticText' && (
-          <Row label="Text"><span className="expr-row"><textarea rows={4} value={element.text} onChange={(e) => patch({ text: e.target.value })} /><button type="button" className="btn sm" title="Open the editor (or double-click the element)" onClick={() => onEditExpression(element.id)}>…</button></span></Row>
+          <>
+            <Row label="Text"><span className="expr-row"><textarea rows={4} value={element.text} onChange={(e) => patch({ text: e.target.value })} /><button type="button" className="btn sm" title="Open the editor (or double-click the element)" onClick={() => onEditExpression(element.id)}>…</button></span></Row>
+            <TextFormat element={element} patch={patch} />
+          </>
         )}
         {tab === 'specific' && element.type === 'textField' && (
           <>
             {expressionRow('Expression', 'expression', '$F{Name}  or  =$F{A} * 2')}
+            <div className="prop-grid">
+              <Row label="Evaluation Time">
+                <select value={element.evaluationTime || 'Now'} onChange={(e) => patch({ evaluationTime: e.target.value })} title="Report / Auto: $V{…} gets its value at the end of the report — for “Page X of Y”, grand totals in the title or a percentage of the total">
+                  <option value="Now">Now</option>
+                  <option value="Report">Report</option>
+                  <option value="Auto">Auto</option>
+                </select>
+              </Row>
+              <Row label="Blank When NULL"><input type="checkbox" checked={element.blankWhenNull} onChange={(e) => patch({ blankWhenNull: e.target.checked })} /></Row>
+            </div>
             <Row label="Pattern">
-              <span className="inline">
-                <input list="pattern-choices" value={element.pattern} placeholder="#,##0.00  |  dd/MM/yyyy" onChange={(e) => patch({ pattern: e.target.value })} />
+              <span className="expr-row">
+                <input list="pattern-choices" value={element.pattern || ''} placeholder="#,##0.00  |  dd/MM/yyyy" spellCheck={false} onChange={(e) => patch({ pattern: e.target.value })} />
                 <datalist id="pattern-choices">{PATTERNS.map(([value, label]) => <option key={value} value={value}>{label}</option>)}</datalist>
+                <button type="button" className="btn sm" title="Format Pattern: Number, Percentage, Currency, Scientific, Time, Date" onClick={() => setPatternOpen(true)}>…</button>
               </span>
             </Row>
-            <Row label="Evaluation time">
-              <select value={element.evaluationTime || 'Now'} onChange={(e) => patch({ evaluationTime: e.target.value })}>
-                <option value="Now">Now (while filling)</option>
-                <option value="Report">Report (final values)</option>
-                <option value="Auto">Auto (fields now, variables final)</option>
-              </select>
+            {element.pattern && <p className="hint pattern-preview">Sample: <b>{patternSample(element.pattern)}</b></p>}
+            <Row label="Pattern Expression">
+              <textarea rows={2} spellCheck={false} value={element.patternExpression || ''} placeholder={'$F{Currency}.equals("USD") ? "$ #,##0.00" : "Rs #,##0.00"'} onChange={(e) => patch({ patternExpression: e.target.value })} />
             </Row>
-            <p className="hint">Report / Auto: <code>$V&#123;…&#125;</code> gets its value at the end of the report — use it for “Page X of Y”, grand totals in the title or a percentage of the total.</p>
-            <Row label="Blank when null"><input type="checkbox" checked={element.blankWhenNull} onChange={(e) => patch({ blankWhenNull: e.target.checked })} /></Row>
+            <p className="hint">Pattern Expression gives a pattern per record and wins over Pattern (when it gives one). Use $F, $P, $V and <code>? :</code>.</p>
+            <TextFormat element={element} patch={patch} />
+            {patternOpen && <PatternDialog value={element.pattern} onClose={() => setPatternOpen(false)} onDone={(pattern) => { patch({ pattern }); setPatternOpen(false); }} />}
           </>
         )}
         {tab === 'specific' && element.type === 'barcode' && (
@@ -202,7 +369,18 @@ export default function Properties({ state, dispatch, notify, actions, onEditExp
         {tab === 'specific' && element.type === 'image' && (
           <>
             <Row label="Image (PNG/JPEG)"><input type="file" accept="image/png,image/jpeg" onChange={(e) => upload(e.target.files[0])} /></Row>
-            {element.src && <button className="btn sm" onClick={() => patch({ src: '' })}>Remove picture</button>}
+            <Row label="Or from a web address">
+              <input type="url" placeholder="https://…/logo.png" onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); fromUrl(e.currentTarget.value); } }}
+                onBlur={(e) => { if (e.currentTarget.value.trim() && e.currentTarget.value.trim() !== element.srcUrl) fromUrl(e.currentTarget.value); }} />
+            </Row>
+            {(element.src || element.srcName || element.reference) && (
+              <p className="hint img-origin">
+                {element.src ? <>Stored in the report: <b>{element.srcName || 'picture'}</b> ({Math.round((element.src.length * 3) / 4 / 1024)} KB)</> : <b className="danger-text">Missing picture{element.srcName ? `: ${element.srcName}` : ''} — choose the file above</b>}
+                {element.srcUrl && <> · from <a href={element.srcUrl} target="_blank" rel="noopener noreferrer">{new URL(element.srcUrl).host}</a></>}
+                {element.reference && <> · Jaspersoft expression <code>{element.reference}</code></>}
+              </p>
+            )}
+            {element.src && <button className="btn sm" onClick={() => patch({ src: '', srcUrl: '' })}>Remove picture</button>}
             <p className="hint">Up to 2.4 MB per image, 8 MB per report. The picture keeps its proportions inside the box.</p>
           </>
         )}
@@ -251,8 +429,7 @@ export default function Properties({ state, dispatch, notify, actions, onEditExp
 
         {tab === 'advanced' && (
           <>
-            {expressionRow('Print When expression', 'printWhenExpression', '$F{Amount} > 0')}
-            <p className="hint">Like Jasper: the element is printed only when this is true, e.g. <code>$F&#123;Status&#125;.equals("Approved")</code> or <code>$V&#123;PAGE_NUMBER&#125; == 1</code>. Empty = always.</p>
+            {['break', 'note'].includes(element.type) && expressionRow('Print When expression', 'printWhenExpression', '$F{Amount} > 0')}
             <div className="prop-section">Editing</div>
             <label className="check-row" title="A locked element cannot be moved or resized on the canvas (Ctrl+L). It still prints normally."><input type="checkbox" checked={Boolean(element.locked)} onChange={(e) => patch({ locked: e.target.checked })} /> Locked (cannot be moved or resized)</label>
             <div className="prop-section">Info</div>
@@ -466,13 +643,16 @@ export default function Properties({ state, dispatch, notify, actions, onEditExp
       <>
       <Row label="Excel / CSV layout">
         <select value={page.sheetLayout || 'table'} onChange={(e) => setPage({ sheetLayout: e.target.value })}>
-          <option value="grid">Pixel-perfect like the PDF (Jasper style)</option>
-          <option value="table">Data table (one header row, one row per record)</option>
+          <option value="mixed">Headings pixel-perfect, data as a table (recommended)</option>
+          <option value="grid">Everything pixel-perfect like the PDF (Jasper style)</option>
+          <option value="table">Data table only (headings as plain rows)</option>
         </select>
       </Row>
       <p className="hint">{page.sheetLayout === 'grid'
-        ? 'Excel and CSV get every band in its place: headings, page header, images, lines, details and totals.'
-        : 'Excel gets the Title and Page Header texts on top, then one header row and one row per record. CSV gets only the table.'}</p>
+        ? 'Excel and CSV get every band in its place: headings, page header, images, lines, details and totals — exactly like the PDF.'
+        : page.sheetLayout === 'mixed'
+          ? 'Excel: the Title, Page Header and Column Header look exactly as designed (positions, merged cells, borders, colours, images — e.g. a report-number box on the right). Below them every record is one row in the Detail columns, with a filter on the headings and the top frozen, so the data can be sorted and filtered. CSV gets only the table.'
+          : 'Excel gets the Title and Page Header texts on top (one per row), then one header row and one row per record. CSV gets only the table.'}</p>
       </>
       )}
       <p className="hint">Select an element or band to see its properties here. Zoom: Ctrl +, Ctrl −, Ctrl 0, or Ctrl + mouse wheel.</p>

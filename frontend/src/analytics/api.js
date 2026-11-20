@@ -17,6 +17,9 @@ export const bi = {
   relationships: () => request('/api/analytics/relationships'),
   relate: (body) => request('/api/analytics/relationships', { method: 'POST', body }),
   unrelate: (relId) => request(`/api/analytics/relationships/${id(relId)}`, { method: 'DELETE' }),
+  updateRelationship: (relId, body) => request(`/api/analytics/relationships/${id(relId)}`, { method: 'PUT', body }),
+  checkRelationship: (body) => request('/api/analytics/relationships/check', { method: 'POST', body }),
+  suggestRelationships: () => request('/api/analytics/relationships/suggest'),
   dashboards: () => request('/api/analytics/dashboards'),
   dashboard: (dashId) => request(`/api/analytics/dashboards/${id(dashId)}`),
   createDashboard: (body) => request('/api/analytics/dashboards', { method: 'POST', body }),
@@ -101,3 +104,15 @@ export async function notADashboardFile(file) {
   if (file.size > 2_000_000) return `This file is ${describeBytes(file.size)}: a dashboard file (.mdash) is at most 2 MB, because it holds no data.`;
   return '';
 }
+
+/** Analytics → Queries: DAX or SQL over the datasets, or MongoDB / SQL on a data adapter (live); run and saved. */
+export const queries = {
+  list: () => request('/api/analytics/queries'),
+  get: (queryId) => request(`/api/analytics/queries/${id(queryId)}`),
+  create: (body) => request('/api/analytics/queries', { method: 'POST', body }),
+  save: (queryId, body) => request(`/api/analytics/queries/${id(queryId)}`, { method: 'PUT', body }),
+  remove: (queryId) => request(`/api/analytics/queries/${id(queryId)}`, { method: 'DELETE' }),
+  // { language: 'dax' | 'sql', text } or { language: 'source', queryLanguage, connectionId, collection, text, limit }
+  run: (body) => request('/api/analytics/queries/run', { method: 'POST', body }),
+  runSaved: (queryId) => request(`/api/analytics/queries/${id(queryId)}/run`, { method: 'POST', body: {} }),
+};

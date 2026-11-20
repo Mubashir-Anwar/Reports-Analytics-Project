@@ -94,7 +94,21 @@
   .rb-bar { gap: 4px; padding: 0 6px; }
   .rb-doc small, .rb-quickbar .pub-chip, .rb-publish .lbl { display: none; }
   .rb-doc { max-width: 28vw; }
-  .rb-tabs { margin-left: 0; }
   .rb-tabs button { padding: 0 10px; }
   .rb-body { min-height: 84px; }
 }
+/* phone and tablet: the 12 tabs get a full row of their own (swipe sideways); name and quick buttons stay on the first row */
+@media (max-width: 1024px) {
+  .rb-bar { flex-wrap: wrap; height: auto; padding-top: 4px; row-gap: 2px; }
+  .rb-doc { max-width: none; flex: 1 1 0; }
+  .rb-tabs { order: 3; flex: 1 0 100%; height: 34px; margin: 0 -10px; padding: 0 10px;
+    mask-image: linear-gradient(90deg, #000 calc(100% - 28px), transparent); -webkit-mask-image: linear-gradient(90deg, #000 calc(100% - 28px), transparent); }
+}
+.rb-hint { font-size: 11px; color: var(--muted); padding: 2px 2px 0; }
+
+/* Page Layout: size picker under the big icon, margin boxes; Share: the run link */
+.rb-big select.rb-select { width: 120px; margin-top: 2px; font-size: 11px; }
+.rb-margins { display: grid; grid-template-columns: auto auto; gap: 2px 8px; align-content: center; font-size: 11px; }
+.rb-margins label { display: flex; align-items: center; justify-content: space-between; gap: 4px; }
+.rb-margins .rb-num { width: 46px; }
+.rb-link { font-size: 11px; max-width: 320px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding: 2px 4px; background: var(--bg); border: 1px solid var(--line); border-radius: 4px; }

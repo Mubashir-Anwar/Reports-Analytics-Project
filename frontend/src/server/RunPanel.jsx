@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Notice, downloadBlob } from '../portal/Shell.jsx';
 import { serverApi } from './serverApi.js';
+import { optionalFilters } from '../errorHelp.js';
 
 const today = () => new Date().toISOString().slice(0, 10);
 const FORMAT_LABELS = { pdf: 'PDF', xlsx: 'Excel (.xlsx)', csv: 'CSV' };
@@ -37,6 +38,7 @@ export default function RunPanel({ report, onBackground }) {
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState(null); // { text, kind, url }
   const parameters = report.parameters.filter((p) => !p.computed);
+  const filters = optionalFilters(report);
 
   useEffect(() => {
     setValues(Object.fromEntries(parameters.map((p) => [p.name, initialValue(p)])));
@@ -49,7 +51,7 @@ export default function RunPanel({ report, onBackground }) {
   const background = async () => {
     setBusy(true);
     try {
-      const { run: started } = await serverApi.runInBackground(report.id, chosenValues(), format);
+      const { run: started } = await serverApi.runInBackground(report.ref || report.id, chosenValues(), format);
       setResult({ text: `Started in the background (${started.status}). The file will be under Runs when it is ready.`, kind: 'ok' });
       onBackground?.();
     } catch (error) { setResult({ text: error.message, kind: 'error' }); }
@@ -62,9 +64,14 @@ export default function RunPanel({ report, onBackground }) {
     setResult({ text: 'The report is running on the server…', kind: '' });
     try {
       const chosen = Object.fromEntries(Object.entries(values).filter(([, value]) => value !== ''));
-      const blob = await serverApi.run(report.id, chosen, format);
-      const url = downloadBlob(blob, `${report.id}.${format}`);
-      setResult({ text: `Downloaded ${report.id}.${format}. `, kind: 'ok', url: format === 'pdf' ? url : '' });
+      if (format === 'pdf') {                 // a PDF is shown here too, so this page fetches it
+        const blob = await serverApi.run(report.ref || report.id, chosen, format);
+        const url = downloadBlob(blob, `${report.id}.${format}`);
+        setResult({ text: `Downloaded ${report.id}.${format}. `, kind: 'ok', url });
+      } else {                                // Excel / CSV: made on the server, saved when ready, on any page
+        const { queued } = await serverApi.runLater(report.ref || report.id, chosen, format, `${report.title || report.id}.${format}`);
+        setResult({ text: queued ? `${report.id}.${format} is being made on the server. It downloads by itself when ready — you can run other reports or open other pages meanwhile (see the panel in the bottom corner).` : `Downloaded ${report.id}.${format}.`, kind: 'ok', url: '' });
+      }
     } catch (error) { setResult({ text: error.message, kind: 'error' }); }
     finally { setBusy(false); }
   };
@@ -78,6 +85,7 @@ export default function RunPanel({ report, onBackground }) {
               <span>{p.label || p.name}{p.required ? '' : ' (optional)'}</span>
               <ParameterInput parameter={p} value={values[p.name] ?? ''} onChange={(value) => setValues((v) => ({ ...v, [p.name]: value }))} />
               {p.description && <span className="hint">{p.description}</span>}
+              {p.required && filters[p.name] && <span className="hint warn-text">Empty gives all records in this report, but it is marked Required — untick Required on the report's Parameters tab to leave it empty.</span>}
             </label>
           ))}
         </div>
@@ -90,7 +98,7 @@ export default function RunPanel({ report, onBackground }) {
         <button className="btn" type="button" disabled={busy} onClick={background} title="For big reports: keep working, download the file from Runs later">⟳ Run in background</button>
       </div>
       {result && <Notice message={result}>{result.url && <a href={result.url} target="_blank" rel="noopener noreferrer">Open the PDF in a new tab ↗</a>}</Notice>}
-      <details style={{ marginTop: 12 }}><summary className="muted" style={{ cursor: 'pointer' }}>Report link for websites</summary><p className="muted">Websites call <code>/generate/{report.id}.{format}</code> with a signed link or the X-Report-Token header.</p></details>
+      <details style={{ marginTop: 12 }}><summary className="muted" style={{ cursor: 'pointer' }}>Report link for websites</summary><p className="muted">Websites call <code>/generate/{report.id}.{format}?Folder={report.folder}</code> with a signed link or the X-API-Key header (Folder chooses this report when the same ID is in several folders).</p></details>
     </form>
   );
 }

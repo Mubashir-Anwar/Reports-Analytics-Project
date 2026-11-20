@@ -25,7 +25,7 @@ from backend.app.constants import (
 from backend.app.logs import LOG
 from backend.app.security import api_keys
 from backend.app.security.access import client_address, enabled_areas
-from backend.app.security.shared_state import is_revoked
+from backend.app.security.shared_state import is_revoked, replaced, replaced_and_over
 from backend.app.security.users import (
     bootstrap_login_active,
     derived_role,
@@ -149,12 +149,18 @@ def report_in_scope(ctx: SimpleNamespace, request: Request, definition: Any) -> 
     return ctx.report_level(who, definition) >= permissions.RUN
 
 
-def unknown_report(ctx: SimpleNamespace, request: Request, report_id: str) -> HTTPException:
+def unknown_report(ctx: SimpleNamespace, request: Request, report_id: str, folder: str | None = None) -> HTTPException:
     """404 for a report ID that is not published (or outside the caller's folders), naming the closest IDs the
     caller may run, e.g. "KFS_FAL" -> "Did you mean FAL_KFS?". Only IDs the caller could run anyway are named."""
     import difflib  # noqa: PLC0415
 
-    visible = [rid for rid, item in ctx.reports_by_id.items() if report_in_scope(ctx, request, item)]
+    seen = [item for item in ctx.reports_by_id.values() if report_in_scope(ctx, request, item)]
+    if folder is not None:
+        others = sorted(item.folder for item in seen if item.report_id == report_id)
+        if others:                                   # the ID is there, in other folders the caller may use
+            return HTTPException(status_code=404, detail=f"Report ID '{report_id}' is not in the folder '{folder}'; "
+                                                         f"it is in: {', '.join(others[:5])}")
+    visible = sorted({item.report_id for item in seen})
     wanted = report_id.lower()
     folded = {rid.lower(): rid for rid in visible}
     close = difflib.get_close_matches(wanted, list(folded), n=3, cutoff=0.5)
@@ -231,7 +237,7 @@ def require_json_request(ctx: SimpleNamespace, request: Request) -> None:
 def current_session(ctx: SimpleNamespace, request: Request) -> dict[str, Any] | None:
     """The signed-in user with their rights; role is viewer/designer/admin for folder permissions."""
     body = read_session_cookie(request.cookies.get(SESSION_COOKIE, ""))
-    if body is None or is_revoked(body.get("n")):
+    if body is None or is_revoked(body.get("n")) or replaced_and_over(body.get("n")):
         return None
     if body.get("b"):
         if not bootstrap_login_active():
@@ -272,4 +278,13 @@ def require_session(ctx: SimpleNamespace, request: Request, minimum: str = "view
 
 def session_view(ctx: SimpleNamespace, session: dict[str, Any]) -> dict[str, Any]:
     return {"username": session["username"], "role": session["role"], "bootstrap": session["bootstrap"],
-            "rights": sorted(session["rights"]), "superAdmin": session["superAdmin"]}
+            "rights": sorted(session["rights"]), "superAdmin": session["superAdmin"], "replaced": replaced_notice(session)}
+
+
+def replaced_notice(session: dict[str, Any]) -> dict[str, Any] | None:
+    """{secondsLeft, by} while this browser's session is being replaced by a sign-in somewhere else."""
+    import time  # noqa: PLC0415
+    item = replaced(session.get("nonce"))
+    if not item:
+        return None
+    return {"secondsLeft": max(0, round(item["logoutAt"] - time.time())), "by": item.get("agent", "")}

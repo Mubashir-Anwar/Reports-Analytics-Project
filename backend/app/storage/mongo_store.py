@@ -107,6 +107,9 @@ class _MongoDocuments:
     def append_line(self, key: str, line: str) -> None:
         self.lines_collection.insert_one({"key": _clean_key(key), "line": line.rstrip("\n"), "at": model.now()})
 
+    def delete_lines(self, key: str) -> int:
+        return self.lines_collection.delete_many({"key": _clean_key(key)}).deleted_count
+
     def lines(self, key: str) -> Iterable[str]:
         cursor = self.lines_collection.find({"key": _clean_key(key)}, {"line": 1}).sort("_id", DESCENDING).limit(5000)
         return [doc["line"] for doc in reversed(list(cursor))]

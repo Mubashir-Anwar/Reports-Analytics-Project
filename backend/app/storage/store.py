@@ -126,6 +126,14 @@ class FileStore:
         with os.fdopen(descriptor, "a", encoding="utf-8", newline="\n") as stream:
             stream.write(line.rstrip("\n") + "\n")
 
+    def delete_lines(self, key: str) -> int:
+        """Remove an append-only log (all its lines). Returns how many lines it had (files: 1 when it existed)."""
+        path = self.path(key)
+        if not path.is_file():
+            return 0
+        path.unlink()
+        return 1
+
     def lines(self, key: str) -> Iterable[str]:
         path = self.path(key)
         if not path.is_file():
@@ -252,6 +260,10 @@ class PostgresStore:
 
     def append_line(self, key: str, line: str) -> None:
         self._execute("INSERT INTO reporting_lines (key, line) VALUES (%s, %s)", (_clean_key(key), line.rstrip("\n")))
+
+    def delete_lines(self, key: str) -> int:
+        self._execute("DELETE FROM reporting_lines WHERE key = %s", (_clean_key(key),))
+        return 1
 
     def lines(self, key: str) -> Iterable[str]:
         rows = self._execute("SELECT line FROM (SELECT id, line FROM reporting_lines WHERE key = %s ORDER BY id DESC LIMIT 5000) AS t ORDER BY id",

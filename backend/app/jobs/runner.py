@@ -19,7 +19,7 @@ from fastapi import HTTPException
 
 from backend.app.connectors.errors import MongoReadAccessError
 from backend.app.connectors.mongo_fallback import _row_value
-from backend.app.definitions import validate_parameters
+from backend.app.definitions import AmbiguousReport, validate_parameters
 from backend.app.jobs import mailer, schedule, store
 from backend.app.logs import LOG
 from backend.app.rendering import spool
@@ -113,15 +113,24 @@ class JobRunner:
                 due.append(dict(job))
             if changed:
                 store.save_schedules(schedules)
-        return [self.enqueue(job["reportId"], job["format"], job["parameters"], job["owner"], "scheduled", job) for job in due]
+        return [self.enqueue(job["reportId"], job["format"], job["parameters"], job["owner"], "scheduled", job, job.get("folder"))
+                for job in due]
+
+    def report(self, report_id: str, folder: str | None) -> Any:
+        """The report of a schedule or run: <folder>/<ID>. Older records have no folder: the only report with the ID."""
+        return self.ctx.reports_by_id.find(report_id, folder or None)
 
     # ------------------------------------------------------------- running
     def enqueue(self, report_id: str, output_format: str, parameters: dict[str, str], owner: str, kind: str,
-                job: dict[str, Any] | None = None) -> dict[str, Any]:
-        definition = self.ctx.reports_by_id.get(report_id)
+                job: dict[str, Any] | None = None, folder: str | None = None) -> dict[str, Any]:
+        try:
+            definition = self.report(report_id, folder)
+        except AmbiguousReport:
+            definition = None
         run = {
             "id": schedule.new_id("run"), "jobId": job["id"] if job else "", "jobLabel": job["label"] if job else "",
-            "kind": kind, "reportId": report_id, "title": definition.title if definition else report_id,
+            "kind": kind, "reportId": report_id, "folder": definition.folder if definition else (folder or ""),
+            "title": definition.title if definition else report_id,
             "format": output_format, "parameters": dict(parameters), "owner": owner, "status": "queued", "queuedAt": _iso(_now()),
             "startedAt": "", "finishedAt": "", "rowCount": 0, "error": "", "file": "", "size": 0, "email": "",
         }
@@ -131,6 +140,12 @@ class JobRunner:
             return next((r for r in store.load_runs() if r["id"] == run["id"]), run)
         self.executor.submit(self.execute, run, job)
         return run
+
+    def _quiet_report(self, run: dict[str, Any]) -> Any:
+        try:
+            return self.report(run["reportId"], run.get("folder"))
+        except AmbiguousReport:
+            return None
 
     def execute(self, run: dict[str, Any], job: dict[str, Any] | None = None) -> None:
         ctx = self.ctx
@@ -142,7 +157,10 @@ class JobRunner:
                                  "GeneratedBy": run["owner"]}
         body = b""
         try:
-            definition = ctx.reports_by_id.get(run["reportId"])
+            try:
+                definition = self.report(run["reportId"], run.get("folder"))
+            except AmbiguousReport as exc:
+                raise ValueError(f"{exc.detail} — edit the schedule and choose the report again") from None
             owner = ctx.session_for_user(run["owner"])
             # checked again at run time: the owner may have lost the permission (or the account) since scheduling
             if definition is None or owner is None or ctx.report_level(owner, definition) < permissions.RUN:
@@ -171,7 +189,7 @@ class JobRunner:
             else:
                 rows = [{key: _row_value(row, key) for key in definition.columns} for row in rows]
                 body, _media = render_report_output(definition, parameters, rows, run["format"],
-                                                    ctx.subreport_loader(ctx.report_allowed_for(owner)),
+                                                    ctx.subreport_loader(ctx.report_allowed_for(owner), definition.folder),
                                                     ctx.dataset_loader(definition.connection_id, definition.report_id))
                 store.write_output(name, body)
                 run.update({"status": "success", "rowCount": len(rows), "file": name, "size": len(body)})
@@ -189,7 +207,7 @@ class JobRunner:
             by_key = run["owner"].startswith("apikey:")
             ctx.log_run_from_audit(audit, channel="api" if by_key else ("schedule" if run.get("jobId") else "server"),
                                    actor=run["owner"], actor_type="api-key" if by_key else "user",
-                                   definition=ctx.reports_by_id.get(run["reportId"]), body=body or None)
+                                   definition=self._quiet_report(run), body=body or None)
         if job and job.get("email", {}).get("to"):
             if run.get("spooled") and run.get("size", 0) <= MAIL_ATTACH_MAX:
                 body = spool.export_path(run["file"]).read_bytes()
@@ -271,5 +289,6 @@ class JobRunner:
             schedules = store.load_schedules()
             for job in schedules:
                 if job["id"] == job_id:
-                    job["lastRun"] = {"runId": run["id"], "status": run["status"], "at": run["finishedAt"], "error": run["error"]}
+                    job["lastRun"] = {"runId": run["id"], "status": run["status"], "at": run["finishedAt"], "error": run["error"],
+                                      "rowCount": run.get("rowCount", 0), "file": bool(run.get("file"))}
             store.save_schedules(schedules)

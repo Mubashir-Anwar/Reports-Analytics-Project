@@ -28,6 +28,22 @@ export default function Dashboard({ dashboardId, datasets = [], relationships = 
   const [busy, setBusy] = useState(false);
   const grid = useRef(null);
   const asked = useRef(0);
+  const commands = useRef({});                         // what the Analytics ribbon can ask for (see below)
+  const [pendingAdd, setPendingAdd] = useState(null);  // a visual the ribbon added before editing had started
+
+  // The ribbon (AnalyticsRibbon.jsx) sends window events { cmd: 'edit' | 'save' | 'cancel' | 'reload' | 'add', type }.
+  useEffect(() => {
+    const handle = (event) => { const { cmd, type } = event.detail || {}; commands.current[cmd]?.(type); };
+    window.addEventListener('bi-command', handle);
+    return () => window.removeEventListener('bi-command', handle);
+  }, []);
+  useEffect(() => {
+    window.dispatchEvent(new CustomEvent('bi-dashboard-state', { detail: { open: Boolean(saved), editing: Boolean(draft), mayChange: Boolean(saved?.mayChange) } }));
+  }, [saved, draft]);
+  useEffect(() => () => window.dispatchEvent(new CustomEvent('bi-dashboard-state', { detail: { open: false } })), []);
+  useEffect(() => {                                   // editing has started: add the visual the ribbon asked for
+    if (pendingAdd && draft) { setPendingAdd(null); commands.current.add?.(pendingAdd); }
+  }, [pendingAdd, draft]);
 
   useEffect(() => {
     setSaved(null); setDraft(null); setSelected(null); setResults({}); setPicks({}); setSlicers({});
@@ -92,6 +108,16 @@ export default function Dashboard({ dashboardId, datasets = [], relationships = 
       setSaved(dashboard); setDraft(null); setSelected(null);
       notify('Dashboard saved.', 'ok'); onSaved?.();
     } catch (error) { notify(error.message, 'error'); } finally { setBusy(false); }
+  };
+  commands.current = {
+    edit: () => { if (!editing && saved.mayChange) setDraft(structuredClone(saved)); },
+    save: () => { if (editing && draft.name.trim() && !busy) save(); },
+    cancel: () => { if (editing) { setDraft(null); setSelected(null); } },
+    reload: () => load(),
+    add: (type) => {
+      if (editing) addTile(type);
+      else if (saved.mayChange) { setDraft(structuredClone(saved)); setPendingAdd(type); }
+    },
   };
   const remove = async () => {
     if (!window.confirm(`Delete the dashboard “${saved.name}”? This cannot be undone.`)) return;

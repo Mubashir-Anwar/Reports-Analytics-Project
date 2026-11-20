@@ -1,18 +1,19 @@
 import { Suspense, lazy, useCallback, useEffect, useMemo, useState } from 'react';
 import ContextMenu from '../ContextMenu.jsx';
 import { confirmFolderDelete } from '../folderDelete.js';
-import { Notice, Topbar, downloadBlob } from '../portal/Shell.jsx';
+import { Notice, Topbar } from '../portal/Shell.jsx';
 import { BRAND } from '../shared/brand.js';
 import { Logo } from '../shared/NavBar.jsx';
 import { Breadcrumbs, FolderTree, NewFolderDialog, SubfolderTiles } from '../shared/folders.jsx';
 import PermissionsDialog from './PermissionsDialog.jsx';
 import ResourcePanel from './ResourcePanel.jsx';
 import { RunsList, SchedulesList } from './Schedules.jsx';
+import LogsView from './LogsView.jsx';
 import UploadDialog from './UploadDialog.jsx';
 
 const DashboardViewer = lazy(() => import('./DashboardViewer.jsx'));     // charts load only when a dashboard is opened
 import { safeNext } from '../shared/session.js';
-import { roleAtLeast, serverApi, whenSignedOut } from './serverApi.js';
+import { roleAtLeast, serverApi, splitRef, whenSignedOut } from './serverApi.js';
 
 /* ---------------------------------------------------------------- sign in */
 function LoginForm({ onSignedIn, message }) {
@@ -27,6 +28,9 @@ function LoginForm({ onSignedIn, message }) {
     try {
       const user = await serverApi.login(username.trim(), password);
       setPassword('');
+      if (user.replacedOther) {
+        try { sessionStorage.setItem('team-note', `You were also signed in on ${user.replacedOther.by}. That browser is signed out in ${Math.round(user.replacedOther.seconds)} seconds: one account works in one browser at a time.`); } catch { /* private mode */ }
+      }
       onSignedIn(user);
     } catch (failure) { setError({ text: failure.message, kind: 'error' }); }
     finally { setBusy(false); }
@@ -64,6 +68,8 @@ function Repository({ user, onUser }) {
   const [dashboards, setDashboards] = useState([]);
   const [openDash, setOpenDash] = useState(null);   // the dashboard being viewed (replaces the three columns)
   const [folder, setFolder] = useState('');
+  const [sideWidth, setSideWidth] = useState(readSide);
+  useEffect(() => { try { if (sideWidth) localStorage.setItem(SIDE_KEY, String(sideWidth)); else localStorage.removeItem(SIDE_KEY); } catch { /* private mode */ } }, [sideWidth]);
   const [search, setSearch] = useState('');
   const [selectedId, setSelectedId] = useState('');
   const [tab, setTab] = useState('run');
@@ -136,17 +142,18 @@ function Repository({ user, onUser }) {
       if (answer.problem) { fail(new Error(answer.problem)); return; }
       const result = await serverApi.deleteFolder(path, answer.recursive);
       if (folder === path || folder.startsWith(`${path}/`)) setFolder('');
-      if (result.reportsDeleted?.includes(selectedId)) setSelectedId('');
+      const [selFolder] = splitRef(selectedId);
+      if (selectedId && (selFolder === path || selFolder.startsWith(`${path}/`))) setSelectedId('');
       const extra = [result.subfoldersDeleted ? `${result.subfoldersDeleted} subfolder(s)` : '', result.reportsDeleted?.length ? `${result.reportsDeleted.length} report(s)` : ''].filter(Boolean).join(' and ');
       await done(`Folder /${path} deleted${extra ? ` with ${extra}` : ''}.`);
     } catch (error) { fail(error); }
   };
   const remove = async (r) => {
-    if (!window.confirm(`Delete “${r.title}” (${r.id}) from the server? The designer's workspace copy is kept and can be published again.`)) return;
-    try { await serverApi.deleteReport(r.id); await done(`“${r.title}” was deleted from the server.`, r.id === selectedId ? '' : selectedId); } catch (error) { fail(error); }
+    if (!window.confirm(`Delete “${r.title}” (${r.id}) from /${r.folder}? The designer's workspace copy is kept and can be published again.`)) return;
+    try { await serverApi.deleteReport(r.ref); await done(`“${r.title}” was deleted from the server.`, r.ref === selectedId ? '' : selectedId); } catch (error) { fail(error); }
   };
   const download = async (r) => {
-    try { downloadBlob(await serverApi.download(r.id), `${r.id}.mrd`); setMessage({ text: `Downloaded ${r.id}.mrd — one file with the whole report. Open it in the Designer or upload it to another server.`, kind: 'ok' }); }
+    try { serverApi.download(r.ref); setMessage({ text: `Downloaded ${r.id}.mrd — one file with the whole report. Open it in the Designer or upload it to another server.`, kind: 'ok' }); }
     catch (error) { fail(error); }
   };
   const paste = async (target) => {
@@ -158,33 +165,33 @@ function Repository({ user, onUser }) {
         setClipboard(null);
         await done(`Moved the dashboard “${clipboard.title}” to /${where}.`);
       } else if (clipboard.mode === 'cut') {
-        await serverApi.move(clipboard.id, where);
+        const moved = await serverApi.move(clipboard.id, where);
         setClipboard(null);
-        await done(`Moved “${clipboard.title}” to /${where}.`, clipboard.id);
+        await done(`Moved “${clipboard.title}” to /${where}.`, moved.report.ref);
       } else {
         const result = await serverApi.copy(clipboard.id, where);
-        await done(`Copied “${clipboard.title}” to /${where} as ${result.report.id}.`, result.report.id);
+        await done(`Copied “${clipboard.title}” to /${where} as ${result.report.id}.`, result.report.ref);
       }
     } catch (error) { fail(error); }
   };
-  const openInDesigner = (r) => window.open(`/designer?open=${encodeURIComponent(r.id)}`, '_blank', 'noopener');
+  const openInDesigner = (r) => window.open(`/designer?open=${encodeURIComponent(r.id)}&folder=${encodeURIComponent(r.folder)}`, '_blank', 'noopener');
 
   const reportMenu = (r) => [
-    { header: `${r.title} (${r.id})` },
-    { label: 'Run', icon: '▶', onClick: () => open(r.id, 'run') },
-    { label: 'Edit', icon: '✎', disabled: !canManage(r), hint: canManage(r) ? '' : designer ? 'Needs the Manage permission on this folder' : 'Needs a designer account', onClick: () => open(r.id, 'overview') },
-    { label: 'Schedule…', icon: '⏰', onClick: () => { setView('repository'); open(r.id, 'schedules'); } },
-    { label: 'Parameters', icon: '$P', onClick: () => open(r.id, 'parameters') },
-    { label: 'Data Source', icon: '⛁', onClick: () => open(r.id, 'datasource') },
+    { header: `${r.title} (${r.id})${r.folder ? ` · /${r.folder}` : ''}` },
+    { label: 'Run', icon: '▶', onClick: () => open(r.ref, 'run') },
+    { label: 'Edit', icon: '✎', disabled: !canManage(r), hint: canManage(r) ? '' : designer ? 'Needs the Manage permission on this folder' : 'Needs a designer account', onClick: () => open(r.ref, 'overview') },
+    { label: 'Schedule…', icon: '⏰', onClick: () => { setView('repository'); open(r.ref, 'schedules'); } },
+    { label: 'Parameters', icon: '$P', onClick: () => open(r.ref, 'parameters') },
+    { label: 'Data Source', icon: '⛁', onClick: () => open(r.ref, 'datasource') },
     { label: 'Open in Designer', icon: '🎨', disabled: !canManage(r), onClick: () => openInDesigner(r) },
     { label: 'Download (.mrd)', icon: '⤓', disabled: !canManage(r), onClick: () => download(r) },
     '-',
-    { label: 'Copy', icon: '⧉', shortcut: 'Ctrl+C', disabled: !designer, onClick: () => { setClipboard({ mode: 'copy', id: r.id, title: r.title }); setMessage({ text: `“${r.title}” copied — right-click a folder → Paste.`, kind: 'ok' }); } },
-    { label: 'Cut', icon: '✂', shortcut: 'Ctrl+X', disabled: !canManage(r), onClick: () => { setClipboard({ mode: 'cut', id: r.id, title: r.title }); setMessage({ text: `“${r.title}” cut — right-click a folder → Paste to move it.`, kind: 'ok' }); } },
+    { label: 'Copy', icon: '⧉', shortcut: 'Ctrl+C', disabled: !designer, onClick: () => { setClipboard({ mode: 'copy', id: r.ref, title: r.title }); setMessage({ text: `“${r.title}” copied — right-click a folder → Paste.`, kind: 'ok' }); } },
+    { label: 'Cut', icon: '✂', shortcut: 'Ctrl+X', disabled: !canManage(r), onClick: () => { setClipboard({ mode: 'cut', id: r.ref, title: r.title }); setMessage({ text: `“${r.title}” cut — right-click a folder → Paste to move it.`, kind: 'ok' }); } },
     { label: 'Paste into this folder', icon: '📋', disabled: !canManageFolder(r.folder) || !clipboard, onClick: () => paste(r.folder) },
     '-',
-    { label: 'History', icon: '🕘', onClick: () => open(r.id, 'history') },
-    { label: 'Properties', icon: '⚙', onClick: () => open(r.id, 'overview') },
+    { label: 'History', icon: '🕘', onClick: () => open(r.ref, 'history') },
+    { label: 'Properties', icon: '⚙', onClick: () => open(r.ref, 'overview') },
     { label: 'Delete', icon: '✕', danger: true, disabled: !admin, hint: admin ? '' : 'Needs an admin account', onClick: () => remove(r) },
   ];
   const removeDashboard = async (d) => {
@@ -226,8 +233,8 @@ function Repository({ user, onUser }) {
     const onKey = (event) => {
       if (!designer || !(event.ctrlKey || event.metaKey) || ['INPUT', 'TEXTAREA', 'SELECT'].includes(event.target.tagName)) return;
       const key = event.key.toLowerCase();
-      const r = reports.find((x) => x.id === selectedId);
-      if ((key === 'c' || key === 'x') && r && !window.getSelection()?.toString()) { setClipboard({ mode: key === 'c' ? 'copy' : 'cut', id: r.id, title: r.title, kind: 'report' }); setMessage({ text: `“${r.title}” ${key === 'c' ? 'copied' : 'cut'}.`, kind: 'ok' }); }
+      const r = reports.find((x) => x.ref === selectedId);
+      if ((key === 'c' || key === 'x') && r && !window.getSelection()?.toString()) { setClipboard({ mode: key === 'c' ? 'copy' : 'cut', id: r.ref, title: r.title, kind: 'report' }); setMessage({ text: `“${r.title}” ${key === 'c' ? 'copied' : 'cut'}.`, kind: 'ok' }); }
       if (key === 'v' && clipboard) paste(folder || r?.folder);
     };
     window.addEventListener('keydown', onKey);
@@ -237,11 +244,11 @@ function Repository({ user, onUser }) {
   return (
     <main className="page">
       <div className="page-head">
-        <div><p className="eyebrow">Report server</p><h1>{{ repository: 'Reports and dashboards', schedules: 'Schedules', runs: 'Runs and outputs' }[view]}</h1>
-          <p className="muted">{{ repository: 'Right-click a report, a dashboard or a folder for its actions. Reports are published from the Designer, dashboards are made in Analytics; both can be uploaded as files.', schedules: 'Reports that run by themselves at set times. Create one from a report → Schedules.', runs: 'Background runs and scheduled outputs. Files are kept on the server until they are replaced or deleted.' }[view]}</p></div>
+        <div><p className="eyebrow">Report server</p><h1>{{ repository: 'Reports and dashboards', schedules: 'Schedules', runs: 'Runs and outputs', logs: 'Logs' }[view]}</h1>
+          <p className="muted">{{ repository: 'Right-click a report, a dashboard or a folder for its actions. Reports are published from the Designer, dashboards are made in Analytics; both can be uploaded as files.', schedules: 'Reports that run by themselves at set times. Create one from a report → Schedules.', runs: 'Background runs and scheduled outputs. Files are kept on the server until they are replaced or deleted.', logs: 'Every request that reached the server (kept in the system database), report runs, the service log and the audit trail.' }[view]}</p></div>
         <div className="row">
           <div className="segmented view-switch" role="tablist">
-            {[['repository', '🗄 Repository'], ['schedules', '⏰ Schedules'], ['runs', '⟳ Runs']].map(([id, label]) => (
+            {[['repository', '🗄 Repository'], ['schedules', '⏰ Schedules'], ['runs', '⟳ Runs'], ...(admin ? [['logs', '📜 Logs']] : [])].map(([id, label]) => (
               <button key={id} role="tab" aria-selected={view === id} className={view === id ? 'on' : ''} onClick={() => setView(id)}>{label}</button>
             ))}
           </div>
@@ -254,17 +261,19 @@ function Repository({ user, onUser }) {
       {clipboard && <div className="clip-bar">📋 {clipboard.mode === 'cut' ? 'Cut' : 'Copied'}: <b>{clipboard.title}</b> — right-click a folder → Paste <button className="btn quiet sm" onClick={() => setClipboard(null)}>✕</button></div>}
       {view === 'schedules' && <section className="card"><SchedulesList info={scheduleInfo} onMessage={showMessage} /></section>}
       {view === 'runs' && <section className="card"><RunsList onMessage={showMessage} version={runsVersion} /></section>}
+      {view === 'logs' && admin && <section className="card"><LogsView /></section>}
       {view === 'repository' && openDash && (
         <Suspense fallback={<section className="card"><p className="muted">Loading the dashboard…</p></section>}>
           <DashboardViewer key={openDash.id} entry={openDash} mayManage={canManageDash(openDash)} onBack={() => setOpenDash(null)} onMessage={showMessage} />
         </Suspense>
       )}
-      {view === 'repository' && !openDash && <div className={`server-grid ${selectedId ? 'has-selection' : ''}`} style={{ marginTop: 14 }}>
+      {view === 'repository' && !openDash && <div className={`server-grid ${selectedId ? 'has-selection' : ''}`} style={{ marginTop: 14, ...(sideWidth ? { '--side-w': `min(${sideWidth}px, 45vw)` } : {}) }}>
         <aside className="card" onContextMenu={showMenu(folderMenu(''))}>
           <div className="card-head"><div><p className="eyebrow">Folders</p><h2>Repository</h2></div>{designer && <button className="btn sm quiet" onClick={() => createFolder()}>+ Folder</button>}</div>
           <input type="search" placeholder="⌕  Find a report or dashboard" value={search} onChange={(e) => setSearch(e.target.value)} style={{ marginBottom: 10 }} />
           <FolderTree folders={folders} selected={folder} onSelect={setFolder} count={countIn} rootLabel="Everything" rootCount={reports.length + dashboards.length}
             onMenu={(event, path) => showMenu(folderMenu(path))(event)} storageKey="server-folders-open" />
+          <SideResizer width={sideWidth} onWidth={setSideWidth} />
         </aside>
         <section className="card" onContextMenu={showMenu(folderMenu(folder))}>
           <div className="card-head">
@@ -293,11 +302,11 @@ function Repository({ user, onUser }) {
             )}
             {visible.map((r) => (
               <button
-                key={r.id}
-                className={`report-card ${r.id === selectedId ? 'on' : ''} ${clipboard?.mode === 'cut' && clipboard.id === r.id ? 'cut' : ''}`}
-                onClick={() => open(r.id, tab)}
-                onDoubleClick={() => open(r.id, 'run')}
-                onContextMenu={(e) => { setSelectedId(r.id); showMenu(reportMenu(r))(e); }}
+                key={r.ref}
+                className={`report-card ${r.ref === selectedId ? 'on' : ''} ${clipboard?.mode === 'cut' && clipboard.id === r.ref ? 'cut' : ''}`}
+                onClick={() => open(r.ref, tab)}
+                onDoubleClick={() => open(r.ref, 'run')}
+                onContextMenu={(e) => { setSelectedId(r.ref); showMenu(reportMenu(r))(e); }}
               >
                 <strong>{r.title}</strong>
                 <small>{r.folder} · {r.formats.map((f) => f.toUpperCase()).join(', ')}{r.parameters.length ? ` · ${r.parameters.length} question${r.parameters.length > 1 ? 's' : ''}` : ''}</small>
@@ -317,7 +326,7 @@ function Repository({ user, onUser }) {
         {selectedId
           ? <ResourcePanel key={`${selectedId}-${version}`} reportId={selectedId} tab={tab} setTab={setTab} onChanged={load}
               scheduleInfo={scheduleInfo} onBackground={() => setRunsVersion((n) => n + 1)} onBack={() => setSelectedId('')}
-              menu={(event, info) => setMenu({ x: event.clientX, y: event.clientY, items: reportMenu(reports.find((r) => r.id === info.id) || info) })} />
+              menu={(event, info) => setMenu({ x: event.clientX, y: event.clientY, items: reportMenu(reports.find((r) => r.ref === info.ref) || info) })} />
           : <section className="card resource hide-mobile" style={{ textAlign: 'center', padding: '48px 18px' }}><div style={{ fontSize: 30, opacity: 0.5 }}>▤</div><h2>Choose a report</h2><p className="muted">Run it, or check its parameters, data source, query and history. Right-click for more.</p></section>}
       </div>}
       <ContextMenu menu={menu} onClose={() => setMenu(null)} />
@@ -333,7 +342,7 @@ function Repository({ user, onUser }) {
               return;
             }
             setFolder(result.report.folder);
-            await done(`${result.replaced ? 'Replaced' : 'Uploaded'} ${result.report.id} in /${result.report.folder}.${result.warnings?.length ? ` Check: ${result.warnings.join('; ')}` : ''}`, result.report.id);
+            await done(`${result.replaced ? 'Replaced' : 'Uploaded'} ${result.report.id} in /${result.report.folder}.${result.warnings?.length ? ` Check: ${result.warnings.join('; ')}` : ''}`, result.report.ref);
             setTab('overview');
           }} />
       )}
@@ -350,9 +359,47 @@ function leaveLogin(user) {
   return false;
 }
 
+
+const SIDE_KEY = 'server-folders-width';
+const SIDE_MIN = 180;
+const sideMax = () => Math.max(SIDE_MIN, Math.min(560, Math.round(window.innerWidth * 0.45)));
+const readSide = () => { try { const w = Number(localStorage.getItem(SIDE_KEY)); return w >= SIDE_MIN ? w : null; } catch { return null; } };
+
+/** The right edge of the Folders panel: drag it (mouse or touch) or use ← → to make the panel wider; double-click = normal. */
+function SideResizer({ width, onWidth }) {
+  const [dragging, setDragging] = useState(false);
+  const clamp = (w) => Math.round(Math.min(sideMax(), Math.max(SIDE_MIN, w)));
+  const start = (event) => {
+    const aside = event.currentTarget.parentElement;
+    const startX = event.clientX;
+    const startW = aside.getBoundingClientRect().width;
+    event.currentTarget.setPointerCapture?.(event.pointerId);
+    setDragging(true);
+    const move = (e) => onWidth(clamp(startW + e.clientX - startX));
+    const stop = () => { setDragging(false); window.removeEventListener('pointermove', move); window.removeEventListener('pointerup', stop); window.removeEventListener('pointercancel', stop); };
+    window.addEventListener('pointermove', move);
+    window.addEventListener('pointerup', stop);
+    window.addEventListener('pointercancel', stop);
+    event.preventDefault();
+  };
+  const key = (event) => {
+    const step = event.shiftKey ? 40 : 10;
+    const now = width || event.currentTarget.parentElement.getBoundingClientRect().width;
+    if (event.key === 'ArrowRight') { event.preventDefault(); onWidth(clamp(now + step)); }
+    if (event.key === 'ArrowLeft') { event.preventDefault(); onWidth(clamp(now - step)); }
+  };
+  return (
+    <div className={`side-resizer ${dragging ? 'dragging' : ''}`} role="separator" aria-orientation="vertical" aria-label="Width of the Folders panel"
+      aria-valuenow={width || undefined} aria-valuemin={SIDE_MIN} tabIndex={0} title="Drag to make the Folders panel wider or narrower (double-click: normal width)"
+      onPointerDown={start} onKeyDown={key} onDoubleClick={() => onWidth(null)} />
+  );
+}
+
 export default function ServerApp() {
   const [user, setUser] = useState(undefined); // undefined = checking, null = signed out
-  const [loginMessage, setLoginMessage] = useState(null);
+  const [loginMessage, setLoginMessage] = useState(() => (new URLSearchParams(window.location.search).get('reason') === 'elsewhere'
+    ? { text: 'You were signed out here because your account signed in on another browser (one account works in one browser at a time). Sign in again to continue here; the other browser will then be signed out.', kind: 'error' }
+    : null));
 
   useEffect(() => {
     whenSignedOut(() => { setUser(null); setLoginMessage({ text: 'Your session has ended. Please sign in again.', kind: 'error' }); });

@@ -60,13 +60,16 @@ def folder(name: str, description: str = "") -> None:
 
 
 def req(name: str, method: str, path: str, *, body=None, raw_body: str | None = None, expect=(200,), auth: str = "session",
-        save: dict | None = None, checks: str = "", redirects: bool = True, description: str = "") -> None:
+        save: dict | None = None, checks: str = "", redirects: bool = True, description: str = "",
+        extra_headers: dict | None = None) -> None:
     """auth: session (the signed-in cookie) | admin (X-Admin-Token) | key (X-API-Key) | none."""
     headers = []
     if auth == "admin":
         headers.append({"key": "X-Admin-Token", "value": "{{adminToken}}"})
     elif auth == "key":
         headers.append({"key": "X-API-Key", "value": "{{apiKey}}"})
+    for key, value in (extra_headers or {}).items():
+        headers.append({"key": key, "value": value})
     if body is not None or raw_body is not None or method in ("POST", "PUT", "DELETE"):
         headers.append({"key": "Content-Type", "value": "application/json"})
     if raw_body is None and method in ("POST", "PUT", "DELETE"):
@@ -173,7 +176,9 @@ req("Edit title", "PUT", f"/api/server/reports/{REPORT}", body={"title": "Postma
 req("Versions", "GET", f"/api/server/reports/{REPORT}/versions", save={"versionNumber": "pm.response.json().versions[pm.response.json().versions.length - 1].version"})
 req("One version", "GET", f"/api/server/reports/{REPORT}/versions/{{{{versionNumber}}}}")
 req("Restore the first version", "POST", f"/api/server/reports/{REPORT}/versions/{{{{versionNumber}}}}/restore", body={})
-req("Copy", "POST", f"/api/server/reports/{REPORT}/copy", body={"folder": "Postman/Sub", "id": "PM_ORDERS_COPY"})
+req("Copy", "POST", f"/api/server/reports/{REPORT}/copy", body={"folder": "Postman/Sub", "newId": "PM_ORDERS_COPY"},
+    description="newId gives the copy its own ID. Without it a copy into another folder keeps the ID (like JasperReports Server): "
+                "the same ID is then in two folders, see '11 Report access'.")
 req("Move the copy", "POST", "/api/server/reports/PM_ORDERS_COPY/move", body={"folder": "Postman"})
 req("Download .mrd", "GET", f"/api/server/reports/{REPORT}/file")
 req("Upload .mrd as a new report", "POST", "/api/server/upload",
@@ -213,6 +218,21 @@ req("Reports (admin token)", "GET", "/reports", auth="admin")
 req("Generate CSV by URL (admin token)", "GET", f"/generate/{REPORT}.csv?Branch=LHR", auth="admin")
 req("Generate PDF by URL (API key)", "GET", f"/generate/{REPORT}.pdf?Branch=KHI", auth="key")
 req("Adapter status for the runner", "GET", "/reports/connections/pm_mongo/status", auth="admin")
+
+SAME_ID = ("A report is <folder>/<ID>: the same ID can be published in several folders. Folder= (the report's server folder) "
+           "says which one; without it an ID that is in several folders is refused with 409.")
+req("Same ID in a second folder: copy PM_ORDERS into Postman/Sub", "POST", f"/api/server/reports/{REPORT}/copy?folder=Postman",
+    body={"folder": "Postman/Sub"}, description=SAME_ID,
+    checks="pm.test('keeps the ID', function () { pm.expect(pm.response.json().report.ref).to.eql('Postman/Sub/PM_ORDERS'); });")
+req("Same ID: without Folder the ID is unclear (409)", "GET", f"/generate/{REPORT}.csv?Branch=LHR", auth="key", expect=(409,),
+    description=SAME_ID, checks="pm.test('asks for Folder', function () { pm.expect(pm.response.json().detail).to.include('Folder='); });")
+req("Same ID: Folder chooses the report", "GET", f"/generate/{REPORT}.xlsx?Folder=Postman/Sub/&Branch=LHR", auth="key",
+    description=SAME_ID + " A trailing or leading / in Folder is fine.")
+req("Same ID: a folder without that report (404)", "GET", f"/generate/{REPORT}.csv?Folder=Postman/Other&Branch=LHR", auth="key",
+    expect=(404,), checks="pm.test('names the folders', function () { pm.expect(pm.response.json().detail).to.include('Postman/Sub'); });")
+req("Same ID: public API takes \"folder\" in the body", "POST", f"/api/v1/reports/{REPORT}/run", auth="key",
+    body={"format": "csv", "folder": "Postman/Sub", "parameters": {"Branch": "LHR"}})
+req("Same ID: delete the second copy (?folder=)", "DELETE", f"/api/server/reports/{REPORT}?folder=Postman/Sub")
 
 folder("12 Public API v1 (API key)")
 req("Who am I (key)", "GET", "/api/v1/whoami", auth="key",
@@ -387,6 +407,21 @@ req("Public API: one dashboard (tiles to draw it yourself)", "GET", "/api/v1/ana
 req("Public API: one visual", "POST", "/api/v1/analytics/query", auth="key", body=SUM_BY_BRANCH)
 req("Public API: import again now", "POST", "/api/v1/analytics/datasets/{{dsOrders}}/refresh", auth="key", expect=(202,))
 req("Import again now (session)", "POST", "/api/analytics/datasets/{{dsBranches}}/refresh", expect=(202,))
+req("Query in DAX (total by branch)", "POST", "/api/analytics/queries/run",
+    body={"language": "dax", "text": "EVALUATE SUMMARIZECOLUMNS('PM orders'[Branch], \"Total\", SUM('PM orders'[Amount]))\nORDER BY [Total] DESC"},
+    checks="pm.test('rows per branch', function () { pm.expect(pm.response.json().columns.map(c => c.name)).to.eql(['Branch', 'Total']); });")
+req("Query in SQL (DuckDB SELECT)", "POST", "/api/analytics/queries/run",
+    body={"language": "sql", "text": "SELECT Branch, COUNT(*) AS n FROM \"PM orders\" GROUP BY Branch"})
+req("Query reading a file is refused", "POST", "/api/analytics/queries/run",
+    body={"language": "sql", "text": "SELECT * FROM read_csv('/etc/passwd')"}, expect=(422,))
+req("Save the query", "POST", "/api/analytics/queries",
+    body={"name": "PM totals", "folder": "Postman", "language": "dax", "text": "EVALUATE ROW(\"Total\", SUM('PM orders'[Amount]))"},
+    save={"queryId": "pm.response.json().query.id"})
+req("Saved queries", "GET", "/api/analytics/queries")
+req("One saved query", "GET", "/api/analytics/queries/{{queryId}}")
+req("Run the saved query", "POST", "/api/analytics/queries/{{queryId}}/run", body={})
+req("Rename the saved query", "PUT", "/api/analytics/queries/{{queryId}}", body={"name": "PM totals (all)"})
+req("Delete the saved query", "DELETE", "/api/analytics/queries/{{queryId}}")
 req("Admin: every dataset and dashboard, disk use, limits", "GET", "/api/admin/analytics",
     checks="pm.test('has totals', function () { pm.expect(pm.response.json().totals.datasets).to.be.above(0); });")
 req("Admin: import a dataset now", "POST", "/api/admin/analytics/datasets/{{dsBranches}}/refresh", expect=(202,))
@@ -400,6 +435,41 @@ req("Delete relationship", "DELETE", "/api/analytics/relationships/{{relationshi
 req("Admin: delete dataset PM branches", "DELETE", "/api/admin/analytics/datasets/{{dsBranches}}?force=true")
 req("Delete dataset PM orders", "DELETE", "/api/analytics/datasets/{{dsOrders}}?force=true")
 
+folder("12d Many downloads at once (CSV, Excel, PDF)",
+       "Load test. Run this folder with the Collection Runner and set Iterations (e.g. 20) to hit the server that many times; "
+       "or open one request and use Send repeatedly. 'Run now' requests wait for the file. 'Deliver later' requests "
+       "(header X-Deliver: later) are answered at once with 202 and a ticket; the server makes the file in the background, "
+       "queueing when every place is busy, and you collect it from /api/deliveries/{id}/file. Works on /generate, "
+       "/api/v1/reports/{id}/run, /api/server/reports/{id}/run, /api/admin/reports/{id}/run and the designer's runs.")
+LATER = {"X-Deliver": "later"}
+for fmt, label in (("csv", "CSV"), ("xlsx", "Excel"), ("pdf", "PDF")):
+    req(f"Run now: {label} (file in the answer)", "POST", f"/api/v1/reports/{REPORT}/run", auth="key",
+        body={"format": fmt, "parameters": {"Branch": "KHI"}},
+        checks=f"pm.test('a {label} file', function () {{ pm.expect(pm.response.headers.get('Content-Disposition')).to.include('.{fmt}'); }});")
+req("Run now: CSV by URL", "GET", f"/generate/{REPORT}.csv?Branch=LHR", auth="key")
+for fmt, label in (("csv", "CSV"), ("xlsx", "Excel"), ("pdf", "PDF")):
+    req(f"Deliver later: {label} (202 + ticket)", "POST", f"/api/v1/reports/{REPORT}/run", auth="key", extra_headers=LATER,
+        body={"format": fmt, "parameters": {"Branch": "KHI"}}, expect=(202,),
+        save={f"delivery_{fmt}": "pm.response.json().delivery.id"})
+req("Deliver later: Excel by URL", "GET", f"/generate/{REPORT}.xlsx?Branch=ISB", auth="key", extra_headers=LATER, expect=(202,),
+    save={"delivery_url": "pm.response.json().delivery.id"})
+req("Deliver later as the signed-in user (Report Server Run)", "POST", f"/api/server/reports/{REPORT}/run", extra_headers=LATER,
+    body={"format": "xlsx", "parameters": {"Branch": "KHI"}}, expect=(202,), save={"delivery_session": "pm.response.json().delivery.id"})
+req("Wait until the key's downloads are ready (repeats itself)", "GET", "/api/deliveries", auth="key",
+    checks="const items = pm.response.json().deliveries;\n"
+           "const tries = Number(pm.environment.get('deliveryTries') || 0);\n"
+           "if (items.some(d => d.status === 'queued' || d.status === 'running') && tries < 60) { pm.environment.set('deliveryTries', tries + 1); "
+           "postman.setNextRequest(pm.info.requestName); }\n"
+           "else { pm.environment.unset('deliveryTries'); pm.test('all made', function () { items.forEach(d => pm.expect(d.status).to.eql('ready')); }); }")
+FOLDER[-1]["event"].append({"listen": "prerequest", "script": {"type": "text/javascript", "exec": ["setTimeout(function () {}, 500);"]}})
+for fmt, label in (("csv", "CSV"), ("xlsx", "Excel"), ("pdf", "PDF")):
+    req(f"Collect the {label} file", "GET", f"/api/deliveries/{{{{delivery_{fmt}}}}}/file", auth="key", expect=(200, 409))
+req("Collect the Excel file asked for by URL", "GET", "/api/deliveries/{{delivery_url}}/file", auth="key", expect=(200, 409))
+req("One download's status (signed-in user)", "GET", "/api/deliveries/{{delivery_session}}")
+req("Someone else cannot collect it (the key is not the session)", "GET", "/api/deliveries/{{delivery_session}}/file", auth="key", expect=(404,))
+req("Forget a download (removes its file)", "DELETE", "/api/deliveries/{{delivery_url}}", auth="key", expect=(200, 404))
+req("Capacity after the burst", "GET", "/api/admin/capacity")
+
 folder("13 Logs, audit and system (Admin)")
 req("System database (where the service keeps its data)", "GET", "/api/admin/system-db",
     checks="pm.test('names the database', function () { pm.expect(pm.response.json().label).to.be.a('string'); });")
@@ -412,6 +482,13 @@ req("Product name (public: sign-in page, navigation bar)", "GET", "/api/branding
 req("Product name: a wrong name is refused (super admin)", "PUT", "/api/admin/branding", body={"name": "<x>", "tagline": ""}, expect=(422,))
 req("Capacity: report places in use, background queue, limits", "GET", "/api/admin/capacity",
     checks="pm.test('has limits', function () { pm.expect(pm.response.json().limits.maxConcurrent).to.be.above(0); });")
+req("Report Server logs: every request today (system database)", "GET", "/api/server/logs/requests?limit=50",
+    checks="pm.test('requests are recorded', function () { pm.expect(pm.response.json().totals.requests).to.be.above(0); });")
+req("Report Server logs: only the errors", "GET", "/api/server/logs/requests?status=errors&limit=50")
+req("Report Server logs: report runs", "GET", "/api/server/logs/runs?limit=50")
+req("Report Server logs: service log", "GET", "/api/server/logs/service?lines=50&level=WARNING")
+req("Report Server logs: audit trail", "GET", "/api/server/logs/audit?limit=50")
+req("Report Server logs: downloads and capacity right now", "GET", "/api/server/logs/downloads")
 req("Service log", "GET", "/api/admin/logs?lines=50")
 req("Download service log", "GET", "/api/admin/logs/download")
 req("Report runs", "GET", "/api/admin/audit?limit=50")

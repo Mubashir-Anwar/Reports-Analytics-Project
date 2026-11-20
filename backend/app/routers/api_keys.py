@@ -20,7 +20,7 @@ from urllib.parse import quote, urlencode
 from fastapi import FastAPI, HTTPException, Request
 
 from backend.app.constants import OUTPUT_FORMATS, SIGNED_LINK_KEYS
-from backend.app.definitions import validate_parameters
+from backend.app.definitions import clean_folder, validate_parameters
 from backend.app.logs import LOG
 from backend.app.security import api_keys, embed_tokens, webhooks
 from backend.app.storage.files import normalize_folder_path
@@ -176,9 +176,10 @@ def register(app: FastAPI, ctx: SimpleNamespace) -> None:
         payload = await json_body(request)
         report_id = str(payload.get("report", "")).strip()
         output_format = str(payload.get("format", "pdf")).strip().lower()
-        definition = reports_by_id.get(report_id)
-        if definition is None or not report_in_scope(request, definition):
-            raise ctx.unknown_report(request, report_id)
+        folder = clean_folder(payload.get("folder"))         # when the same ID is published in several folders
+        definition = reports_by_id.find(report_id, folder, lambda item: report_in_scope(request, item))
+        if definition is None:
+            raise ctx.unknown_report(request, report_id, folder)
         if output_format not in OUTPUT_FORMATS:
             raise HTTPException(status_code=422, detail="format must be pdf, xlsx or csv")
         parameters = payload.get("parameters") or {}
@@ -201,7 +202,7 @@ def register(app: FastAPI, ctx: SimpleNamespace) -> None:
         except ValueError as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from None
         expires = int(time.time()) + lifetime
-        pairs += [("KeyId", key["id"]), ("Expires", str(expires))]
+        pairs = [pair for pair in pairs if pair[0] != "Folder"] + [("Folder", definition.folder), ("KeyId", key["id"]), ("Expires", str(expires))]
         path = f"/generate/{quote(report_id)}.{output_format}"
         query = urlencode(pairs, quote_via=quote)
         signature = hmac.new(api_keys.link_secret().encode("utf-8"), f"{path}?{query}".encode("utf-8"), hashlib.sha256).hexdigest()

@@ -16,6 +16,7 @@ from fastapi.responses import JSONResponse, Response
 from backend.app.analytics import store as analytics_store
 from backend.app.connectors.profiles import load_connection_profiles
 from backend.app.constants import BOOTSTRAP_USERNAME, OUTPUT_FORMATS, REPORT_ID_PATTERN, SESSION_COOKIE, USER_RIGHTS, WORKSPACE_META
+from backend.app.definitions import clean_folder
 from backend.app.logs import LOG
 from backend.app.mrd import parse_report_definition_xml, render_report_definition_xml
 from backend.app.security import permissions, shared_state
@@ -29,6 +30,7 @@ from backend.app.security.users import (
     load_users,
     make_session_cookie,
     password_needs_upgrade,
+    read_session_cookie,
     save_users,
     session_lifetime_seconds,
     set_user_password,
@@ -97,10 +99,19 @@ def register(app: FastAPI, ctx: SimpleNamespace) -> None:
         LOG.info("User %s signed in (%s)", session_user, ", ".join(rights) or "no rights")
         ctx.audit_event(request, "auth.login", session_user, {"firstSetup": bootstrap, "rights": rights},
                         actor=session_user, actor_type="user")
+        cookie = make_session_cookie(session_user, version, bootstrap)
+        nonce = (read_session_cookie(cookie) or {}).get("n", "")
+        agent = shared_state.describe_agent(request.headers.get("user-agent", ""), client)
+        previous = shared_state.claim_session(session_user, nonce, agent, session_lifetime_seconds())
+        if previous:
+            LOG.info("User %s signed in on %s; the session on %s ends in %ss", session_user, agent, previous["agent"], shared_state.grace_seconds())
+            ctx.audit_event(request, "auth.session_replaced", session_user, {"old": previous["agent"], "new": agent},
+                            actor=session_user, actor_type="user")
         response = JSONResponse({"username": session_user, "role": role, "bootstrap": bootstrap, "rights": rights,
-                                 "superAdmin": super_admin})
+                                 "superAdmin": super_admin,
+                                 "replacedOther": {"by": previous["agent"], "seconds": shared_state.grace_seconds()} if previous else None})
         secure = request.url.scheme == "https" or os.getenv("REPORTING_SECURE_COOKIES", "false").strip().lower() == "true"
-        response.set_cookie(SESSION_COOKIE, make_session_cookie(session_user, version, bootstrap), max_age=session_lifetime_seconds(),
+        response.set_cookie(SESSION_COOKIE, cookie, max_age=session_lifetime_seconds(),
                             httponly=True, samesite="strict", secure=secure, path="/")
         return response
 
@@ -109,6 +120,7 @@ def register(app: FastAPI, ctx: SimpleNamespace) -> None:
         session = current_session(request)
         if session is not None:
             shared_state.revoke_session(session["nonce"], session_lifetime_seconds())  # on every instance
+            shared_state.release_session(session["username"], session["nonce"])
             LOG.info("User %s signed out of /server", session["username"])
             ctx.audit_event(request, "auth.logout", session["username"], actor=session["username"], actor_type="user")
         response = JSONResponse({"status": "signed-out"})
@@ -154,10 +166,14 @@ def register(app: FastAPI, ctx: SimpleNamespace) -> None:
                 "dashboards": sorted(dashboards, key=lambda item: item["name"].casefold()),
                 "user": session_view(session), "folderAccess": {f: permissions.NAMES[permissions.level(session, f, rules)] for f in visible}}
 
+    def report_at(session: dict[str, Any], report_id: str, request: Request, needed: int) -> Any:
+        """The report in ?folder= (the same ID may be used in several folders), if this user may use it at `needed`."""
+        return ctx.require_report(session, report_id, needed, folder=clean_folder(request.query_params.get("folder")))
+
     @app.post("/api/server/reports/{report_id}/run")
     async def server_run_report(report_id: str, request: Request) -> Response:
         session = require_session(request)
-        definition = ctx.require_report(session, report_id, permissions.RUN)
+        definition = report_at(session, report_id, request, permissions.RUN)
         payload = await json_body(request)
         return run_definition_file(definition, payload, request.url.path, "server-session",
                                    fixed_connection=True, user=session["username"], session=session, request=request)
@@ -197,16 +213,16 @@ def register(app: FastAPI, ctx: SimpleNamespace) -> None:
     @app.delete("/api/server/reports/{report_id}")
     def server_delete_report(report_id: str, request: Request) -> dict[str, str]:
         session = require_session(request, "admin")
-        ctx.require_report(session, report_id, permissions.MANAGE)
-        result = delete_published_report(report_id)
-        record_history(report_id, "deleted", session["username"])
+        definition = report_at(session, report_id, request, permissions.MANAGE)
+        result = delete_published_report(report_id, definition.folder)
+        record_history(report_id, "deleted", session["username"], folder=definition.folder)
         LOG.info("Report %s removed from the server by %s", report_id, session["username"])
         return result
 
     @app.get("/api/server/reports/{report_id}")
     def server_report_details(report_id: str, request: Request) -> dict[str, Any]:
         session = require_session(request)
-        definition = ctx.require_report(session, report_id, permissions.RUN)
+        definition = report_at(session, report_id, request, permissions.RUN)
         return {**resource_details(definition, session), "access": permissions.NAMES[ctx.report_level(session, definition)]}
 
     @app.put("/api/server/reports/{report_id}")
@@ -214,7 +230,7 @@ def register(app: FastAPI, ctx: SimpleNamespace) -> None:
         """Edit a published report's properties: title, description, formats, data adapter, the questions
         (label, help, required, default, allowed values) and, for designers, the query."""
         session = require_session(request, "designer")
-        definition = ctx.require_report(session, report_id, permissions.MANAGE)
+        definition = report_at(session, report_id, request, permissions.MANAGE)
         changes = await json_body(request)
         payload = copy.deepcopy(definition.editor_config)
         for key in ("title", "description"):
@@ -252,19 +268,19 @@ def register(app: FastAPI, ctx: SimpleNamespace) -> None:
                 payload["queryLanguage"] = changes["queryLanguage"]
             if "collection" in changes:
                 payload["collection"] = str(changes["collection"] or "").strip()
-        saved = save_report_payload(payload, expected_id=report_id, action="edited", user=session["username"])
+        saved = save_report_payload(payload, expected_id=report_id, previous=definition, action="edited", user=session["username"])
         changed = sorted(k for k in changes if k in ("title", "description", "formats", "defaultFormat", "connectionId", "parameters", "querySource"))
-        sync_workspace_copy(report_id, lambda data: data.update({k: copy.deepcopy(saved.editor_config.get(k)) for k in
+        sync_workspace_copy(saved, lambda data: data.update({k: copy.deepcopy(saved.editor_config.get(k)) for k in
                                                                 ("title", "description", "formats", "defaultFormat", "connectionId",
                                                                  "parameters", "querySource", "queryLanguage", "collection")
                                                                 if k in saved.editor_config}))
-        record_history(report_id, "edited", session["username"], ", ".join(changed))
+        record_history(report_id, "edited", session["username"], ", ".join(changed), folder=saved.folder)
         return resource_details(saved, session)
 
     @app.post("/api/server/reports/{report_id}/copy")
     async def server_copy_report(report_id: str, request: Request) -> dict[str, Any]:
         session = require_session(request, "designer")
-        definition = ctx.require_report(session, report_id, permissions.RUN)
+        definition = report_at(session, report_id, request, permissions.RUN)
         body = await json_body(request, optional=True)
         payload = copy.deepcopy(definition.editor_config)
         try:
@@ -272,38 +288,41 @@ def register(app: FastAPI, ctx: SimpleNamespace) -> None:
         except ValueError as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from None
         ctx.require_folder(session, payload["folder"], permissions.MANAGE)
-        new_id = str(body.get("newId") or "").strip() or free_report_id(report_id)
-        if new_id in reports_by_id:
-            raise HTTPException(status_code=409, detail=f"A report with the ID {new_id} already exists")
+        target = payload["folder"]
+        # into another folder the copy keeps its ID (like JasperReports Server); in the same folder it needs a new one
+        keep_id = target != definition.folder and f"{target}/{report_id}" not in reports_by_id
+        new_id = str(body.get("newId") or "").strip() or (report_id if keep_id else free_report_id(report_id, target))
+        if f"{target}/{new_id}" in reports_by_id:
+            raise HTTPException(status_code=409, detail=f"/{target} already has a report with the ID {new_id}")
         payload["id"] = new_id
-        payload["title"] = str(body.get("title") or f"{definition.title} (copy)")[:300]
+        payload["title"] = str(body.get("title") or (definition.title if new_id == report_id else f"{definition.title} (copy)"))[:300]
         saved = save_report_payload(payload, action="copied", user=session["username"])
         add_saved_folder(payload["folder"])
-        record_history(new_id, "copied", session["username"], f"from {report_id}")
+        record_history(new_id, "copied", session["username"], f"from /{definition.ref}", folder=saved.folder)
         return {"report": resource_details(saved, session)}
 
     @app.post("/api/server/reports/{report_id}/move")
     async def server_move_report(report_id: str, request: Request) -> dict[str, Any]:
         session = require_session(request, "designer")
-        definition = ctx.require_report(session, report_id, permissions.MANAGE)
+        definition = report_at(session, report_id, request, permissions.MANAGE)
         body = await json_body(request)
         try:
             folder = normalize_folder_path(body.get("folder", ""))
         except ValueError as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from None
         ctx.require_folder(session, folder, permissions.MANAGE)
-        before = definition.editor_config.get("folder", "General")
+        before = definition.folder
         payload = {**copy.deepcopy(definition.editor_config), "folder": folder}
-        saved = save_report_payload(payload, expected_id=report_id, action="moved", user=session["username"])
+        saved = save_report_payload(payload, expected_id=report_id, previous=definition, action="moved", user=session["username"])
         add_saved_folder(folder)
-        record_history(report_id, "moved", session["username"], f"{before} → {folder}")
+        record_history(report_id, "moved", session["username"], f"{before} → {folder}", folder=saved.folder)
         return {"report": resource_details(saved, session)}
 
     @app.get("/api/server/reports/{report_id}/file")
     def server_download_report(report_id: str, request: Request) -> Response:
         """The whole report (query, parameters, data adapter, band design, images) as one .mrd file."""
         session = require_session(request, "designer")
-        definition = ctx.require_report(session, report_id, permissions.MANAGE)  # the file holds the query
+        definition = report_at(session, report_id, request, permissions.MANAGE)  # the file holds the query
         return Response(render_report_definition_xml(admin_report_payload(definition)), media_type="application/xml; charset=utf-8",
                         headers={"Content-Disposition": f'attachment; filename="{report_id}.mrd"'})
 
@@ -322,7 +341,7 @@ def register(app: FastAPI, ctx: SimpleNamespace) -> None:
             root_tag = SafeET.fromstring(content, forbid_dtd=True).tag.split("}")[-1]
             if root_tag == "jasperReport":
                 from backend.app.importers import jrxml as jrxml_import
-                imported = jrxml_import.import_jrxml(content)
+                imported = jrxml_import.import_jrxml(content, body.get("resources"))   # + its image files
                 payload = {**imported["report"], "design": imported["design"]}
                 warnings = list(imported.get("warnings") or [])
             else:
@@ -342,17 +361,14 @@ def register(app: FastAPI, ctx: SimpleNamespace) -> None:
         except ValueError as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from None
         report_id = str(payload.get("id", ""))
-        exists = report_id in reports_by_id
         ctx.require_folder(session, payload["folder"], permissions.MANAGE)
-        if exists:
-            existing = reports_by_id[report_id]
-            if ctx.report_level(session, existing) < permissions.MANAGE:  # hidden or run-only: never replaced from here
-                raise HTTPException(status_code=409, detail=f"The ID {report_id} is already used on the server; give the report a new ID")
+        existing = dict.get(reports_by_id, f"{payload['folder']}/{report_id}")   # the same ID in another folder is another report
+        exists = existing is not None
         if exists and body.get("replace") is not True:
-            raise HTTPException(status_code=409, detail=f"{report_id} is already on the server; tick “Replace” or give it a new ID")
-        saved = save_report_payload(payload, expected_id=report_id if exists else None, action="uploaded", user=session["username"])
+            raise HTTPException(status_code=409, detail=f"{report_id} is already in /{payload['folder']}; tick “Replace” or give it a new ID")
+        saved = save_report_payload(payload, expected_id=report_id if exists else None, previous=existing, action="uploaded", user=session["username"])
         add_saved_folder(payload["folder"])
-        record_history(report_id, "uploaded", session["username"], f"{'replaced' if exists else 'new'} in {payload['folder']}")
+        record_history(report_id, "uploaded", session["username"], f"{'replaced' if exists else 'new'} in {payload['folder']}", folder=saved.folder)
         return {"report": resource_details(saved, session), "replaced": exists, "warnings": warnings}
 
     @app.get("/api/server/connections")
@@ -364,14 +380,14 @@ def register(app: FastAPI, ctx: SimpleNamespace) -> None:
     @app.get("/api/server/reports/{report_id}/versions")
     def server_report_versions(report_id: str, request: Request) -> dict[str, Any]:
         session = require_session(request, "designer")
-        ctx.require_report(session, report_id, permissions.MANAGE)
-        return {"versions": ctx.list_versions(report_id)}
+        definition = report_at(session, report_id, request, permissions.MANAGE)
+        return {"versions": ctx.list_versions(report_id, definition.folder)}
 
     @app.get("/api/server/reports/{report_id}/versions/{number}")
     def server_report_version(report_id: str, number: int, request: Request) -> dict[str, Any]:
         session = require_session(request, "designer")
-        ctx.require_report(session, report_id, permissions.MANAGE)
-        found = ctx.get_version(report_id, number) if REPORT_ID_PATTERN.fullmatch(report_id) else None
+        definition = report_at(session, report_id, request, permissions.MANAGE)
+        found = ctx.get_version(report_id, number, definition.folder) if REPORT_ID_PATTERN.fullmatch(report_id) else None
         if not found:
             raise HTTPException(status_code=404, detail="Version not found")
         return found
@@ -381,13 +397,13 @@ def register(app: FastAPI, ctx: SimpleNamespace) -> None:
         """Make an older version the current one again (as a new version; nothing is lost)."""
         session = require_session(request, "designer")
         require_json_request(request)
-        current = ctx.require_report(session, report_id, permissions.MANAGE)
-        found = ctx.get_version(report_id, number)
+        current = report_at(session, report_id, request, permissions.MANAGE)
+        found = ctx.get_version(report_id, number, current.folder)
         if not found or not isinstance(found.get("definition"), dict):
             raise HTTPException(status_code=404, detail="Version not found")
         payload = copy.deepcopy(found["definition"])
-        payload["folder"] = (current.editor_config or {}).get("folder", payload.get("folder", "General"))  # restoring does not move it
-        saved = save_report_payload(payload, expected_id=report_id, action=f"restored version {number}", user=session["username"])
+        payload["folder"] = current.folder  # restoring does not move it
+        saved = save_report_payload(payload, expected_id=report_id, previous=current, action=f"restored version {number}", user=session["username"])
 
         def replace_draft(data: dict[str, Any]) -> None:
             meta = data.get(WORKSPACE_META)
@@ -395,9 +411,9 @@ def register(app: FastAPI, ctx: SimpleNamespace) -> None:
             data.update(copy.deepcopy(saved.editor_config))
             if meta:
                 data[WORKSPACE_META] = meta
-        sync_workspace_copy(report_id, replace_draft)
-        record_history(report_id, "restored", session["username"], f"version {number}")
-        return {"report": resource_details(saved, session), "versions": ctx.list_versions(report_id)}
+        sync_workspace_copy(saved, replace_draft)
+        record_history(report_id, "restored", session["username"], f"version {number}", folder=saved.folder)
+        return {"report": resource_details(saved, session), "versions": ctx.list_versions(report_id, saved.folder)}
 
 
     # ---------------------------------------------------------------- folder permissions (administrators)

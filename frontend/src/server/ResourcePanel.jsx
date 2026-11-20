@@ -3,9 +3,10 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Notice, formatWhen } from '../portal/Shell.jsx';
 import RunPanel, { FORMAT_LABELS } from './RunPanel.jsx';
-import { SchedulesList } from './Schedules.jsx';
+import { ScheduleWatcher, SchedulesList } from './Schedules.jsx';
 import { DbLogo, adapterTypeLabel } from '../shared/adapters.jsx';
 import { serverApi } from './serverApi.js';
+import { optionalFilters } from '../errorHelp.js';
 
 export const RESOURCE_TABS = [['run', 'Run'], ['overview', 'Overview'], ['parameters', 'Parameters'], ['datasource', 'Data Source'], ['query', 'Query'], ['schedules', 'Schedules'], ['versions', 'Versions'], ['history', 'History']];
 const ACTION_ICONS = { published: '⇪', edited: '✎', copied: '⧉', moved: '➜', uploaded: '⤒', deleted: '✕' };
@@ -41,6 +42,26 @@ function OverviewTab({ info, onSave }) {
         {d.subreports.length > 0 && <><dt>Subreports</dt><dd>{d.subreports.join(', ')}</dd></>}
         {info.usedBy.length > 0 && <><dt>Used by</dt><dd>{info.usedBy.join(', ')} (as a subreport)</dd></>}
       </dl>
+      {(d.images || []).length > 0 && (
+        <>
+          <h4 className="res-files-title">Files in this report</h4>
+          <p className="muted" style={{ fontSize: 12, margin: '0 0 6px' }}>Pictures are stored inside the report: they are published, copied and downloaded (.mrd) together with it.</p>
+          <table className="res-files">
+            <thead><tr><th>File</th><th>Type</th><th>Size</th><th>Where</th><th>From</th></tr></thead>
+            <tbody>
+              {d.images.map((img) => (
+                <tr key={`${img.band}-${img.elementId}`} className={img.missing ? 'missing' : ''}>
+                  <td>{img.name || <span className="muted">(no name)</span>}{img.missing && <b className="res-missing"> · missing — prints empty</b>}</td>
+                  <td>{img.format ? img.format.toUpperCase() : '—'}</td>
+                  <td>{img.bytes ? `${(img.bytes / 1024).toFixed(1)} KB` : '—'}</td>
+                  <td>{img.band} · {img.size} px</td>
+                  <td className="res-from">{img.url ? <a href={img.url} target="_blank" rel="noopener noreferrer">{img.url}</a> : img.reference ? <code title="The Jaspersoft image expression it was imported from">{img.reference}</code> : 'uploaded file'}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </>
+      )}
     </div>
   );
 }
@@ -57,8 +78,17 @@ function ParametersTab({ info, onSave }) {
       allowedValues: r.allowedText.split(',').map((v) => v.trim()).filter(Boolean),
     })),
   });
+  const filters = optionalFilters({ querySource: info.querySource, parameters: rows });
+  const strict = rows.filter((r) => r.required && filters[r.name]);
   return (
     <div className="stack">
+      {strict.length > 0 && (
+        <div className="notice warn">
+          <b>{strict.map((r) => r.name).join(', ')}</b> {strict.length === 1 ? 'is' : 'are'} Required, but the report already gives all records when {strict.length === 1 ? 'it is' : 'they are'} empty
+          ({strict.map((r) => filters[r.name]).join('; ')}). Untick Required so the report and its schedules run without {strict.length === 1 ? 'it' : 'them'}.
+          {info.canEdit && <> <button type="button" className="btn sm" onClick={() => setRows((list) => list.map((r) => (filters[r.name] ? { ...r, required: false } : r)))}>Make optional</button> then Save parameters.</>}
+        </div>
+      )}
       <div className="table-wrap">
         <table className="grid-table">
           <thead><tr><th>Name</th><th>Type</th><th>Label (question)</th><th>Help text</th><th>Required</th><th>Default</th><th>Allowed values</th></tr></thead>
@@ -153,11 +183,11 @@ function VersionsTab({ info, onRestored }) {
   const [versions, setVersions] = useState(null);
   const [shown, setShown] = useState(null); // { version, definition }
   const [error, setError] = useState('');
-  useEffect(() => { serverApi.versions(info.id).then((r) => setVersions(r.versions)).catch((e) => { setVersions([]); setError(e.message); }); }, [info.id]);
-  const show = async (number) => { try { setShown(await serverApi.version(info.id, number)); } catch (e) { setError(e.message); } };
+  useEffect(() => { serverApi.versions(info.ref).then((r) => setVersions(r.versions)).catch((e) => { setVersions([]); setError(e.message); }); }, [info.ref]);
+  const show = async (number) => { try { setShown(await serverApi.version(info.ref, number)); } catch (e) { setError(e.message); } };
   const restore = async (number) => {
     if (!window.confirm(`Make version ${number} the current version of “${info.title}”? The current state stays in the list as a version too.`)) return;
-    try { const result = await serverApi.restoreVersion(info.id, number); setVersions(result.versions); setShown(null); onRestored(result.report, number); } catch (e) { setError(e.message); }
+    try { const result = await serverApi.restoreVersion(info.ref, number); setVersions(result.versions); setShown(null); onRestored(result.report, number); } catch (e) { setError(e.message); }
   };
   if (versions === null) return <p className="muted">Loading…</p>;
   return (
@@ -218,7 +248,7 @@ export default function ResourcePanel({ reportId, tab, setTab, onChanged, menu, 
   if (!info) return <section className="card resource"><Notice message={message || { text: 'Loading…' }} /></section>;
   const save = async (changes) => {
     try {
-      const next = await serverApi.edit(info.id, changes);
+      const next = await serverApi.edit(info.ref, changes);
       setInfo(next);
       setMessage({ text: 'Saved on the server (and in the designer workspace copy).', kind: 'ok' });
       onChanged();
@@ -241,6 +271,7 @@ export default function ResourcePanel({ reportId, tab, setTab, onChanged, menu, 
       {tab === 'datasource' && <DataSourceTab info={info} onSave={save} />}
       {tab === 'query' && <QueryTab info={info} onSave={save} />}
       {tab === 'schedules' && <SchedulesList report={info} info={scheduleInfo} onMessage={setMessage} />}
+      {scheduleInfo?.schedulerOn !== false && <ScheduleWatcher report={info} onMessage={setMessage} />}
       {tab === 'versions' && <VersionsTab info={info} onRestored={(report, number) => { setInfo(report); setMessage({ kind: 'ok', text: `Version ${number} is the current version again (the designer workspace copy too).` }); onChanged(); }} />}
       {tab === 'history' && <HistoryTab info={info} />}
     </section>

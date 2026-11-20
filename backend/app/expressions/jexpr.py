@@ -28,13 +28,15 @@ class JExprError(ValueError):
 _TOKEN_RE = re.compile(
     r"""\s*(?:
       (?P<ref>\$[FPV]\{[^{}]+\})
-     |(?P<str>"(?:[^"\\]|\\.)*")
+     |(?P<str>"(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*')
      |(?P<num>\d+\.\d*(?:[eE][+-]?\d+)?[dDfF]?|\.\d+[dDfF]?|\d+[lL]?)
      |(?P<name>[A-Za-z_][A-Za-z0-9_]*)
-     |(?P<op>\|\||&&|==|!=|<=|>=|[-+*/%<>!?:(),.])
+     |(?P<op>\|\||&&|==|!=|<=|>=|[-+*/%<>!?:(),.\[\]])
     )""",
     re.X,
 )
+# whitespace plus Java comments (// to end of line, /* ... */) between tokens
+_SKIP_RE = re.compile(r"(?:\s+|//[^\n]*|/\*.*?\*/)*", re.S)
 _ESCAPES = {"n": "\n", "t": "\t", "r": "\r", '"': '"', "\\": "\\", "'": "'", "b": "\b", "f": "\f"}
 
 
@@ -61,7 +63,8 @@ def _tokenize(text: str) -> list[tuple[str, Any]]:
     tokens: list[tuple[str, Any]] = []
     pos = 0
     while pos < len(text):
-        if not text[pos:].strip():
+        pos = _SKIP_RE.match(text, pos).end()
+        if pos >= len(text):
             break
         match = _TOKEN_RE.match(text, pos)
         if not match or match.end() == pos:
@@ -82,7 +85,10 @@ def _tokenize(text: str) -> list[tuple[str, Any]]:
 
 
 # --------------------------------------------------------------------- parser
-_STATIC_CLASSES = {"Double", "Integer", "Long", "String", "Math", "Boolean", "BigDecimal", "Float", "Short"}
+_STATIC_CLASSES = {"Double", "Integer", "Long", "String", "Math", "Boolean", "BigDecimal", "Float", "Short",
+                   # java.time (Java 8+): parse / now / format with DateTimeFormatter.ofPattern
+                   "OffsetDateTime", "LocalDateTime", "LocalDate", "ZonedDateTime", "Instant", "DateTimeFormatter"}
+_TIME_CLASSES = {"OffsetDateTime", "LocalDateTime", "LocalDate", "ZonedDateTime", "Instant"}
 _NEW_CLASSES = {"Date", "DecimalFormat", "SimpleDateFormat", "Double", "Integer", "Long", "String", "BigDecimal", "Float", "GregorianCalendar"}
 _PACKAGE_PREFIXES = ("java", "lang", "util", "text", "math", "sql")
 
@@ -200,14 +206,19 @@ class _Parser:
         return values
 
     def postfix(self, node):
-        while self.accept("op", "."):
+        while True:
+            if self.accept("op", "["):                      # list[0], map["key"], "text".split(":")[1]
+                node = ("index", node, self.ternary())
+                self.expect("op", "]")
+                continue
+            if not self.accept("op", "."):
+                return node
             kind, name = self.take()
             if kind != "name":
                 raise JExprError("A method name is expected")
             if self.peek() != ("op", "("):
                 raise JExprError(f"Field access .{name} is not supported")
             node = ("call", node, name, self.args())
-        return node
 
     def primary(self):
         kind, value = self.take()
@@ -320,8 +331,15 @@ def _cap(text: str) -> str:
 # --- DecimalFormat
 class DecimalFormatter:
     def __init__(self, pattern: str):
-        pattern = pattern.split(";")[0]
-        self.prefix, self.core, self.suffix = self._split(pattern)
+        positive, _, negative = pattern.partition(";")
+        # Java "#,##0.00;(#,##0.00)": the second part gives the prefix/suffix of negative numbers
+        self.negative = self._split(negative)[0::2] if negative else None
+        # scientific "0.00E0": mantissa pattern + minimum exponent digits
+        self.exponent = 0
+        science = re.fullmatch(r"([^E]*[#0.])E(0+)(.*)", positive)
+        if science and "'" not in positive:
+            positive, self.exponent = science.group(1) + science.group(3), len(science.group(2))
+        self.prefix, self.core, self.suffix = self._split(positive)
         self.percent = "%" in (self.prefix + self.suffix)
         integer, _, fraction = self.core.partition(".")
         self.min_int = integer.replace(",", "").count("0")
@@ -364,6 +382,10 @@ class DecimalFormatter:
         number = abs(number)
         if isinstance(number, float) and math.isinf(number):
             return ("-" if negative else "") + self.prefix + "∞" + self.suffix
+        power = None
+        if self.exponent:
+            power = 0 if number == 0 else math.floor(math.log10(number))
+            number = number / (10 ** power) if number else 0.0
         from decimal import ROUND_HALF_EVEN, Decimal
         quantum = Decimal(1).scaleb(-self.max_frac)
         dec = Decimal(repr(float(number)) if isinstance(number, float) else number).quantize(quantum, rounding=ROUND_HALF_EVEN)
@@ -383,9 +405,27 @@ class DecimalFormatter:
         body = whole + ("." + frac if frac else "")
         if body == "":
             body = "0"
-        if negative and body.strip("0.,") != "":
+        if power is not None:
+            if whole.replace(",", "") == "10":       # 9.995 rounded up to 10.00: one more power of ten
+                return DecimalFormatter._rescale(self, -number if negative else number, power)
+            body += "E" + ("-" if power < 0 else "") + str(abs(power)).rjust(self.exponent, "0")
+        if negative and body.strip("0.,E-") not in ("", "E"):
+            if self.negative is not None:
+                return self.negative[0] + body + self.negative[1]
             return "-" + self.prefix + body + self.suffix
         return self.prefix + body + self.suffix
+
+    def _rescale(self, mantissa: float, power: int) -> str:
+        sign = "-" if mantissa < 0 else ""
+        again = DecimalFormatter.__new__(DecimalFormatter)
+        again.__dict__.update(self.__dict__)
+        again.exponent = 0
+        body = again.format(abs(mantissa) / 10)
+        body = body[len(self.prefix):len(body) - len(self.suffix) if self.suffix else None]
+        text = body + "E" + ("-" if power + 1 < 0 else "") + str(abs(power + 1)).rjust(self.exponent, "0")
+        if sign and self.negative is not None:
+            return self.negative[0] + text + self.negative[1]
+        return sign + self.prefix + text + self.suffix
 
 
 # --- SimpleDateFormat
@@ -627,6 +667,60 @@ _STRING_METHODS: dict[str, Callable[..., Any]] = {
 }
 
 
+def _split(s: str, pattern: Any, limit: Any = 0) -> list[str]:
+    """String.split(regex[, limit]) like Java: limit 0 drops trailing empty strings."""
+    limit = int(to_number(limit))
+    regex = _java_regex(pattern)
+    if s == "":
+        return [""]                            # Java: no match -> the original string
+    parts = regex.split(s, maxsplit=limit - 1 if limit > 0 else 0)
+    first = regex.match(s)
+    if first is not None and first.end() == 0 and parts and parts[0] == "":
+        parts = parts[1:]                      # Java 8+: a zero-width match at the start adds no empty first part
+    if limit == 0:
+        while parts and parts[-1] == "":
+            parts.pop()
+    if len(parts) > 10_000:
+        raise JExprError("split() produced too many parts")
+    return parts
+
+
+_STRING_METHODS["split"] = _split
+
+
+def _index(target: Any, key: Any) -> Any:
+    """Groovy subscript (Jasper reports with language="groovy"): list[0], map["Name"], text[0].
+
+    Like Groovy, an index past the end gives null and a negative index counts from the end.
+    """
+    if target is None:
+        raise JExprError("[...] used on null")
+    if isinstance(target, dict):
+        return target.get(key if isinstance(key, str) else java_str(key))
+    if isinstance(target, (list, tuple, str)):
+        if not _is_num(key) or int(key) != key:
+            raise JExprError("A list index must be a whole number")
+        index = int(key)
+        if -len(target) <= index < len(target):
+            return target[index]
+        return None
+    raise JExprError("[...] is only supported on lists, maps and text")
+
+
+_LIST_METHODS: dict[str, Callable[..., Any]] = {
+    "size": lambda items: len(items),
+    "isEmpty": lambda items: len(items) == 0,
+    "contains": lambda items, value: any(_equal(item, value) for item in items),
+    "indexOf": lambda items, value: next((i for i, item in enumerate(items) if _equal(item, value)), -1),
+}
+_MAP_METHODS: dict[str, Callable[..., Any]] = {
+    "get": lambda mapping, key: mapping.get(key if isinstance(key, str) else java_str(key)),
+    "containsKey": lambda mapping, key: (key if isinstance(key, str) else java_str(key)) in mapping,
+    "size": lambda mapping: len(mapping),
+    "isEmpty": lambda mapping: len(mapping) == 0,
+}
+
+
 class Calendar:
     """java.util.GregorianCalendar subset: built from fields, .getTime() gives the Date (a datetime)."""
 
@@ -724,6 +818,8 @@ class Evaluator:
             return self.static(node[1], node[2], [self.run(a) for a in node[3]])
         if kind == "call":
             return self.call(self.run(node[1]), node[2], [self.run(a) for a in node[3]])
+        if kind == "index":
+            return _index(self.run(node[1]), self.run(node[2]))
         raise JExprError(f"Unknown node {kind}")
 
     def construct(self, cls: str, args: list) -> Any:
@@ -755,6 +851,16 @@ class Evaluator:
             return java_str(args[0])
         if cls == "Boolean" and method in ("parseBoolean", "valueOf"):
             return str(args[0]).strip().lower() == "true"
+        if cls == "DateTimeFormatter" and method == "ofPattern" and args:
+            return DateFormatter(str(args[0]))
+        if cls in _TIME_CLASSES and method == "now":
+            moment = datetime.now(timezone.utc).replace(tzinfo=None)
+            return datetime(moment.year, moment.month, moment.day) if cls == "LocalDate" else moment
+        if cls in _TIME_CLASSES and method == "parse" and args:
+            if args[0] is None:
+                return None
+            moment = args[1].parse(args[0]) if len(args) > 1 and isinstance(args[1], DateFormatter) else to_datetime(args[0])
+            return datetime(moment.year, moment.month, moment.day) if cls == "LocalDate" else moment
         if cls == "Math":
             numbers = [to_number(a) for a in args]
             table = {
@@ -781,6 +887,19 @@ class Evaluator:
             moment = to_datetime(target)
             if method in _DATE_METHODS and not args:
                 return _DATE_METHODS[method](moment)
+            if method == "format" and len(args) == 1 and isinstance(args[0], DateFormatter):
+                return args[0].format(moment)               # java.time: date.format(DateTimeFormatter.ofPattern(…))
+            if method in ("toLocalDate",):
+                return datetime(moment.year, moment.month, moment.day)
+            if method in ("toLocalDateTime", "toInstant", "toDate"):
+                return moment
+            if method in ("plusDays", "minusDays", "plusHours", "minusHours", "plusMinutes", "minusMinutes") and len(args) == 1:
+                unit = {"Days": "days", "Hours": "hours", "Minutes": "minutes"}[method[4:] if method.startswith("plus") else method[5:]]
+                amount = to_number(args[0]) * (1 if method.startswith("plus") else -1)
+                return moment + timedelta(**{unit: amount})
+            if method in ("getYear", "getMonthValue", "getDayOfMonth", "getHour", "getMinute") and not args:
+                return {"getYear": moment.year, "getMonthValue": moment.month, "getDayOfMonth": moment.day,
+                        "getHour": moment.hour, "getMinute": moment.minute}[method]
             if method in ("before", "after") and len(args) == 1:
                 other = to_datetime(args[0])
                 return moment < other if method == "before" else moment > other
@@ -789,6 +908,16 @@ class Evaluator:
                 return _substring(target, *args)
             if method in _STRING_METHODS:
                 return _STRING_METHODS[method](target, *args)
+        if isinstance(target, (list, tuple)):
+            if method == "get" and len(args) == 1:
+                index = args[0]
+                if not _is_num(index) or int(index) != index or not 0 <= int(index) < len(target):
+                    raise JExprError("List.get(): index out of range")
+                return target[int(index)]
+            if method in _LIST_METHODS:
+                return _LIST_METHODS[method](target, *args)
+        if isinstance(target, dict) and method in _MAP_METHODS:
+            return _MAP_METHODS[method](target, *args)
         if _is_num(target) and method in ("intValue", "longValue", "shortValue"):
             return int(target)
         if _is_num(target) and method in ("doubleValue", "floatValue"):

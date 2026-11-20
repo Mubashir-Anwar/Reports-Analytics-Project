@@ -11,7 +11,8 @@ Who may do what (accounts need the Analytics right for all of it):
     GET    /api/analytics/datasets                     POST (create)        POST /api/analytics/datasets/test
     GET    /api/analytics/datasets/{id}                PUT  DELETE           GET  …/{id}/rows   GET …/{id}/refreshes
     POST   /api/analytics/datasets/{id}/refresh        import now in the background (202)
-    GET    /api/analytics/relationships                POST  DELETE /api/analytics/relationships/{id}
+    GET    /api/analytics/relationships                POST  PUT  DELETE /api/analytics/relationships/{id}
+    POST   /api/analytics/relationships/check          GET   /api/analytics/relationships/suggest
     GET    /api/analytics/dashboards                   POST  GET/PUT/DELETE /api/analytics/dashboards/{id}
     POST   /api/analytics/query                        one visual → columns and rows
     POST   /api/analytics/query-batch                  every visual of a dashboard at once (one report place)
@@ -48,13 +49,14 @@ from __future__ import annotations
 
 import re
 import shutil
+import time
 from types import SimpleNamespace
 from typing import Any
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse
 
-from backend.app.analytics import bundle, engine, importer, powerbi, settings, store
+from backend.app.analytics import bundle, engine, importer, model as analytics_model, powerbi, queries as analytics_queries, settings, store
 from backend.app.analytics.refresher import next_refresh
 from backend.app.connectors.errors import ConnectorQueryError, MongoReadAccessError
 from backend.app.connectors.profiles import load_connection_profiles
@@ -315,6 +317,45 @@ def register(app: FastAPI, ctx: SimpleNamespace) -> None:
         store.save_relationship(record)
         audit(request, session, "analytics.relationship.created", record["id"], clean)
         return JSONResponse({"relationship": record}, status_code=201)
+
+    def model_sides(payload: dict[str, Any]) -> tuple[dict[str, Any], dict[str, Any]]:
+        left, right = store.dataset(str(payload.get("fromDataset") or "")), store.dataset(str(payload.get("toDataset") or ""))
+        if left is None or right is None:
+            raise HTTPException(status_code=422, detail="Choose both datasets")
+        return left, right
+
+    @app.post("/api/analytics/relationships/check")
+    async def check_relationship(request: Request) -> dict[str, Any]:
+        """How two columns join on the data (keys found on both sides, cardinality, advice) — before saving."""
+        session = modeller(request)
+        payload = await body(request)
+        left, right = model_sides(payload)
+        try:
+            with ctx.run_gate.slot(caller_of("", user=session["username"])):
+                return analytics_model.check(left, str(payload.get("fromColumn") or ""), right, str(payload.get("toColumn") or ""))
+        except engine.QueryError as exc:
+            raise bad(exc) from None
+
+    @app.get("/api/analytics/relationships/suggest")
+    def suggest_relationships(request: Request) -> dict[str, Any]:
+        """Pairs of columns that look like keys of each other, checked on the data."""
+        session = modeller(request)
+        with ctx.run_gate.slot(caller_of("", user=session["username"])):
+            return {"suggestions": analytics_model.suggest(store.datasets(), store.relationships())}
+
+    @app.put("/api/analytics/relationships/{rel_id}")
+    async def update_relationship(request: Request, rel_id: str) -> dict[str, Any]:
+        session = modeller(request)
+        current = store.relationship(rel_id)
+        if current is None:
+            raise HTTPException(status_code=404, detail="Relationship not found")
+        try:
+            clean = store.clean_relationship(await body(request), current)
+        except ValueError as exc:
+            raise bad(exc) from None
+        record = store.save_relationship({**current, **clean})
+        audit(request, session, "analytics.relationship.updated", rel_id, clean)
+        return {"relationship": record}
 
     @app.delete("/api/analytics/relationships/{rel_id}")
     async def delete_relationship(request: Request, rel_id: str) -> dict[str, Any]:
@@ -627,6 +668,129 @@ def register(app: FastAPI, ctx: SimpleNamespace) -> None:
         if removed:
             admin_audit(request, actor, "analytics.files.cleaned", "analytics", {"files": removed, "bytes": freed})
         return {"removed": removed, "freedBytes": freed, "stillOpen": kept}
+
+    # ------------------------------------------------------------- Queries (DAX / SQL), saved
+    def query_view(item: dict[str, Any], session: dict[str, Any]) -> dict[str, Any]:
+        return {**item, "mayChange": may_change(session, item)}
+
+    def visible_query(session: dict[str, Any], query_id: str) -> dict[str, Any]:
+        item = store.saved_query(query_id)
+        if item is None or not sees(session, item):
+            raise HTTPException(status_code=404, detail="Query not found")
+        return item
+
+    def run_source(session: dict[str, Any], item: dict[str, Any], limit: Any = None) -> dict[str, Any]:
+        """A read-only query on the data adapter itself (MongoDB pipeline or the database's SQL): the first rows."""
+        if not may_model(session):
+            raise HTTPException(status_code=403, detail="Queries that read a database directly are run by modellers. "
+                                "Ask one to make a dataset from this query, then use DAX or SQL over the dataset")
+        try:
+            cap = max(1, min(int(limit or 1000), 10_000))
+        except (TypeError, ValueError):
+            cap = 1000
+        started = time.monotonic()
+        try:
+            source = store.clean_source({"connectionId": item.get("connectionId"), "queryLanguage": item.get("queryLanguage"),
+                                         "collection": item.get("collection"), "querySource": item.get("text")}, adapters())
+            with ctx.run_gate.slot(caller_of("", user=session["username"])):
+                found = importer.preview(ctx, {**source, "name": "query"}, limit=cap + 1)
+        except HTTPException:
+            raise
+        except (ValueError, ConnectorQueryError, MongoReadAccessError) as exc:
+            raise bad(exc) from None
+        rows = found["rows"][:cap]
+
+        def kind(index: int) -> str:
+            values = [row[index] for row in rows if row[index] is not None][:50]
+            if values and all(isinstance(v, (int, float)) and not isinstance(v, bool) for v in values):
+                return "number"
+            if values and all(isinstance(v, str) and re.match(r"\d{4}-\d{2}-\d{2}(T|$)", v) for v in values):
+                return "date"
+            return "text"
+        columns = [{"name": name, "type": kind(i)} for i, name in enumerate(found["columns"])]
+        return {"language": "source", "queryLanguage": source["queryLanguage"], "connectionId": source["connectionId"],
+                "collection": source["collection"], "sql": "", "columns": columns, "rows": rows,
+                "rowCount": len(rows), "truncated": len(found["rows"]) > cap,
+                "durationMs": int((time.monotonic() - started) * 1000), "tables": []}
+
+    def run_text(session: dict[str, Any], language: str, text: str, limit: Any = None, item: dict[str, Any] | None = None) -> dict[str, Any]:
+        if str(language or "").lower() == "source":
+            return run_source(session, {**(item or {}), "text": text}, limit)
+        rules = permissions.load_rules()
+        mine = [d for d in store.datasets() if sees(session, d, rules=rules)]
+        try:
+            with ctx.run_gate.slot(caller_of("", user=session["username"])):
+                return analytics_queries.run(language, text, mine, int(limit) if limit else None, store.relationships())
+        except (engine.QueryError, engine.QueryTimeout, ValueError) as exc:
+            raise bad(exc) from None
+
+    @app.get("/api/analytics/queries")
+    def list_queries(request: Request) -> dict[str, Any]:
+        session = user(request)
+        rules = permissions.load_rules()
+        return {"queries": [query_view(q, session) for q in store.queries() if sees(session, q, rules=rules)]}
+
+    @app.post("/api/analytics/queries/run")
+    async def run_query_text(request: Request) -> dict[str, Any]:
+        """Run a query that is being written (not saved): {"language": "dax" | "sql", "text": "EVALUATE …"}, or
+        {"language": "source", "connectionId", "queryLanguage": "mongosh" | "aggregation-json" | "python" | "javascript" | "sql",
+        "collection", "text"} to read the data adapter itself (read-only, the first rows)."""
+        session = modeller(request)
+        payload = await body(request)
+        return run_text(session, payload.get("language"), payload.get("text"), payload.get("limit"), payload)
+
+    @app.post("/api/analytics/queries")
+    async def create_query(request: Request) -> dict[str, Any]:
+        session = modeller(request)
+        payload = await body(request)
+        try:
+            clean = store.clean_query(payload, adapters=adapters())
+        except ValueError as exc:
+            raise bad(exc) from None
+        if not sees(session, clean, permissions.MANAGE) and not may_model(session):
+            raise HTTPException(status_code=403, detail="You may not save queries in this folder")
+        record = {"id": store.new_id("qry"), **clean, "owner": session["username"], "createdAt": store.now(),
+                  "updatedBy": session["username"], "updatedAt": store.now()}
+        store.save_query(record)
+        audit(request, session, "analytics.query.created", record["id"], {"name": record["name"], "language": record["language"]})
+        return {"query": query_view(record, session)}
+
+    @app.get("/api/analytics/queries/{query_id}")
+    def get_query(query_id: str, request: Request) -> dict[str, Any]:
+        session = user(request)
+        return {"query": query_view(visible_query(session, query_id), session)}
+
+    @app.put("/api/analytics/queries/{query_id}")
+    async def update_query(query_id: str, request: Request) -> dict[str, Any]:
+        session = modeller(request)
+        current = visible_query(session, query_id)
+        if not may_change(session, current):
+            raise HTTPException(status_code=403, detail="Only its owner or an administrator may change this query")
+        try:
+            clean = store.clean_query(await body(request), current, adapters=adapters())
+        except ValueError as exc:
+            raise bad(exc) from None
+        record = {**current, **clean, "updatedBy": session["username"], "updatedAt": store.now()}
+        store.save_query(record)
+        audit(request, session, "analytics.query.updated", query_id, {"name": record["name"]})
+        return {"query": query_view(record, session)}
+
+    @app.delete("/api/analytics/queries/{query_id}")
+    def delete_query(query_id: str, request: Request) -> dict[str, Any]:
+        session = modeller(request)
+        current = visible_query(session, query_id)
+        if not may_change(session, current):
+            raise HTTPException(status_code=403, detail="Only its owner or an administrator may delete this query")
+        store.delete_query(query_id)
+        audit(request, session, "analytics.query.deleted", query_id, {"name": current["name"]})
+        return {"deleted": query_id}
+
+    @app.post("/api/analytics/queries/{query_id}/run")
+    def run_saved_query(query_id: str, request: Request) -> dict[str, Any]:
+        """Anyone with the Analytics right who sees the query's folder may run it (over the datasets they see)."""
+        session = user(request)
+        item = visible_query(session, query_id)
+        return {**run_text(session, item["language"], item["text"], item=item), "query": query_view(item, session)}
 
     # ------------------------------------------------------------- queries
     @app.post("/api/analytics/query")

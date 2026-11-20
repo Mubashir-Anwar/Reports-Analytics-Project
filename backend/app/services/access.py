@@ -29,9 +29,12 @@ def report_level(ctx: SimpleNamespace, session: dict[str, Any], definition: Repo
     return permissions.level(session, ctx.report_folder(definition), rules)
 
 
-def require_report(ctx: SimpleNamespace, session: dict[str, Any], report_id: str, needed: int = permissions.RUN) -> ReportDefinition:
-    """The published report if the user may use it at `needed`; a hidden report looks like a missing one (404)."""
-    definition = ctx.reports_by_id.get(report_id)
+def require_report(ctx: SimpleNamespace, session: dict[str, Any], report_id: str, needed: int = permissions.RUN,
+                   folder: str | None = None) -> ReportDefinition:
+    """The published report if the user may use it at `needed`; a hidden report looks like a missing one (404).
+    `folder` chooses between reports with the same ID; without it the only one this user can see is taken."""
+    rules = permissions.load_rules()
+    definition = ctx.reports_by_id.find(report_id, folder, lambda item: ctx.report_level(session, item, rules) >= permissions.RUN)
     if definition is None or definition.editor_config is None:
         raise HTTPException(status_code=404, detail="This report is not published on the server")
     have = ctx.report_level(session, definition)
@@ -73,7 +76,6 @@ def report_allowed_for(ctx: SimpleNamespace, session: dict[str, Any] | None):
         return None
     rules = permissions.load_rules()
 
-    def allowed(report_id: str) -> bool:
-        definition = ctx.reports_by_id.get(report_id)
-        return definition is not None and ctx.report_level(session, definition, rules) >= permissions.RUN
+    def allowed(definition: ReportDefinition) -> bool:
+        return ctx.report_level(session, definition, rules) >= permissions.RUN
     return allowed

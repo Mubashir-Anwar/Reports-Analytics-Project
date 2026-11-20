@@ -116,6 +116,7 @@ ENTITY_MIGRATIONS: list[tuple[int, str, Any]] = [
     (2, "schedules and job runs", _create_entities),      # create_all only adds the tables that are missing
     (3, "reports, drafts, folders and data sources", _create_entities),
     (4, "analytics: datasets, relationships, dashboards and refreshes", _create_entities),
+    (5, "analytics: saved DAX / SQL queries", _create_entities),
 ]
 
 _ENGINES: dict[str, sa.Engine] = {}

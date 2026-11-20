@@ -111,14 +111,14 @@ export const TEMPLATES = [
   { id: 'blank', name: 'Blank A4', text: 'An empty portrait page with Title, Detail and Page Footer. Design everything yourself.', needsFields: false, build: () => blank(A4) },
   { id: 'blank-landscape', name: 'Blank A4 landscape', text: 'An empty landscape page.', needsFields: false, build: () => blank(A4_LANDSCAPE) },
   { id: 'letter', name: 'Letter', text: 'Letterhead with logo, date, address, body text and signature. One letter per record (e.g. acceptance letters).', needsFields: false, build: letter },
-  { id: 'table', name: 'Table report', text: 'Column headings and one row per record, from the fields (the old “Auto layout”).', needsFields: true, build: (columns, title, previous) => autoLayout(columns, {}, title, previous) },
+  { id: 'table', name: 'Table report', text: 'Column headings and one row per record, from the fields (the old “Auto layout”).', needsFields: true, build: (columns, title, previous, options) => autoLayout(columns, {}, title, previous, options), hasOptions: true },
   { id: 'form', name: 'Form (label : value)', text: 'Every field as “label : value”, one block per record — for detail sheets and profiles.', needsFields: false, build: form },
   { id: 'certificate', name: 'Certificate / image page', text: 'Landscape page with a border in the Background band and big centered text. One per record.', needsFields: false, build: certificate },
 ];
 
-export function applyTemplate(id, columns, title, previous) {
+export function applyTemplate(id, columns, title, previous, options) {
   const template = TEMPLATES.find((t) => t.id === id);
-  const design = template.build(columns, title, previous);
+  const design = template.build(columns, title, previous, options);
   // keep the report's own groups, variables, calculated fields and sort when they still fit the fields
   return {
     ...design,

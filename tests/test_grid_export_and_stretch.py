@@ -94,3 +94,28 @@ def test_stretch_with_overflow_grows_the_band_only_when_needed():
 def test_pdf_draws_every_image(images):
     pdf = dr.render_design_pdf(design(images=images), "T", COLUMNS, ROWS, {})
     assert pdf.count(b"/Subtype /Image") == images
+
+
+def test_mixed_layout_places_the_headings_exactly_and_the_data_as_a_filterable_table():
+    d = design("mixed")
+    assert d["page"]["sheetLayout"] == "mixed"
+    d["bands"]["pageHeader"]["elements"].append(dr.validate_design({"bands": {"pageHeader": {"height": 20, "elements": [
+        st(200, 0, 100, "Report no. 7", borderWidth=1)]}}}, COLUMNS, set())["bands"]["pageHeader"]["elements"][0])
+    sheet = load_workbook(io.BytesIO(dr.render_design_xlsx(d, "T", COLUMNS, ROWS, {}))).active
+    cells = {c.value: c for row in sheet.iter_rows() for c in row if c.value is not None}
+    for expected in ("Digital Loan Application", "Branch report header", "Report no. 7", "Name", "Address", "Ali", LONG, "Sara", "Karachi"):
+        assert expected in cells
+    assert "Total: 2" not in cells and "Page 1" not in cells          # the data part is only the records
+    name, ali, sara = cells["Name"], cells["Ali"], cells["Sara"]
+    assert ali.column == name.column and ali.row == name.row + 1 and sara.row == ali.row + 1   # one row per record
+    assert cells["Karachi"].column == cells["Address"].column
+    # pixel-perfect: "Report no. 7" starts at x=200, inside the Address column, so that column is split there and
+    # the Address data is merged across both cells (the same on every row, so Excel can still sort)
+    report = cells["Report no. 7"]
+    assert report.row == cells["Branch report header"].row and report.column > cells["Address"].column
+    karachi = [r for r in sheet.merged_cells.ranges if cells["Karachi"].coordinate in r]
+    assert karachi and karachi[0].max_col >= report.column and karachi[0].min_row == karachi[0].max_row
+    assert sheet.auto_filter.ref.startswith(f"A{name.row}") and sheet.freeze_panes == f"A{ali.row}"
+    assert len(sheet._images) == 1 and cells["Ali"].border.left.style == "thin"
+    data_rows = range(ali.row, sara.row + 1)
+    assert all(r.min_row == r.max_row for r in sheet.merged_cells.ranges if r.min_row in data_rows)  # never across records

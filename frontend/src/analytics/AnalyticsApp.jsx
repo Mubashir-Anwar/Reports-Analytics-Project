@@ -1,9 +1,12 @@
 // /analytics: dashboards, datasets and the model. Needs the Analytics right; datasets and the model also the
-// Designer or Admin right. Addresses: #dash/<id>, #ds/<id>, #ds/new, #model.
+// Designer or Admin right. Addresses: #dash/<id>, #ds/<id>, #ds/new, #model, #q/<id>, #q/new (DAX / SQL queries).
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Notice, Topbar } from '../portal/Shell.jsx';
 import { signOut } from '../shared/session.js';
-import { bi, describeBytes, notADashboardFile, saveDashboardFile } from './api.js';
+import { setTeamPlace } from '../shared/TeamBar.jsx';
+import { bi, describeBytes, notADashboardFile, queries, saveDashboardFile } from './api.js';
+import AnalyticsRibbon from './AnalyticsRibbon.jsx';
+import QueryEditor, { modeLabel } from './QueryEditor.jsx';
 import Dashboard from './Dashboard.jsx';
 import DatasetEditor from './DatasetEditor.jsx';
 import ModelView from './ModelView.jsx';
@@ -12,7 +15,7 @@ import { readPbixReport } from './pbix.js';
 
 const readHash = () => {
   const [kind, id] = window.location.hash.slice(1).split('/');
-  return ['dash', 'ds', 'model'].includes(kind) ? { kind, id: id || '' } : { kind: 'home', id: '' };
+  return ['dash', 'ds', 'model', 'q'].includes(kind) ? { kind, id: id || '' } : { kind: 'home', id: '' };
 };
 
 export default function AnalyticsApp() {
@@ -22,12 +25,13 @@ export default function AnalyticsApp() {
   const [datasets, setDatasets] = useState([]);
   const [relationships, setRelationships] = useState([]);
   const [dashboards, setDashboards] = useState([]);
+  const [savedQueries, setSavedQueries] = useState([]);
   const [message, setMessage] = useState(null);
   const notify = useCallback((text, kind = 'ok') => setMessage(text ? { text, kind } : null), []);
 
   const reload = useCallback(async () => {
-    const [d, r, b] = await Promise.all([bi.datasets(), bi.relationships(), bi.dashboards()]);
-    setDatasets(d.datasets); setRelationships(r.relationships); setDashboards(b.dashboards);
+    const [d, r, b, q] = await Promise.all([bi.datasets(), bi.relationships(), bi.dashboards(), queries.list().catch(() => ({ queries: [] }))]);
+    setDatasets(d.datasets); setRelationships(r.relationships); setDashboards(b.dashboards); setSavedQueries(q.queries);
   }, []);
 
   useEffect(() => {
@@ -109,12 +113,28 @@ Type the ID of the data adapter to use: ${info.adapters.map((a) => a.id).join(',
   if (denied) {
     return (<><Topbar current="/analytics" /><div className="login-wrap"><div className="card login"><Notice message={{ text: denied, kind: 'error' }} /><button type="button" className="btn" onClick={signOut}>Sign out and use another account</button></div></div></>);
   }
+  useEffect(() => {
+    const names = { dash: 'Dashboard', ds: 'Dataset', q: 'Query', model: 'Model' };
+    const item = ({ dash: dashboards, ds: datasets, q: savedQueries }[view.kind] || []).find((x) => x.id === view.id);
+    setTeamPlace(names[view.kind] ? { place: `${view.kind}/${view.id || ''}`, title: `${names[view.kind]}${item ? ` · ${item.name || item.title || item.id}` : ''}` } : {});
+  }, [view, datasets, dashboards, savedQueries]);
   if (!info) return (<><Topbar current="/analytics" /><div className="login-wrap"><p className="muted">Connecting…</p></div></>);
 
   const current = (kind, id) => view.kind === kind && view.id === id;
+  const refreshAll = async () => {
+    const ready = datasets.filter((d) => d.status === 'ready' || d.status === 'failed');
+    if (!ready.length || !window.confirm(`Import all ${ready.length} dataset(s) again from their data adapters? It runs in the background.`)) return;
+    const results = await Promise.allSettled(ready.map((d) => bi.refresh(d.id)));
+    const failed = results.filter((r) => r.status === 'rejected').length;
+    notify(failed ? `${ready.length - failed} dataset(s) importing; ${failed} could not start.` : `${ready.length} dataset(s) importing again.`, failed ? 'warn' : 'ok');
+    reload();
+  };
+  const folderList = [...new Set(['Analytics', ...datasets.map((d) => d.folder), ...dashboards.map((d) => d.folder), ...savedQueries.map((q) => q.folder)].filter(Boolean))].sort();
   return (
     <>
       <Topbar current="/analytics" />
+      <AnalyticsRibbon info={info} view={view} go={go} onNewDashboard={newDashboard} onImport={() => picker.current?.click()}
+        onRefreshAll={refreshAll} onReload={reload} readyCount={datasets.filter((d) => d.status === 'ready').length} />
       <div className="bi">
         <aside className="bi-side" aria-label="Analytics contents">
           <div className="bi-group">
@@ -140,6 +160,15 @@ Type the ID of the data adapter to use: ${info.adapters.map((a) => a.id).join(',
               </a>
             ))}
           </div>
+          <div className="bi-group">
+            <div className="bi-group-head"><span>Queries (DAX · SQL · MongoDB)</span>{info.mayModel && <a className="btn small" href="#q/new">+ New</a>}</div>
+            {savedQueries.length === 0 && <p className="muted small">{info.mayModel ? 'Write DAX / SQL over the datasets, or a MongoDB / SQL query on a data adapter, and keep it here.' : 'No saved queries.'}</p>}
+            {savedQueries.map((q) => (
+              <a key={q.id} href={`#q/${q.id}`} className={`bi-link ${current('q', q.id) ? 'on' : ''}`}>
+                <span>{q.name}</span><small className="muted" title={modeLabel(q)}>{q.language === 'source' ? (q.queryLanguage === 'sql' ? 'DB SQL' : 'Mongo') : q.language.toUpperCase()}</small>
+              </a>
+            ))}
+          </div>
           <a href="#model" className={`bi-link model ${view.kind === 'model' ? 'on' : ''}`}><span>Model (relationships)</span><small className="muted">{relationships.length}</small></a>
         </aside>
 
@@ -162,6 +191,11 @@ Type the ID of the data adapter to use: ${info.adapters.map((a) => a.id).join(',
               onSaved={(newId) => { reload(); if (newId) go(`ds/${newId}`); }} onDeleted={() => { reload(); go(''); }} />
           )}
           {powerBi && <PowerBiImport {...powerBi} datasets={datasets} onDone={powerBiDone} onCancel={() => setPowerBi(null)} />}
+          {view.kind === 'q' && (
+            <QueryEditor key={view.id || 'new'} queryId={view.id || 'new'} datasets={datasets} adapters={info.adapters || []} mayModel={info.mayModel} notify={notify} folders={folderList}
+              onDatasetMade={() => reload()}
+              onSaved={(newId) => { reload(); if (newId && newId !== view.id) go(`q/${newId}`); }} onDeleted={() => { reload(); go(''); }} />
+          )}
           {view.kind === 'model' && <ModelView datasets={datasets} relationships={relationships} mayModel={info.mayModel} notify={notify} onChanged={reload} />}
         </main>
       </div>

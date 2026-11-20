@@ -10,6 +10,7 @@ from fastapi.responses import Response
 from backend.app.connectors import sql as sql_connector
 from backend.app.connectors.errors import ConnectorQueryError
 from backend.app.constants import OUTPUT_FORMATS, REPORT_ID_PATTERN
+from backend.app.definitions import clean_folder
 from backend.app.queries.mongo_query import (
     _validate_pipeline_parameter_names,
     _validate_read_only_pipeline,
@@ -102,7 +103,7 @@ def register(app: FastAPI, ctx: SimpleNamespace) -> None:
             if not isinstance(xml_text, str) or not xml_text.strip():
                 raise ValueError("Send the jrxml text as 'xml' in the JSON body")
             from backend.app.importers import jrxml as jrxml_import
-            return jrxml_import.import_jrxml(xml_text)
+            return jrxml_import.import_jrxml(xml_text, payload.get("resources"))   # + its image files
         except ValueError as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from None
 
@@ -154,7 +155,8 @@ def register(app: FastAPI, ctx: SimpleNamespace) -> None:
                 raise ValueError("rows must be a list of objects")
             title = str(payload.get("title", "Report"))
             rows = rows[:2000]
-            token = designer_render.SUBREPORT_LOADER.set(subreport_loader())  # Subreports run their published report
+            # Subreports run their published report (first the one in the same folder as this report)
+            token = designer_render.SUBREPORT_LOADER.set(subreport_loader(None, clean_folder(payload.get("folder"))))
             # Tables / Crosstabs with their own dataset: run it on the chosen adapter; without one, sample records
             adapter = str(payload.get("connectionId") or "").strip()
             dataset_token = designer_render.DATASET_LOADER.set(

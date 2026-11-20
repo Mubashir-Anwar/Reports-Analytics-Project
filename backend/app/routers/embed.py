@@ -25,7 +25,7 @@ from pymongo.errors import PyMongoError
 from backend.app.connectors.errors import ConnectorQueryError, MongoReadAccessError
 from backend.app.connectors.mongo_fallback import _row_value
 from backend.app.constants import OUTPUT_FORMATS
-from backend.app.definitions import _safe_value, validate_parameters
+from backend.app.definitions import _safe_value, clean_folder, validate_parameters
 from backend.app.security import api_keys, embed_tokens
 from backend.app.security.headers import CSP
 
@@ -58,7 +58,8 @@ def register(app: FastAPI, ctx: SimpleNamespace) -> None:
     @app.post("/api/v1/embed-tokens", tags=["Public API v1"])
     async def create_embed_token(request: Request) -> dict[str, Any]:
         """For a website's server: a short-lived token that shows one report in its page. Body:
-        {"report": "KFS_FAL", "parameters": {"Identifier": "123"}, "expiresInSeconds": 900, "onBehalfOf": "ali"}.
+        {"report": "KFS_FAL", "folder": "cascade/KMBL/Reports", "parameters": {"Identifier": "123"}, "expiresInSeconds": 900,
+        "onBehalfOf": "ali"} ("folder" only when the same ID is published in several folders).
         The given parameters are fixed (the viewer shows them locked); the others the visitor may fill in."""
         require_report_access(request)
         scope = getattr(request.state, "report_scope", None)
@@ -68,9 +69,10 @@ def register(app: FastAPI, ctx: SimpleNamespace) -> None:
         if not key.get("embedOrigins"):
             raise HTTPException(status_code=422, detail="List the websites that may show reports for this key first (Admin → API keys → Embedding)")
         payload = await json_body(request)
-        definition = reports_by_id.get(str(payload.get("report", "")))
-        if definition is None or definition.editor_config is None or not report_in_scope(request, definition):
-            raise ctx.unknown_report(request, str(payload.get("report", "")))
+        folder = clean_folder(payload.get("folder"))
+        definition = reports_by_id.find(str(payload.get("report", "")), folder, lambda item: report_in_scope(request, item))
+        if definition is None or definition.editor_config is None:
+            raise ctx.unknown_report(request, str(payload.get("report", "")), folder)
         fixed = payload.get("parameters") or {}
         if not isinstance(fixed, dict):
             raise HTTPException(status_code=422, detail="parameters must be an object of fixed values")
@@ -82,7 +84,7 @@ def register(app: FastAPI, ctx: SimpleNamespace) -> None:
             lifetime = int(payload.get("expiresInSeconds", embed_tokens.DEFAULT_LIFETIME))
         except (TypeError, ValueError):
             raise HTTPException(status_code=422, detail="expiresInSeconds must be a number") from None
-        token, expires = embed_tokens.issue(key["id"], definition.report_id, {str(k): v for k, v in fixed.items()}, lifetime,
+        token, expires = embed_tokens.issue(key["id"], definition.ref, {str(k): v for k, v in fixed.items()}, lifetime,
                                             str(payload.get("onBehalfOf") or ""))
         ctx.audit_event(request, "embed.token_issued", definition.report_id, {"fixed": sorted(fixed), "expires": expires},
                         actor=key["name"], actor_type="api-key")
@@ -103,7 +105,10 @@ def register(app: FastAPI, ctx: SimpleNamespace) -> None:
         if wait:
             raise HTTPException(status_code=429, detail=f"Too many requests; try again in {wait} s", headers={"Retry-After": str(wait)})
         request.state.report_scope = ("key", key)
-        definition = reports_by_id.get(str(body.get("r", "")))
+        try:
+            definition = reports_by_id.get(str(body.get("r", "")))      # <folder>/<ID> (older tokens: the ID)
+        except HTTPException:
+            definition = None
         if definition is None or definition.editor_config is None or not report_in_scope(request, definition):
             raise HTTPException(status_code=404, detail="This report is no longer available")
         return key, definition, body
@@ -192,4 +197,5 @@ def register(app: FastAPI, ctx: SimpleNamespace) -> None:
         pairs = merged_pairs(definition, body, payload.get("parameters"))
         if body.get("u"):
             pairs.append(("GeneratedBy", str(body["u"])))
+        pairs.append(("Folder", definition.folder))
         return ctx.produce_report(request, f"{definition.report_id}.{output_format}", f"embed:{key['name']}", pairs)

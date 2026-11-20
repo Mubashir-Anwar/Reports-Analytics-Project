@@ -29,7 +29,7 @@ from pymongo.errors import PyMongoError
 from backend.app.connectors.errors import ConnectorQueryError, MongoReadAccessError
 from backend.app.connectors.mongo_fallback import _row_value
 from backend.app.constants import OUTPUT_FORMATS, SIGNED_LINK_KEYS
-from backend.app.definitions import _safe_value, validate_parameters
+from backend.app.definitions import _safe_value, clean_folder, validate_parameters
 from backend.app.jobs import store as job_store
 
 MEDIA = {"pdf": "application/pdf", "csv": "text/csv; charset=utf-8",
@@ -49,7 +49,7 @@ def register(app: FastAPI, ctx: SimpleNamespace) -> None:
         editor = definition.editor_config or {}
         return {
             "id": definition.report_id, "title": definition.title, "description": editor.get("description", ""),
-            "folder": editor.get("folder", "General"), "formats": editor.get("formats", sorted(OUTPUT_FORMATS)),
+            "folder": definition.folder, "formats": editor.get("formats", sorted(OUTPUT_FORMATS)),
             "defaultFormat": editor.get("defaultFormat", "pdf"),
             "parameters": [{
                 "name": spec.name, "type": spec.kind, "label": spec.label or spec.name, "description": spec.description,
@@ -59,10 +59,16 @@ def register(app: FastAPI, ctx: SimpleNamespace) -> None:
             } for spec in definition.parameters if spec.prompt],
         }
 
-    def visible_report(request: Request, report_id: str) -> Any:
-        definition = reports_by_id.get(report_id)
-        if definition is None or definition.editor_config is None or not report_in_scope(request, definition):
-            raise ctx.unknown_report(request, report_id)
+    def visible_report(request: Request, report_id: str, payload: dict[str, Any] | None = None) -> Any:
+        """The report with this ID that these credentials may run. The same ID can be published in several folders:
+        "folder" in the body (or ?folder=, or Folder among the parameters) says which one."""
+        payload = payload or {}
+        given = payload.get("parameters") if isinstance(payload.get("parameters"), dict) else {}
+        folder = clean_folder(payload.get("folder") or given.get("Folder")
+                              or request.query_params.get("folder") or request.query_params.get("Folder"))
+        definition = reports_by_id.find(report_id, folder, lambda item: report_in_scope(request, item))
+        if definition is None or definition.editor_config is None:
+            raise ctx.unknown_report(request, report_id, folder)
         return definition
 
     def run_request(payload: dict[str, Any], definition: Any) -> tuple[str, list[tuple[str, str]]]:
@@ -81,6 +87,7 @@ def register(app: FastAPI, ctx: SimpleNamespace) -> None:
         on_behalf = str(payload.get("onBehalfOf") or "").strip()[:128]
         if on_behalf:
             pairs.append(("GeneratedBy", on_behalf))
+        pairs = [pair for pair in pairs if pair[0] != "Folder"] + [("Folder", definition.folder)]   # the report chosen above
         return output_format, pairs
 
     def caller_key(request: Request) -> dict[str, Any]:
@@ -91,7 +98,7 @@ def register(app: FastAPI, ctx: SimpleNamespace) -> None:
         return scope[1]
 
     def job_view(run: dict[str, Any]) -> dict[str, Any]:
-        view = {name: run.get(name) for name in ("id", "reportId", "title", "format", "status", "rowCount", "error", "size",
+        view = {name: run.get(name) for name in ("id", "reportId", "folder", "title", "format", "status", "rowCount", "error", "size",
                                                  "queuedAt", "startedAt", "finishedAt")}
         view["downloadUrl"] = f"/api/v1/jobs/{run['id']}/file" if run.get("status") == "success" and run.get("file") else None
         return view
@@ -131,10 +138,12 @@ def register(app: FastAPI, ctx: SimpleNamespace) -> None:
 
     @app.post("/api/v1/reports/{report_id}/run", tags=["Public API v1"])
     async def v1_run(report_id: str, request: Request) -> Response:
-        """Run now and return the file. Body: {"format": "pdf", "parameters": {"Identifier": "123"}, "onBehalfOf": "ali"}."""
+        """Run now and return the file. Body: {"format": "pdf", "parameters": {"Identifier": "123"}, "onBehalfOf": "ali",
+        "folder": "cascade/KMBL/Reports"} ("folder" only when the same ID is published in several folders)."""
         access = require_report_access(request)
-        definition = visible_report(request, report_id)
-        output_format, pairs = run_request(await json_body(request, optional=True), definition)
+        payload = await json_body(request, optional=True)
+        definition = visible_report(request, report_id, payload)
+        output_format, pairs = run_request(payload, definition)
         return ctx.produce_report(request, f"{definition.report_id}.{output_format}", access, pairs)
 
     @app.post("/api/v1/reports/{report_id}/data", tags=["Public API v1"])
@@ -143,8 +152,8 @@ def register(app: FastAPI, ctx: SimpleNamespace) -> None:
         {"parameters": {"Branch": "LHR"}, "limit": 100, "offset": 0}. At most REPORT_MAX_ROWS records are read;
         "total" is how many there are (up to that limit), "rows" the requested page."""
         access = require_report_access(request)
-        definition = visible_report(request, report_id)
         payload = await json_body(request, optional=True)
+        definition = visible_report(request, report_id, payload)
         _format, pairs = run_request({**payload, "format": "csv"}, definition)
         try:
             limit = int(payload.get("limit", 100))
@@ -181,8 +190,9 @@ def register(app: FastAPI, ctx: SimpleNamespace) -> None:
     async def v1_start_job(report_id: str, request: Request) -> JSONResponse:
         """Run in the background (big reports). Poll GET /api/v1/jobs/{id}, or get a webhook call when it is done."""
         key = caller_key(request)
-        definition = visible_report(request, report_id)
-        output_format, pairs = run_request(await json_body(request, optional=True), definition)
+        payload = await json_body(request, optional=True)
+        definition = visible_report(request, report_id, payload)
+        output_format, pairs = run_request(payload, definition)
         if output_format not in (definition.editor_config or {}).get("formats", sorted(OUTPUT_FORMATS)):
             raise HTTPException(status_code=422, detail=f"The {output_format.upper()} format is not enabled for this report")
         try:
@@ -193,8 +203,8 @@ def register(app: FastAPI, ctx: SimpleNamespace) -> None:
         active = [run for run in job_store.load_runs() if run.get("owner") == owner and run.get("status") in ("queued", "running")]
         if len(active) >= MAX_ACTIVE_JOBS_PER_KEY:
             raise HTTPException(status_code=429, detail=f"This key already has {len(active)} reports waiting or running; try again when one is done")
-        parameters = {name: value for name, value in pairs if name != "GeneratedBy"}
-        run = ctx.job_runner.enqueue(definition.report_id, output_format, parameters, owner, "api", None)
+        parameters = {name: value for name, value in pairs if name not in ("GeneratedBy", "Folder")}
+        run = ctx.job_runner.enqueue(definition.report_id, output_format, parameters, owner, "api", None, definition.folder)
         return JSONResponse(status_code=202, content={"job": job_view(run)}, headers={"Location": f"/api/v1/jobs/{run['id']}"})
 
     @app.get("/api/v1/jobs/{job_id}", tags=["Public API v1"])

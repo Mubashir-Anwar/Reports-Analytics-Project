@@ -1,10 +1,11 @@
-// The Designer's ribbon (like Excel / Word / Tableau): tabs File, Home, Insert, Arrange, Data and View with grouped
-// buttons, a quick-access row (report name, Undo, Redo, Save, Publish) and a collapse button. Every button calls the
-// same actions as the menus and shortcuts (outlineActions.js), so nothing here has its own logic.
+// The Designer's ribbon (like Excel / Word): tabs File, Home, Format, Insert, Page Layout, Formulas, Data, Arrange, Review,
+// Share, View and Help with grouped buttons, a quick-access row (report name, Undo, Redo, Save, Publish) and a collapse button. Every
+// button calls the same actions as the menus and shortcuts (outlineActions.js), so nothing here has its own logic.
 import { useEffect, useRef, useState } from 'react';
 import { selectedIds } from './arrange.js';
-import { FONT_NAMES, PALETTE_GROUPS, ZOOM_LIMITS, clampZoom, findElement } from './designModel.js';
-import { MRD_ACCEPT } from './mrd.js';
+import { FONT_NAMES, PAGE_PRESETS, PALETTE_GROUPS, ZOOM_LIMITS, clampZoom, contentRight, findElement, mapElements, pagePreset } from './designModel.js';
+import HelpDialog from './HelpDialogs.jsx';
+import { MRD_WITH_IMAGES_ACCEPT } from './mrd.js';
 import { publishState } from './panels.jsx';
 import { LookPanel } from './shared/ThemeMenu.jsx';
 
@@ -74,7 +75,40 @@ const P = {
   chevronUp: 'M6 15l6-6 6 6',
   chevronDown: 'M6 9l6 6 6-6',
   table: 'M4 5h16v14H4zM4 10h16M4 15h16M10 5v14',
+  bAll: 'M4 4h16v16H4z',
+  bBottom: 'M4 20h16M4 4h.01M8 4h.01M12 4h.01M16 4h.01M20 4h.01M4 8h.01M4 12h.01M4 16h.01M20 8h.01M20 12h.01M20 16h.01',
+  bTop: 'M4 4h16M4 20h.01M8 20h.01M12 20h.01M16 20h.01M20 20h.01M4 8h.01M4 12h.01M4 16h.01M20 8h.01M20 12h.01M20 16h.01',
+  bSides: 'M4 4v16M20 4v16M8 4h.01M12 4h.01M16 4h.01M8 20h.01M12 20h.01M16 20h.01',
+  bNone: 'M4 4h.01M8 4h.01M12 4h.01M16 4h.01M20 4h.01M4 20h.01M8 20h.01M12 20h.01M16 20h.01M20 20h.01M4 12h.01M20 12h.01',
+  hide: 'M3 3l18 18M10.6 10.6a2 2 0 0 0 2.8 2.8M9.9 5.1A10 10 0 0 1 12 5c6.5 0 10 7 10 7a17 17 0 0 1-3.2 4.1M6.1 6.1C3.6 7.8 2 12 2 12s3.5 7 10 7a9.7 9.7 0 0 0 5.9-1.9',
+  stretch: 'M12 3v18M8 7l4-4 4 4M8 17l4 4 4-4M4 12h3M17 12h3',
+  column: 'M9 3h6v18H9zM4 3v18M20 3v18',
+  similar: 'M4 4h7v7H4zM13 13h7v7h-7zM13 4h7v7h-7zM4 13h7v7H4z',
+  brush: 'M14 4l6 6-8 8H6v-6zM4 20h4',
+  reset: 'M4 4v6h6M20 12a8 8 0 1 1-2.3-5.7L20 9',
+  portrait: 'M7 3h10v18H7z',
+  landscape: 'M3 7h18v10H3z',
+  margins: 'M4 4h16v16H4zM8 4v16M16 4v16M4 8h16M4 16h16',
+  pageSize: 'M6 3h9l4 4v14H6zM15 3v4h4M9 13h6M9 17h6',
+  fitWidth: 'M3 12h18M6 9l-3 3 3 3M18 9l3 3-3 3M3 4v16M21 4v16',
+  newPage: 'M6 3h12v18H6zM9 8h6M9 12h6M12 15v4M10 17h4',
+  fx: 'M14 4h-2a3 3 0 0 0-3 3v13M6 11h7M15 13l5 6M20 13l-5 6',
+  book: 'M4 4h6a2 2 0 0 1 2 2v14a2 2 0 0 0-2-2H4zM20 4h-6a2 2 0 0 0-2 2v14a2 2 0 0 1 2-2h6z',
+  sigma: 'M18 5H6l6 7-6 7h12',
+  check: 'M4 12l5 5L20 6',
+  note: 'M5 4h14v11l-5 5H5zM14 20v-5h5',
+  link: 'M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1',
+  help: 'M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18zM9.5 9a2.5 2.5 0 1 1 3.5 2.3c-.6.3-1 .9-1 1.6V14M12 17.5h.01',
+  keyboard: 'M3 6h18v12H3zM7 10h.01M11 10h.01M15 10h.01M17 14H7',
+  star: 'M12 3l2.7 5.6 6.1.9-4.4 4.3 1 6.1L12 17l-5.4 2.9 1-6.1-4.4-4.3 6.1-.9z',
+  chat: 'M4 5h16v11H9l-5 4z',
+  support: 'M4 13a8 8 0 0 1 16 0M4 13v4h3v-5H4M20 13v4h-3v-5h3M17 17a4 4 0 0 1-4 3h-1',
+  variable: 'M5 4c-2 4-2 12 0 16M19 4c2 4 2 12 0 16M9 9l6 6M15 9l-6 6',
 };
+const NUMBER_PATTERNS = [
+  ['', 'No pattern'], ['#,##0', '1,234'], ['#,##0.00', '1,234.56'], ['0.00%', '12.34%'], ['Rs. #,##0.00', 'Rs. 1,234.56'],
+  ['dd/MM/yyyy', '31/12/2026'], ['dd-MM-yyyy', '31-12-2026'], ['dd MMM yyyy', '31 Dec 2026'], ['dd/MM/yyyy HH:mm', '31/12/2026 14:05'], ['hh:mm a', '02:05 PM'],
+];
 
 export function RIcon({ name, size = 18 }) {
   return (
@@ -108,7 +142,10 @@ const Group = ({ label, children, className = '' }) => (
 const Stack = ({ children }) => <div className="rb-stack">{children}</div>;
 const Row = ({ children }) => <div className="rb-row">{children}</div>;
 
-const TABS = [['file', 'File'], ['home', 'Home'], ['insert', 'Insert'], ['arrange', 'Arrange'], ['data', 'Data'], ['view', 'View']];
+const TABS = [['file', 'File'], ['home', 'Home'], ['format', 'Format'], ['insert', 'Insert'], ['page', 'Page Layout'], ['formulas', 'Formulas'], ['data', 'Data'],
+  ['arrange', 'Arrange'], ['review', 'Review'], ['share', 'Share'], ['view', 'View'], ['help', 'Help']];
+const plural = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`;
+const MARGINS = [['Normal', 30], ['Narrow', 15], ['Wide', 50], ['None', 0]];
 
 function readPrefs() {
   try { return { tab: 'home', collapsed: false, ...JSON.parse(localStorage.getItem(KEY) || '{}') }; } catch { return { tab: 'home', collapsed: false }; }
@@ -120,20 +157,24 @@ function readPrefs() {
  */
 export default function Ribbon({
   state, dispatch, actions, zoom, setZoom, prefs, setPrefs, view, setView, drawer, setDrawer, panels, setPanels, hasClipboard,
-  onNew, onOpenFile, onSave, onSaveFile, onPublish, onDemo, onTemplates, onQuery, onAdapters,
+  onNew, onOpenFile, onSave, onSaveFile, onPublish, onDemo, onTemplates, onQuery, onAdapters, onResetLayout, panelSide, onEditExpression, onGo,
 }) {
   const [ui, setUi] = useState(readPrefs);
+  const [dialog, setDialog] = useState(null);
+  const [linkCopied, setLinkCopied] = useState(false);
   const [look, setLook] = useState(false);
+  const [borderWidth, setBorderWidth] = useState(0.5);
   const lookBox = useRef(null);
   // Wide screens: show or hide the docked panel. Tablet/phone: the panel slides in over the report.
   const narrow = () => typeof window !== 'undefined' && window.matchMedia('(max-width: 1100px)').matches;
-  const SIDE = { explorer: 'left', outline: 'left', palette: 'right', properties: 'right' };
+  const DEFAULT_SIDE = { explorer: 'left', outline: 'left', palette: 'right', properties: 'right' };
+  const sideOf = (name) => panelSide?.(name) || DEFAULT_SIDE[name];   // panels can be moved to the other side
   const togglePanel = (name) => {
-    if (narrow()) { setDrawer(drawer === SIDE[name] ? null : SIDE[name]); return; }
+    if (narrow()) { setDrawer(drawer === sideOf(name) ? null : sideOf(name)); return; }
     setDrawer(null);
     setPanels((p) => ({ ...p, [name]: !p[name] }));
   };
-  const panelOn = (name) => (narrow() ? drawer === SIDE[name] : panels[name]);
+  const panelOn = (name) => (narrow() ? drawer === sideOf(name) : panels[name]);
   // The Theme panel floats over the page (the ribbon body scrolls sideways and would cut it off).
   const lookPlace = () => {
     const box = lookBox.current?.getBoundingClientRect();
@@ -143,6 +184,9 @@ export default function Ribbon({
       width, maxHeight: `calc(100vh - ${Math.round(box.bottom + 16)}px)`, overflowY: 'auto', zIndex: 60 };
   };
   useEffect(() => { try { localStorage.setItem(KEY, JSON.stringify(ui)); } catch { /* private mode */ } }, [ui]);
+  // the chosen tab is always in view when the tab row scrolls sideways (phones, narrow windows)
+  const tabsRow = useRef(null);
+  useEffect(() => { tabsRow.current?.querySelector('[aria-selected="true"]')?.scrollIntoView?.({ block: 'nearest', inline: 'nearest' }); }, [ui.tab]);
   useEffect(() => {
     if (!look) return undefined;
     const close = (event) => { if (!lookBox.current?.contains(event.target)) setLook(false); };
@@ -157,19 +201,40 @@ export default function Ribbon({
   const lockedAll = count > 0 && ids.every((id) => findElement(design, id)?.element.locked);
   const none = count === 0;
   const textual = Boolean(element) && ['staticText', 'textField', 'barcode', 'table', 'crosstab'].includes(element.type);
+  const chosenEls = ids.map((id) => findElement(design, id)?.element).filter(Boolean);
+  const hiddenAll = count > 0 && chosenEls.every((el) => String(el.printWhenExpression || '').trim() === 'false');
+  const textEls = chosenEls.filter((el) => ['staticText', 'textField'].includes(el.type));
+  const stretchAll = textEls.length > 0 && textEls.every((el) => el.stretch);
+  const fieldEls = chosenEls.filter((el) => el.type === 'textField');
+  const samePattern = fieldEls.length && fieldEls.every((el) => (el.pattern || '') === (fieldEls[0].pattern || '')) ? (fieldEls[0].pattern || '') : null;
+  const setPattern = (pattern) => {
+    const fieldIds = fieldEls.map((el) => el.id);
+    dispatch({ type: 'DESIGN', key: `pattern-${fieldIds.join()}`, update: (d) => mapElements(d, (el) => (fieldIds.includes(el.id) ? { ...el, pattern } : el)) });
+  };
   const set = (patch) => setPrefs((p) => ({ ...p, ...patch }));
   const pick = (tab) => setUi((current) => ({ tab, collapsed: current.tab === tab ? current.collapsed : false }));
   const status = report.isNew ? { cls: 'draft', text: 'Not saved' } : (() => { const s = publishState(report.status); return { cls: s.cls, text: s.cls === 'published' ? 'Published' : s.cls === 'changed' ? 'Changed' : 'Draft' }; })();
   const inDesign = view === 'design';
   const toDesign = (fn) => () => { if (!inDesign) setView('design'); fn(); };
+  // Page Layout, Formulas, Review and Share
+  const { page } = design;
+  const margins = page.margins || {};
+  const setPage = (values) => dispatch({ type: 'DESIGN', key: `page-${Object.keys(values).join()}`, update: (d) => ({ ...d, page: { ...d.page, ...values } }) });
+  const preset = pagePreset(page);
+  const sameMargins = ['top', 'right', 'bottom', 'left'].every((side) => margins[side] === margins.top) ? margins.top : null;
+  const exprTarget = element && ['staticText', 'textField'].includes(element.type) ? element : null;
+  let noteCount = 0;
+  mapElements(design, (el) => { if (el.type === 'note') noteCount += 1; return el; });
+  const runPath = `/generate/${report.id}.pdf${report.folder ? `?Folder=${encodeURIComponent(report.folder)}` : ''}`;
+  const runLink = `${window.location.origin}${runPath}`;
 
   const body = {
     file: (
       <>
         <Group label="Report">
           <Big icon="newDoc" label="New" title="New report (starts with the layout gallery)" onClick={onNew} />
-          <label className="rb-big" title="Open a .mrd report file, or import a Jaspersoft Studio .jrxml"><RIcon name="open" size={24} /><span>Open file</span>
-            <input type="file" accept={MRD_ACCEPT} hidden onChange={(e) => { onOpenFile(e.target.files[0]); e.target.value = ''; }} />
+          <label className="rb-big" title="Open a .mrd report file, or import a Jaspersoft Studio .jrxml — choose its PNG/JPEG pictures together with it (Ctrl+click) and they are put in the image elements"><RIcon name="open" size={24} /><span>Open file</span>
+            <input type="file" accept={MRD_WITH_IMAGES_ACCEPT} multiple hidden onChange={(e) => { const files = Array.from(e.target.files || []); e.target.value = ''; onOpenFile(files); }} />
           </label>
           <Big icon="save" label="Save" title="Save in your designer workspace (Ctrl+S). The server is not changed." onClick={onSave} />
           <Big icon="download" label="Save as file" title="Download this report as one .mrd file (query, parameters, adapter, design, images)" onClick={onSaveFile} />
@@ -248,6 +313,54 @@ export default function Ribbon({
           <Big icon="save" label="Save" title="Save in your workspace (Ctrl+S)" onClick={onSave} />
           <Big icon="publish" label="Publish" title="Copy this report to a folder on the report server" onClick={onPublish} primary />
         </Group>
+      </>
+    ),
+    format: (
+      <>
+        <Group label="Select">
+          <Big icon="column" label="Column" title="Select column: everything under the selected element in every band (header, detail, footer)" onClick={toDesign(() => actions.selectColumn())} disabled={none} />
+          <Stack>
+            <Small icon="similar" label="Similar" title="Every element of the same kind in the same band" onClick={toDesign(() => actions.selectSimilar())} disabled={none} />
+            <Small icon="selectAll" label="All in band" title="Select all in the band (Ctrl+A)" onClick={toDesign(() => actions.selectAll())} />
+          </Stack>
+        </Group>
+        <Group label="Borders">
+          <Row>
+            <Ico icon="bAll" title="Border on all sides" disabled={none} onClick={() => actions.setBorders('all', borderWidth)} />
+            <Ico icon="bBottom" title="Bottom border only" disabled={none} onClick={() => actions.setBorders('bottom', borderWidth)} />
+            <Ico icon="bTop" title="Top border only" disabled={none} onClick={() => actions.setBorders('top', borderWidth)} />
+            <Ico icon="bSides" title="Left and right borders" disabled={none} onClick={() => actions.setBorders('sides', borderWidth)} />
+            <Ico icon="bNone" title="No border" disabled={none} onClick={() => actions.setBorders('none')} />
+          </Row>
+          <Row>
+            <select className="rb-select" aria-label="Border width" title="Border width used by the buttons above" value={borderWidth} onChange={(e) => setBorderWidth(Number(e.target.value))}>
+              {[0.25, 0.5, 1, 1.5, 2, 3].map((w) => <option key={w} value={w}>{w} px</option>)}
+            </select>
+            <label className={`rb-ico rb-color ${none ? 'off' : ''}`} title="Border colour">
+              <RIcon name="bAll" size={15} /><i style={{ background: element?.borderColor || '#000000' }} />
+              <input type="color" disabled={none} value={element?.borderColor || '#000000'} onChange={(e) => actions.patchSelected({ borderColor: e.target.value })} />
+            </label>
+          </Row>
+        </Group>
+        <Group label="Show">
+          <Big icon="hide" label={hiddenAll ? 'Show' : 'Hide'} title="Hide: keep the element in the design but never print it (Print When Expression = false). Click again to show it." onClick={() => actions.toggleHidden()} disabled={none} on={hiddenAll} />
+          <Big icon="stretch" label="Stretch" title="Stretch with overflow: long data makes the row taller instead of being cut (Static Text and Text Field)" onClick={() => actions.toggleStretch()} disabled={!textEls.length} on={stretchAll} />
+        </Group>
+        <Group label="Number / date">
+          <Stack>
+            <select className="rb-select wide" aria-label="Pattern" title="Pattern of the selected Text Fields (number or date format)" disabled={!fieldEls.length}
+              value={samePattern ?? ''} onChange={(e) => setPattern(e.target.value)}>
+              {samePattern === null && fieldEls.length > 0 && <option value="" disabled>(different patterns)</option>}
+              {NUMBER_PATTERNS.map(([value, label]) => <option key={value} value={value}>{label}{value ? `  ·  ${value}` : ''}</option>)}
+              {samePattern && !NUMBER_PATTERNS.some(([value]) => value === samePattern) && <option value={samePattern}>{samePattern}</option>}
+            </select>
+            <span className="rb-hint">{fieldEls.length ? `${fieldEls.length} text field${fieldEls.length === 1 ? '' : 's'}` : 'Select Text Fields'}</span>
+          </Stack>
+        </Group>
+        <Group label="Format painter">
+          <Big icon="brush" label="Match format" title="Give the look of the last clicked element (font, colours, borders, alignment, padding) to the other selected elements" onClick={() => actions.matchFormat()} disabled={count < 2} />
+        </Group>
+        <div className="rb-note">{count ? `${count} element${count === 1 ? '' : 's'} selected — changes go to all of them` : 'Click elements on the canvas (Shift or Ctrl + click, or drag a box) — then format them all at once'}</div>
       </>
     ),
     insert: (
@@ -354,6 +467,10 @@ export default function Ribbon({
             <Small icon="paletteBox" label="Palette" title="Show or hide the Palette of elements" on={panelOn('palette')} onClick={() => togglePanel('palette')} />
             <Small icon="properties" label="Properties" title="Show or hide the Properties" on={panelOn('properties')} onClick={() => togglePanel('properties')} />
           </Stack>
+          {onResetLayout && (
+            <Big icon="reset" label="Reset layout" title="Put every panel back in its first place and size. (Drag a panel's title bar to move it; its buttons minimise, maximise, float or move it.)"
+              onClick={onResetLayout} />
+          )}
         </Group>
         <Group label="Look">
           <div className="rb-look" ref={lookBox}>
@@ -361,6 +478,147 @@ export default function Ribbon({
             {look && <LookPanel onDone={() => setLook(false)} style={lookPlace()} />}
           </div>
           <Big icon={ui.collapsed ? 'chevronDown' : 'chevronUp'} label={ui.collapsed ? 'Show ribbon' : 'Hide ribbon'} onClick={() => setUi((u) => ({ ...u, collapsed: !u.collapsed }))} />
+        </Group>
+      </>
+    ),
+    page: (
+      <>
+        <Group label="Page Setup">
+          <div className="rb-look">
+            <label className="rb-big" title="Page size"><RIcon name="pageSize" size={24} /><span>Size</span>
+              <select className="rb-select" aria-label="Page size" value={preset} onChange={(e) => {
+                const found = PAGE_PRESETS.find(([id]) => id === e.target.value);
+                if (found) setPage({ width: found[2], height: found[3] });
+              }}>
+                {preset === 'custom' && <option value="custom">Custom ({Math.round(page.width)}×{Math.round(page.height)})</option>}
+                {PAGE_PRESETS.map(([id, label]) => <option key={id} value={id}>{label}</option>)}
+              </select>
+            </label>
+          </div>
+          <Stack>
+            <Small icon="portrait" label="Portrait" on={page.height >= page.width} onClick={() => page.width > page.height && setPage({ width: page.height, height: page.width })} />
+            <Small icon="landscape" label="Landscape" on={page.width > page.height} onClick={() => page.height > page.width && setPage({ width: page.height, height: page.width })} />
+            <Small icon="fitWidth" label="Fit width" title="Make the page just wide enough for every element (plus the margins)" onClick={() => setPage({ width: Math.max(100, contentRight(design) + (margins.left || 0) + (margins.right || 0)) })} />
+          </Stack>
+        </Group>
+        <Group label="Margins">
+          <Stack>
+            {MARGINS.slice(0, 2).map(([name, value]) => <Small key={name} icon="margins" label={`${name} (${value})`} on={sameMargins === value} onClick={() => setPage({ margins: { top: value, right: value, bottom: value, left: value } })} />)}
+          </Stack>
+          <Stack>
+            {MARGINS.slice(2).map(([name, value]) => <Small key={name} icon="margins" label={`${name} (${value})`} on={sameMargins === value} onClick={() => setPage({ margins: { top: value, right: value, bottom: value, left: value } })} />)}
+          </Stack>
+          <div className="rb-margins" title="Margins in points (72 = 1 inch)">
+            {['top', 'bottom', 'left', 'right'].map((side) => (
+              <label key={side}>{side[0].toUpperCase() + side.slice(1)}
+                <input className="rb-num" type="number" min={0} max={500} value={margins[side] ?? 0}
+                  onChange={(e) => { const v = Number(e.target.value); if (v >= 0 && v <= 500) setPage({ margins: { ...margins, [side]: v } }); }} />
+              </label>
+            ))}
+          </div>
+        </Group>
+        <Group label="Print">
+          <Stack>
+            <Small icon="newPage" label="Title on new page" title="Title alone on the first page, without page header/footer" on={Boolean(page.titleNewPage)} onClick={() => setPage({ titleNewPage: !page.titleNewPage })} />
+            <Small icon="newPage" label="Summary on new page" on={Boolean(page.summaryNewPage)} onClick={() => setPage({ summaryNewPage: !page.summaryNewPage })} />
+          </Stack>
+          <Stack>
+            <Small icon="stretch" label="Float column footer" title="Column footer right under the last row" on={Boolean(page.floatColumnFooter)} onClick={() => setPage({ floatColumnFooter: !page.floatColumnFooter })} />
+            <Small icon="distV" label="Ignore pagination" title="All records on one long page" on={Boolean(page.ignorePagination)} onClick={() => setPage({ ignorePagination: !page.ignorePagination })} />
+          </Stack>
+        </Group>
+        <Group label="When no data">
+          <Stack>
+            <select className="rb-select wide" aria-label="When no data" title="What prints when the query returns no rows" value={page.whenNoDataType || 'Auto'} onChange={(e) => setPage({ whenNoDataType: e.target.value })}>
+              <option value="Auto">Auto</option><option value="NoDataSection">No Data Section</option><option value="AllSectionsNoDetail">All Sections, No Detail</option>
+              <option value="BlankPage">Blank Page</option><option value="NoPages">No Pages</option>
+            </select>
+            <span className="rb-hint">Excel / CSV layout</span>
+            <select className="rb-select wide" aria-label="Excel / CSV layout" value={page.sheetLayout || 'table'} onChange={(e) => setPage({ sheetLayout: e.target.value })}>
+              <option value="mixed">Headings exact, data as table</option><option value="grid">Exactly like the PDF</option><option value="table">Data table only</option>
+            </select>
+          </Stack>
+        </Group>
+        <Group label="More">
+          <Big icon="properties" label="Page Format" title="Every page setting: Properties → Page Format" onClick={() => { dispatch({ type: 'SELECT', selection: { kind: 'report' } }); if (!panelOn('properties')) togglePanel('properties'); }} />
+        </Group>
+      </>
+    ),
+    formulas: (
+      <>
+        <Group label="Function Library">
+          <Big icon="fx" label="Expression" title={exprTarget ? 'Open the Expression editor of the selected text' : 'Select a Static Text or Text Field first'} disabled={!exprTarget} onClick={() => onEditExpression?.(exprTarget.id)} primary />
+          <Big icon="book" label="Function List" title="Every function an expression can use, with examples" onClick={() => setDialog('functions')} />
+        </Group>
+        <Group label="Defined Names">
+          <Stack>
+            <Small icon="sigma" label="New variable" title="Sum, Count, Average… of a field" onClick={() => actions.createVariable()} />
+            <Small icon="variable" label="New calculated field" title="A field made from an expression" onClick={() => actions.createCalc()} />
+            <Small icon="params" label="New parameter" title="A value asked when the report runs" onClick={() => actions.createParameter()} />
+          </Stack>
+          <Stack>
+            <span className="rb-hint">{plural(design.variables.length, 'variable')}</span>
+            <span className="rb-hint">{plural(design.calculatedFields.length, 'calculated field')}</span>
+            <span className="rb-hint">{plural(report.parameters.length, 'parameter')}</span>
+          </Stack>
+        </Group>
+        <Group label="Calculation">
+          <Stack>
+            <Small icon="filter" label="Filter expression" onClick={() => onQuery('filter')} />
+            <Small icon="sort" label="Sort" onClick={() => onQuery('sort')} />
+            <Small icon="check" label="Check report" title="List every problem the designer can find" onClick={() => setDialog('check')} />
+          </Stack>
+        </Group>
+      </>
+    ),
+    review: (
+      <>
+        <Group label="Proofing">
+          <Big icon="check" label="Check report" title="List every problem the designer can find, with Go there" onClick={() => setDialog('check')} primary />
+          <Big icon="eye" label="Preview" title="Run the report with real records" on={view === 'preview'} onClick={() => setView('preview')} />
+        </Group>
+        <Group label="Notes">
+          <Big icon="note" label="New note" title="A note on the canvas — only visible in the designer, never printed" on={tool === 'note'} onClick={() => { if (!inDesign) setView('design'); dispatch({ type: 'TOOL', tool: tool === 'note' ? null : 'note' }); }} />
+          <Stack>
+            <span className="rb-hint">{plural(noteCount, 'note')} in the design</span>
+          </Stack>
+        </Group>
+        <Group label="Protect">
+          <Big icon={lockedAll ? 'unlock' : 'lock'} label={lockedAll ? 'Unlock' : 'Lock'} title="Lock: cannot be moved or resized (Ctrl+L)" onClick={() => actions.toggleLock()} disabled={none} on={lockedAll} />
+        </Group>
+        <Group label="Source">
+          <Big icon="code" label="Source" title="The report definition as text (with Validate)" on={view === 'source'} onClick={() => setView('source')} />
+        </Group>
+      </>
+    ),
+    share: (
+      <>
+        <Group label="Share">
+          <Big icon="publish" label="Publish" title="Copy this report to a folder on the report server" onClick={onPublish} primary />
+          <Big icon="download" label="Save as file" title="Download one .mrd file to send to someone" onClick={onSaveFile} />
+        </Group>
+        <Group label="Link">
+          <Big icon="link" label={linkCopied ? 'Copied' : 'Copy link'} title={report.isNew ? 'Save and publish the report first' : `Copy ${runLink}`} disabled={report.isNew} onClick={() => { navigator.clipboard?.writeText(runLink).then(() => setLinkCopied(true), () => {}); setTimeout(() => setLinkCopied(false), 2000); }} />
+          <Stack>
+            <code className="rb-link" title="Add X-API-Key (or sign in) to run it">{report.isNew ? 'Not saved yet' : runPath}</code>
+            <span className="rb-hint">.pdf · .xlsx · .csv — needs an API key or sign-in</span>
+          </Stack>
+        </Group>
+      </>
+    ),
+    help: (
+      <>
+        <Group label="Help">
+          <Big icon="help" label="Help" title="Making a report, step by step" onClick={() => setDialog('help')} />
+          <Big icon="keyboard" label="Keyboard Shortcuts" onClick={() => setDialog('shortcuts')} />
+          <Big icon="book" label="Function List" onClick={() => setDialog('functions')} />
+        </Group>
+        <Group label="What's New">
+          <Big icon="star" label="What's New" onClick={() => setDialog('whatsnew')} />
+        </Group>
+        <Group label="Support & Feedback">
+          <Big icon="chat" label="Feedback" onClick={() => setDialog('feedback')} />
+          <Big icon="support" label="Contact Support" onClick={() => setDialog('support')} />
         </Group>
       </>
     ),
@@ -374,7 +632,7 @@ export default function Ribbon({
           <RIcon name="table" size={16} /><b>{report.title || 'Untitled'}</b>{dirty && <span className="rb-dirty" title="Not saved">●</span>}
           {report.folder && <small className="hide-narrow">in {report.folder}</small>}
         </span>
-        <div className="rb-tabs" role="tablist" aria-label="Ribbon">
+        <div className="rb-tabs" role="tablist" aria-label="Ribbon" ref={tabsRow}>
           {TABS.map(([id, label]) => (
             <button key={id} type="button" role="tab" aria-selected={ui.tab === id} className={`${ui.tab === id ? 'on' : ''} ${id === 'file' ? 'file' : ''}`}
               onClick={() => pick(id)} onDoubleClick={() => setUi((u) => ({ ...u, collapsed: !u.collapsed }))}>{label}</button>
@@ -391,7 +649,8 @@ export default function Ribbon({
           <button type="button" className="rb-quick drawer-btn" aria-label="Palette and properties" aria-expanded={drawer === 'right'} onClick={() => setDrawer(drawer === 'right' ? null : 'right')}><RIcon name="panelR" /></button>
         </div>
       </div>
-      {!ui.collapsed && <div className="rb-body" role="tabpanel" aria-label={TABS.find(([id]) => id === ui.tab)?.[1]}>{body[ui.tab]}</div>}
+      {!ui.collapsed && <div className="rb-body" role="tabpanel" aria-label={TABS.find(([id]) => id === ui.tab)?.[1]}>{body[ui.tab] || body.home}</div>}
+      {dialog && <HelpDialog which={dialog} report={report} design={design} onGo={onGo} onOpen={setDialog} onClose={() => setDialog(null)} />}
     </header>
   );
 }

@@ -178,6 +178,84 @@ export function makeActions({ get, dispatch, notify, ui = { current: {} } }) {
     const all = keys.flatMap((key) => getBand(design, key).elements.map((el) => el.id));
     if (all.length) select(selectionOf(all));
   };
+  /**
+   * Select column: every element in any band that lies under the selected ones (header, detail, footers):
+   * its horizontal middle falls inside a selected element's left..right. Picks a whole table column at once.
+   */
+  const selectColumn = () => {
+    const { design, selection } = get();
+    const chosen = selectedElements(design, ids());
+    if (!chosen.length) { notify('Select a header or a cell first, then Select column', 'error'); return; }
+    const spans = chosen.map(({ element }) => [element.x - 0.5, element.x + element.width + 0.5]);
+    const found = bandKeys(design).flatMap((key) => getBand(design, key).elements)
+      .filter((el) => spans.some(([left, right]) => el.x + el.width / 2 >= left && el.x + el.width / 2 <= right))
+      .map((el) => el.id);
+    select(selectionOf(found, selection.kind === 'element' ? selection.id : found[0]));
+    notify(`${found.length} element(s) in this column selected`, 'ok');
+  };
+  /** Select similar: every element of the same kind in the same band as the selected one(s). */
+  const selectSimilar = () => {
+    const { design, selection } = get();
+    const chosen = selectedElements(design, ids());
+    if (!chosen.length) { notify('Select an element first, then Select similar', 'error'); return; }
+    const wanted = new Set(chosen.map(({ bandKey, element }) => `${bandKey}|${element.type}`));
+    const found = bandKeys(design).flatMap((key) => getBand(design, key).elements.filter((el) => wanted.has(`${key}|${el.type}`)).map((el) => el.id));
+    select(selectionOf(found, selection.kind === 'element' ? selection.id : found[0]));
+    notify(`${found.length} similar element(s) selected`, 'ok');
+  };
+  const BORDER_PRESETS = {
+    all: { borderWidth: 0.5, borders: null },
+    none: { borderWidth: 0, borders: null },
+    bottom: { borderWidth: 0, borders: { top: 0, right: 0, bottom: 0.5, left: 0 } },
+    top: { borderWidth: 0, borders: { top: 0.5, right: 0, bottom: 0, left: 0 } },
+    sides: { borderWidth: 0, borders: { top: 0, right: 0.5, bottom: 0, left: 0.5 } },
+  };
+  /** Ribbon → Borders: the same border on every selected element (keeps each one's border colour). */
+  const setBorders = (preset, width) => {
+    const values = BORDER_PRESETS[preset];
+    if (!values) return;
+    const scaled = width && preset !== 'none'
+      ? { borderWidth: values.borderWidth ? width : 0, borders: values.borders ? Object.fromEntries(Object.entries(values.borders).map(([s, v]) => [s, v ? width : 0])) : null }
+      : values;
+    patchSelected(scaled);
+  };
+  /** Ribbon → Hide / Show: Print When Expression `false` keeps the element in the design but never prints it. */
+  const toggleHidden = () => {
+    const chosen = selectedElements(get().design, ids());
+    if (!chosen.length) return;
+    const hide = !chosen.every(({ element }) => String(element.printWhenExpression || '').trim() === 'false');
+    const custom = chosen.filter(({ element }) => !['', 'false'].includes(String(element.printWhenExpression || '').trim())).length;
+    patchSelected({ printWhenExpression: hide ? 'false' : '' });
+    notify(hide
+      ? `${chosen.length} element(s) hidden: kept in the design, not printed${custom ? ` (${custom} had their own Print When Expression — Ctrl+Z to undo)` : ''}`
+      : `${chosen.length} element(s) shown again`, 'ok');
+  };
+  /** Ribbon → Stretch: "Stretch with overflow" on the selected text elements (long data makes the row taller). */
+  const toggleStretch = () => {
+    const texts = selectedElements(get().design, ids()).filter(({ element }) => ['staticText', 'textField'].includes(element.type));
+    if (!texts.length) { notify('Stretch works on Static Text and Text Field elements', 'error'); return; }
+    const on = !texts.every(({ element }) => element.stretch);
+    const textIds = texts.map(({ element }) => element.id);
+    dispatch({ type: 'DESIGN', key: `stretch-${textIds.join()}`, update: (d) => mapElements(d, (el) => (textIds.includes(el.id) ? { ...el, stretch: on } : el)) });
+    notify(on ? `${texts.length} text element(s) now stretch: long data makes the row taller instead of being cut` : `Stretch switched off on ${texts.length} element(s)`, 'ok');
+  };
+  const LOOK_KEYS = ['fontName', 'fontSize', 'bold', 'italic', 'underline', 'color', 'backColor', 'align', 'vAlign', 'padding',
+    'borderWidth', 'borderColor', 'borders', 'lineStyle', 'markup', 'stretch'];
+  /** Match format (format painter): the look of the primary (last clicked) element on all the others. */
+  const matchFormat = () => {
+    const { design, selection } = get();
+    const chosen = ids();
+    const source = selection.kind === 'element' ? findElement(design, selection.id)?.element : null;
+    if (!source || chosen.length < 2) { notify('Select 2 or more elements; the last one clicked gives its look to the others', 'error'); return; }
+    const look = Object.fromEntries(LOOK_KEYS.filter((key) => key in source).map((key) => [key, source[key]]));
+    const textual = ['staticText', 'textField'];
+    dispatch({ type: 'DESIGN', key: `format-${chosen.join()}`, update: (d) => mapElements(d, (el) => {
+      if (!chosen.includes(el.id) || el.id === source.id) return el;
+      const fit = textual.includes(el.type) ? look : Object.fromEntries(Object.entries(look).filter(([key]) => !['stretch', 'markup'].includes(key)));
+      return { ...el, ...fit };
+    }) });
+    notify(`The look of the last clicked element was copied to ${chosen.length - 1} element(s)`, 'ok');
+  };
 
   const arrangeMenu = (count) => ({
     label: 'Align', icon: '⇤',
@@ -315,6 +393,19 @@ export function makeActions({ get, dispatch, notify, ui = { current: {} } }) {
     const chosen = ids();
     const locked = selectedElements(get().design, chosen.includes(id) ? chosen : [id]).every(({ element }) => element.locked);
     const lockItem = { label: locked ? 'Unlock' : 'Lock', icon: locked ? '🔓' : '🔒', shortcut: 'Ctrl+L', onClick: toggleLock };
+    const selectItems = [
+      { label: 'Select column', icon: '▥', title: 'Everything under it in every band (header, detail, footer)', onClick: selectColumn },
+      { label: 'Select similar', icon: '◫', onClick: selectSimilar },
+    ];
+    const formatItems = [
+      { label: 'Hide / Show', icon: '◌', onClick: toggleHidden },
+      { label: 'Stretch with long text', icon: '↕', onClick: toggleStretch },
+      { label: 'Borders', icon: '▢', items: [
+        { label: 'All sides', onClick: () => setBorders('all') }, { label: 'Bottom only', onClick: () => setBorders('bottom') },
+        { label: 'Top only', onClick: () => setBorders('top') }, { label: 'Left and right', onClick: () => setBorders('sides') },
+        { label: 'No border', onClick: () => setBorders('none') },
+      ] },
+    ];
     const clipboardItems = [
       { label: 'Copy', icon: '⧉', shortcut: 'Ctrl+C', onClick: copy },
       { label: 'Cut', icon: '✂', shortcut: 'Ctrl+X', onClick: cut },
@@ -325,6 +416,10 @@ export function makeActions({ get, dispatch, notify, ui = { current: {} } }) {
       return [
         { header: `${chosen.length} elements selected` },
         ...clipboardItems,
+        '-',
+        ...selectItems,
+        { label: 'Match format of the last clicked', icon: '🖌', onClick: matchFormat },
+        ...formatItems,
         '-',
         arrangeMenu(chosen.length),
         { label: 'Distribute', icon: '⇹', disabled: chosen.length < 3, items: [{ label: 'Horizontally', onClick: () => distribute('h') }, { label: 'Vertically', onClick: () => distribute('v') }] },
@@ -341,6 +436,9 @@ export function makeActions({ get, dispatch, notify, ui = { current: {} } }) {
       { header: `${found.element.type} in ${bandLabel(bandKey)}` },
       { label: 'Properties', icon: '⚙', onClick: () => select({ kind: 'element', id }) },
       ...clipboardItems,
+      '-',
+      ...selectItems,
+      ...formatItems,
       '-',
       arrangeMenu(1),
       { label: 'Bring to Front', icon: '⬆', onClick: () => design$((d) => reorderElement(d, bandKey, id, true)) },
@@ -406,8 +504,9 @@ export function makeActions({ get, dispatch, notify, ui = { current: {} } }) {
   ];
 
   return {
-    rename, deleteSelection, createBandAt, createGroup,
+    rename, deleteSelection, createBandAt, createGroup, createParameter, createVariable, createCalc,
     align, distribute, matchSize, nudge, order, toggleLock, patchSelected, copy, cut, paste, duplicateSelected, selectAll, removeSelected,
+    selectColumn, selectSimilar, setBorders, toggleHidden, toggleStretch, matchFormat,
     reportMenu, bandMenu, elementMenu, parametersMenu, parameterMenu, fieldsMenu, fieldMenu,
     variablesMenu, variableMenu, builtinMenu, calcsMenu, calcMenu, canvasMenu, createBandMenu,
   };

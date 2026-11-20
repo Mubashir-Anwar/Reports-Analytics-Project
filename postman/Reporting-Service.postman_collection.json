@@ -2200,10 +2200,10 @@
                 "copy"
               ]
             },
-            "description": "",
+            "description": "newId gives the copy its own ID. Without it a copy into another folder keeps the ID (like JasperReports Server): the same ID is then in two folders, see '11 Report access'.",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"folder\": \"Postman/Sub\",\n  \"id\": \"PM_ORDERS_COPY\"\n}",
+              "raw": "{\n  \"folder\": \"Postman/Sub\",\n  \"newId\": \"PM_ORDERS_COPY\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -3225,6 +3225,302 @@
                 "type": "text/javascript",
                 "exec": [
                   "pm.test(\"Adapter status for the runner: HTTP 200\", function () { pm.expect([200]).to.include(pm.response.code); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Same ID in a second folder: copy PM_ORDERS into Postman/Sub",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/server/reports/PM_ORDERS/copy?folder=Postman",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "server",
+                "reports",
+                "PM_ORDERS",
+                "copy"
+              ],
+              "query": [
+                {
+                  "key": "folder",
+                  "value": "Postman"
+                }
+              ]
+            },
+            "description": "A report is <folder>/<ID>: the same ID can be published in several folders. Folder= (the report's server folder) says which one; without it an ID that is in several folders is refused with 409.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"folder\": \"Postman/Sub\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Same ID in a second folder: copy PM_ORDERS into Postman/Sub: HTTP 200\", function () { pm.expect([200]).to.include(pm.response.code); });",
+                  "pm.test('keeps the ID', function () { pm.expect(pm.response.json().report.ref).to.eql('Postman/Sub/PM_ORDERS'); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Same ID: without Folder the ID is unclear (409)",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-API-Key",
+                "value": "{{apiKey}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/generate/PM_ORDERS.csv?Branch=LHR",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "generate",
+                "PM_ORDERS.csv"
+              ],
+              "query": [
+                {
+                  "key": "Branch",
+                  "value": "LHR"
+                }
+              ]
+            },
+            "description": "A report is <folder>/<ID>: the same ID can be published in several folders. Folder= (the report's server folder) says which one; without it an ID that is in several folders is refused with 409.",
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Same ID: without Folder the ID is unclear (409): HTTP 409\", function () { pm.expect([409]).to.include(pm.response.code); });",
+                  "pm.test('asks for Folder', function () { pm.expect(pm.response.json().detail).to.include('Folder='); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Same ID: Folder chooses the report",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-API-Key",
+                "value": "{{apiKey}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/generate/PM_ORDERS.xlsx?Folder=Postman/Sub/&Branch=LHR",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "generate",
+                "PM_ORDERS.xlsx"
+              ],
+              "query": [
+                {
+                  "key": "Folder",
+                  "value": "Postman/Sub/"
+                },
+                {
+                  "key": "Branch",
+                  "value": "LHR"
+                }
+              ]
+            },
+            "description": "A report is <folder>/<ID>: the same ID can be published in several folders. Folder= (the report's server folder) says which one; without it an ID that is in several folders is refused with 409. A trailing or leading / in Folder is fine.",
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Same ID: Folder chooses the report: HTTP 200\", function () { pm.expect([200]).to.include(pm.response.code); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Same ID: a folder without that report (404)",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-API-Key",
+                "value": "{{apiKey}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/generate/PM_ORDERS.csv?Folder=Postman/Other&Branch=LHR",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "generate",
+                "PM_ORDERS.csv"
+              ],
+              "query": [
+                {
+                  "key": "Folder",
+                  "value": "Postman/Other"
+                },
+                {
+                  "key": "Branch",
+                  "value": "LHR"
+                }
+              ]
+            },
+            "description": "",
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Same ID: a folder without that report (404): HTTP 404\", function () { pm.expect([404]).to.include(pm.response.code); });",
+                  "pm.test('names the folders', function () { pm.expect(pm.response.json().detail).to.include('Postman/Sub'); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Same ID: public API takes \"folder\" in the body",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-API-Key",
+                "value": "{{apiKey}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/reports/PM_ORDERS/run",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "reports",
+                "PM_ORDERS",
+                "run"
+              ]
+            },
+            "description": "",
+            "auth": {
+              "type": "noauth"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"format\": \"csv\",\n  \"folder\": \"Postman/Sub\",\n  \"parameters\": {\n    \"Branch\": \"LHR\"\n  }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Same ID: public API takes \\\"folder\\\" in the body: HTTP 200\", function () { pm.expect([200]).to.include(pm.response.code); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Same ID: delete the second copy (?folder=)",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/server/reports/PM_ORDERS?folder=Postman/Sub",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "server",
+                "reports",
+                "PM_ORDERS"
+              ],
+              "query": [
+                {
+                  "key": "folder",
+                  "value": "Postman/Sub"
+                }
+              ]
+            },
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Same ID: delete the second copy (?folder=): HTTP 200\", function () { pm.expect([200]).to.include(pm.response.code); });"
                 ]
               }
             }
@@ -5363,7 +5659,7 @@
             "description": "",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"content\": \"UEsDBBQAAAAIAOhicl1hfqQcfgAAABgBAAAPAAAARGF0YU1vZGVsU2NoZW1hhY8xCoNAEEXfUcTaE9jFC6SxCxbGlURQI6sWIt4931HEQrBYdvfx/h9mJqThh6Ok1jsmYNY9kPMWKel3+jLeijeiGwt54i3rzYuMFeqrGeW1N+lEuVy04Hukncg6PWWiO7m9qKeS/dFvMfuq82H7jOLDbaczc9tz7cz2s/AHUEsDBBQAAAAIAOhicl02PitejAEAAJQFAAANAAAAUmVwb3J0L0xheW91dM1Ty2rCQBQ9n1Jcu1AptHRnRZf2iVCaLiTGmBKT1KSPEPLvPXMzEyYTQdxJyDzu49xz7sxUGCBHAB8FIqRIuBvgDld4R8XVhtYcGWKsUWLJcc/oJmKAexxoSZi9o1VlDsX+y6wNEXc6cowJbjHSXhUbIeRcaP8N/cb7IxW/iRtjJowKriPOAat12f3pncktnf25PK7pM15fam8lwuit4HFMdBc8bfckeizzUO9zYRxSQ4CVpcjkNEi21leyz3qoMb05+SntAbWojijbnugzMl/TXnQqZ7Sk+HTOtFt3xjyFGdJ7YF3P6qpaf7FCIJ5nzluHkxprfLQV387KL9v82uFcyN904alF6DJf6VvQ6DK+SYu0EKR9j9HyyJmlnb7N5aZFwsCOeiDiRld1lb/QHutOuxXtk+pqmPPeZnKeeU9JpXFTZh6IGzgd7Pv7imqrs4/Sj0z4u8rs19vkmaxj3fKtmIbFlPcnFB2h3KdjSk5rvfw+TclN4ST6lO28hdj9nvrRiW7ar0B9Zq3+f1BLAQIUABQAAAAIAOhicl1hfqQcfgAAABgBAAAPAAAAAAAAAAAAAACAAQAAAABEYXRhTW9kZWxTY2hlbWFQSwECFAAUAAAACADoYnJdNj4rXowBAACUBQAADQAAAAAAAAAAAAAAgAGrAAAAUmVwb3J0L0xheW91dFBLBQYAAAAAAgACAHgAAABiAgAAAAA=\",\n  \"name\": \"PM sales.pbit\"\n}",
+              "raw": "{\n  \"content\": \"UEsDBBQAAAAIAAFZdF1hfqQcfgAAABgBAAAPAAAARGF0YU1vZGVsU2NoZW1hhY8xCoNAEEXfUcTaE9jFC6SxCxbGlURQI6sWIt4931HEQrBYdvfx/h9mJqThh6Ok1jsmYNY9kPMWKel3+jLeijeiGwt54i3rzYuMFeqrGeW1N+lEuVy04Hukncg6PWWiO7m9qKeS/dFvMfuq82H7jOLDbaczc9tz7cz2s/AHUEsDBBQAAAAIAAFZdF02PitejAEAAJQFAAANAAAAUmVwb3J0L0xheW91dM1Ty2rCQBQ9n1Jcu1AptHRnRZf2iVCaLiTGmBKT1KSPEPLvPXMzEyYTQdxJyDzu49xz7sxUGCBHAB8FIqRIuBvgDld4R8XVhtYcGWKsUWLJcc/oJmKAexxoSZi9o1VlDsX+y6wNEXc6cowJbjHSXhUbIeRcaP8N/cb7IxW/iRtjJowKriPOAat12f3pncktnf25PK7pM15fam8lwuit4HFMdBc8bfckeizzUO9zYRxSQ4CVpcjkNEi21leyz3qoMb05+SntAbWojijbnugzMl/TXnQqZ7Sk+HTOtFt3xjyFGdJ7YF3P6qpaf7FCIJ5nzluHkxprfLQV387KL9v82uFcyN904alF6DJf6VvQ6DK+SYu0EKR9j9HyyJmlnb7N5aZFwsCOeiDiRld1lb/QHutOuxXtk+pqmPPeZnKeeU9JpXFTZh6IGzgd7Pv7imqrs4/Sj0z4u8rs19vkmaxj3fKtmIbFlPcnFB2h3KdjSk5rvfw+TclN4ST6lO28hdj9nvrRiW7ar0B9Zq3+f1BLAQIUABQAAAAIAAFZdF1hfqQcfgAAABgBAAAPAAAAAAAAAAAAAACAAQAAAABEYXRhTW9kZWxTY2hlbWFQSwECFAAUAAAACAABWXRdNj4rXowBAACUBQAADQAAAAAAAAAAAAAAgAGrAAAAUmVwb3J0L0xheW91dFBLBQYAAAAAAgACAHgAAABiAgAAAAA=\",\n  \"name\": \"PM sales.pbit\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -5455,7 +5751,7 @@
             "description": "",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"content\": \"UEsDBBQAAAAIAOhicl1hfqQcfgAAABgBAAAPAAAARGF0YU1vZGVsU2NoZW1hhY8xCoNAEEXfUcTaE9jFC6SxCxbGlURQI6sWIt4931HEQrBYdvfx/h9mJqThh6Ok1jsmYNY9kPMWKel3+jLeijeiGwt54i3rzYuMFeqrGeW1N+lEuVy04Hukncg6PWWiO7m9qKeS/dFvMfuq82H7jOLDbaczc9tz7cz2s/AHUEsDBBQAAAAIAOhicl02PitejAEAAJQFAAANAAAAUmVwb3J0L0xheW91dM1Ty2rCQBQ9n1Jcu1AptHRnRZf2iVCaLiTGmBKT1KSPEPLvPXMzEyYTQdxJyDzu49xz7sxUGCBHAB8FIqRIuBvgDld4R8XVhtYcGWKsUWLJcc/oJmKAexxoSZi9o1VlDsX+y6wNEXc6cowJbjHSXhUbIeRcaP8N/cb7IxW/iRtjJowKriPOAat12f3pncktnf25PK7pM15fam8lwuit4HFMdBc8bfckeizzUO9zYRxSQ4CVpcjkNEi21leyz3qoMb05+SntAbWojijbnugzMl/TXnQqZ7Sk+HTOtFt3xjyFGdJ7YF3P6qpaf7FCIJ5nzluHkxprfLQV387KL9v82uFcyN904alF6DJf6VvQ6DK+SYu0EKR9j9HyyJmlnb7N5aZFwsCOeiDiRld1lb/QHutOuxXtk+pqmPPeZnKeeU9JpXFTZh6IGzgd7Pv7imqrs4/Sj0z4u8rs19vkmaxj3fKtmIbFlPcnFB2h3KdjSk5rvfw+TclN4ST6lO28hdj9nvrRiW7ar0B9Zq3+f1BLAQIUABQAAAAIAOhicl1hfqQcfgAAABgBAAAPAAAAAAAAAAAAAACAAQAAAABEYXRhTW9kZWxTY2hlbWFQSwECFAAUAAAACADoYnJdNj4rXowBAACUBQAADQAAAAAAAAAAAAAAgAGrAAAAUmVwb3J0L0xheW91dFBLBQYAAAAAAgACAHgAAABiAgAAAAA=\",\n  \"name\": \"PM sales.pbit\",\n  \"folder\": \"Postman\",\n  \"pages\": [\n    0\n  ],\n  \"tables\": {\n    \"Orders\": {\n      \"dataset\": \"{{dsOrders}}\"\n    }\n  }\n}",
+              "raw": "{\n  \"content\": \"UEsDBBQAAAAIAAFZdF1hfqQcfgAAABgBAAAPAAAARGF0YU1vZGVsU2NoZW1hhY8xCoNAEEXfUcTaE9jFC6SxCxbGlURQI6sWIt4931HEQrBYdvfx/h9mJqThh6Ok1jsmYNY9kPMWKel3+jLeijeiGwt54i3rzYuMFeqrGeW1N+lEuVy04Hukncg6PWWiO7m9qKeS/dFvMfuq82H7jOLDbaczc9tz7cz2s/AHUEsDBBQAAAAIAAFZdF02PitejAEAAJQFAAANAAAAUmVwb3J0L0xheW91dM1Ty2rCQBQ9n1Jcu1AptHRnRZf2iVCaLiTGmBKT1KSPEPLvPXMzEyYTQdxJyDzu49xz7sxUGCBHAB8FIqRIuBvgDld4R8XVhtYcGWKsUWLJcc/oJmKAexxoSZi9o1VlDsX+y6wNEXc6cowJbjHSXhUbIeRcaP8N/cb7IxW/iRtjJowKriPOAat12f3pncktnf25PK7pM15fam8lwuit4HFMdBc8bfckeizzUO9zYRxSQ4CVpcjkNEi21leyz3qoMb05+SntAbWojijbnugzMl/TXnQqZ7Sk+HTOtFt3xjyFGdJ7YF3P6qpaf7FCIJ5nzluHkxprfLQV387KL9v82uFcyN904alF6DJf6VvQ6DK+SYu0EKR9j9HyyJmlnb7N5aZFwsCOeiDiRld1lb/QHutOuxXtk+pqmPPeZnKeeU9JpXFTZh6IGzgd7Pv7imqrs4/Sj0z4u8rs19vkmaxj3fKtmIbFlPcnFB2h3KdjSk5rvfw+TclN4ST6lO28hdj9nvrRiW7ar0B9Zq3+f1BLAQIUABQAAAAIAAFZdF1hfqQcfgAAABgBAAAPAAAAAAAAAAAAAACAAQAAAABEYXRhTW9kZWxTY2hlbWFQSwECFAAUAAAACAABWXRdNj4rXowBAACUBQAADQAAAAAAAAAAAAAAgAGrAAAAUmVwb3J0L0xheW91dFBLBQYAAAAAAgACAHgAAABiAgAAAAA=\",\n  \"name\": \"PM sales.pbit\",\n  \"folder\": \"Postman\",\n  \"pages\": [\n    0\n  ],\n  \"tables\": {\n    \"Orders\": {\n      \"dataset\": \"{{dsOrders}}\"\n    }\n  }\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -5788,6 +6084,384 @@
                 "type": "text/javascript",
                 "exec": [
                   "pm.test(\"Import again now (session): HTTP 202\", function () { pm.expect([202]).to.include(pm.response.code); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Query in DAX (total by branch)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/analytics/queries/run",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "analytics",
+                "queries",
+                "run"
+              ]
+            },
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"language\": \"dax\",\n  \"text\": \"EVALUATE SUMMARIZECOLUMNS('PM orders'[Branch], \\\"Total\\\", SUM('PM orders'[Amount]))\\nORDER BY [Total] DESC\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Query in DAX (total by branch): HTTP 200\", function () { pm.expect([200]).to.include(pm.response.code); });",
+                  "pm.test('rows per branch', function () { pm.expect(pm.response.json().columns.map(c => c.name)).to.eql(['Branch', 'Total']); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Query in SQL (DuckDB SELECT)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/analytics/queries/run",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "analytics",
+                "queries",
+                "run"
+              ]
+            },
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"language\": \"sql\",\n  \"text\": \"SELECT Branch, COUNT(*) AS n FROM \\\"PM orders\\\" GROUP BY Branch\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Query in SQL (DuckDB SELECT): HTTP 200\", function () { pm.expect([200]).to.include(pm.response.code); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Query reading a file is refused",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/analytics/queries/run",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "analytics",
+                "queries",
+                "run"
+              ]
+            },
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"language\": \"sql\",\n  \"text\": \"SELECT * FROM read_csv('/etc/passwd')\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Query reading a file is refused: HTTP 422\", function () { pm.expect([422]).to.include(pm.response.code); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Save the query",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/analytics/queries",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "analytics",
+                "queries"
+              ]
+            },
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"PM totals\",\n  \"folder\": \"Postman\",\n  \"language\": \"dax\",\n  \"text\": \"EVALUATE ROW(\\\"Total\\\", SUM('PM orders'[Amount]))\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Save the query: HTTP 200\", function () { pm.expect([200]).to.include(pm.response.code); });",
+                  "try { pm.environment.set('queryId', pm.response.json().query.id); } catch (e) { console.log('could not save queryId', e); }"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Saved queries",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/analytics/queries",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "analytics",
+                "queries"
+              ]
+            },
+            "description": ""
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Saved queries: HTTP 200\", function () { pm.expect([200]).to.include(pm.response.code); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "One saved query",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/analytics/queries/{{queryId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "analytics",
+                "queries",
+                "{{queryId}}"
+              ]
+            },
+            "description": ""
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"One saved query: HTTP 200\", function () { pm.expect([200]).to.include(pm.response.code); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Run the saved query",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/analytics/queries/{{queryId}}/run",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "analytics",
+                "queries",
+                "{{queryId}}",
+                "run"
+              ]
+            },
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Run the saved query: HTTP 200\", function () { pm.expect([200]).to.include(pm.response.code); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Rename the saved query",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/analytics/queries/{{queryId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "analytics",
+                "queries",
+                "{{queryId}}"
+              ]
+            },
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"PM totals (all)\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Rename the saved query: HTTP 200\", function () { pm.expect([200]).to.include(pm.response.code); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Delete the saved query",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/analytics/queries/{{queryId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "analytics",
+                "queries",
+                "{{queryId}}"
+              ]
+            },
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Delete the saved query: HTTP 200\", function () { pm.expect([200]).to.include(pm.response.code); });"
                 ]
               }
             }
@@ -6253,6 +6927,843 @@
       ]
     },
     {
+      "name": "12d Many downloads at once (CSV, Excel, PDF)",
+      "description": "Load test. Run this folder with the Collection Runner and set Iterations (e.g. 20) to hit the server that many times; or open one request and use Send repeatedly. 'Run now' requests wait for the file. 'Deliver later' requests (header X-Deliver: later) are answered at once with 202 and a ticket; the server makes the file in the background, queueing when every place is busy, and you collect it from /api/deliveries/{id}/file. Works on /generate, /api/v1/reports/{id}/run, /api/server/reports/{id}/run, /api/admin/reports/{id}/run and the designer's runs.",
+      "item": [
+        {
+          "name": "Run now: CSV (file in the answer)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-API-Key",
+                "value": "{{apiKey}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/reports/PM_ORDERS/run",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "reports",
+                "PM_ORDERS",
+                "run"
+              ]
+            },
+            "description": "",
+            "auth": {
+              "type": "noauth"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"format\": \"csv\",\n  \"parameters\": {\n    \"Branch\": \"KHI\"\n  }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Run now: CSV (file in the answer): HTTP 200\", function () { pm.expect([200]).to.include(pm.response.code); });",
+                  "pm.test('a CSV file', function () { pm.expect(pm.response.headers.get('Content-Disposition')).to.include('.csv'); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Run now: Excel (file in the answer)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-API-Key",
+                "value": "{{apiKey}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/reports/PM_ORDERS/run",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "reports",
+                "PM_ORDERS",
+                "run"
+              ]
+            },
+            "description": "",
+            "auth": {
+              "type": "noauth"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"format\": \"xlsx\",\n  \"parameters\": {\n    \"Branch\": \"KHI\"\n  }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Run now: Excel (file in the answer): HTTP 200\", function () { pm.expect([200]).to.include(pm.response.code); });",
+                  "pm.test('a Excel file', function () { pm.expect(pm.response.headers.get('Content-Disposition')).to.include('.xlsx'); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Run now: PDF (file in the answer)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-API-Key",
+                "value": "{{apiKey}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/reports/PM_ORDERS/run",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "reports",
+                "PM_ORDERS",
+                "run"
+              ]
+            },
+            "description": "",
+            "auth": {
+              "type": "noauth"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"format\": \"pdf\",\n  \"parameters\": {\n    \"Branch\": \"KHI\"\n  }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Run now: PDF (file in the answer): HTTP 200\", function () { pm.expect([200]).to.include(pm.response.code); });",
+                  "pm.test('a PDF file', function () { pm.expect(pm.response.headers.get('Content-Disposition')).to.include('.pdf'); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Run now: CSV by URL",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-API-Key",
+                "value": "{{apiKey}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/generate/PM_ORDERS.csv?Branch=LHR",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "generate",
+                "PM_ORDERS.csv"
+              ],
+              "query": [
+                {
+                  "key": "Branch",
+                  "value": "LHR"
+                }
+              ]
+            },
+            "description": "",
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Run now: CSV by URL: HTTP 200\", function () { pm.expect([200]).to.include(pm.response.code); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Deliver later: CSV (202 + ticket)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-API-Key",
+                "value": "{{apiKey}}"
+              },
+              {
+                "key": "X-Deliver",
+                "value": "later"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/reports/PM_ORDERS/run",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "reports",
+                "PM_ORDERS",
+                "run"
+              ]
+            },
+            "description": "",
+            "auth": {
+              "type": "noauth"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"format\": \"csv\",\n  \"parameters\": {\n    \"Branch\": \"KHI\"\n  }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Deliver later: CSV (202 + ticket): HTTP 202\", function () { pm.expect([202]).to.include(pm.response.code); });",
+                  "try { pm.environment.set('delivery_csv', pm.response.json().delivery.id); } catch (e) { console.log('could not save delivery_csv', e); }"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Deliver later: Excel (202 + ticket)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-API-Key",
+                "value": "{{apiKey}}"
+              },
+              {
+                "key": "X-Deliver",
+                "value": "later"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/reports/PM_ORDERS/run",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "reports",
+                "PM_ORDERS",
+                "run"
+              ]
+            },
+            "description": "",
+            "auth": {
+              "type": "noauth"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"format\": \"xlsx\",\n  \"parameters\": {\n    \"Branch\": \"KHI\"\n  }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Deliver later: Excel (202 + ticket): HTTP 202\", function () { pm.expect([202]).to.include(pm.response.code); });",
+                  "try { pm.environment.set('delivery_xlsx', pm.response.json().delivery.id); } catch (e) { console.log('could not save delivery_xlsx', e); }"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Deliver later: PDF (202 + ticket)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-API-Key",
+                "value": "{{apiKey}}"
+              },
+              {
+                "key": "X-Deliver",
+                "value": "later"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/reports/PM_ORDERS/run",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "reports",
+                "PM_ORDERS",
+                "run"
+              ]
+            },
+            "description": "",
+            "auth": {
+              "type": "noauth"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"format\": \"pdf\",\n  \"parameters\": {\n    \"Branch\": \"KHI\"\n  }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Deliver later: PDF (202 + ticket): HTTP 202\", function () { pm.expect([202]).to.include(pm.response.code); });",
+                  "try { pm.environment.set('delivery_pdf', pm.response.json().delivery.id); } catch (e) { console.log('could not save delivery_pdf', e); }"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Deliver later: Excel by URL",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-API-Key",
+                "value": "{{apiKey}}"
+              },
+              {
+                "key": "X-Deliver",
+                "value": "later"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/generate/PM_ORDERS.xlsx?Branch=ISB",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "generate",
+                "PM_ORDERS.xlsx"
+              ],
+              "query": [
+                {
+                  "key": "Branch",
+                  "value": "ISB"
+                }
+              ]
+            },
+            "description": "",
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Deliver later: Excel by URL: HTTP 202\", function () { pm.expect([202]).to.include(pm.response.code); });",
+                  "try { pm.environment.set('delivery_url', pm.response.json().delivery.id); } catch (e) { console.log('could not save delivery_url', e); }"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Deliver later as the signed-in user (Report Server Run)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-Deliver",
+                "value": "later"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/server/reports/PM_ORDERS/run",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "server",
+                "reports",
+                "PM_ORDERS",
+                "run"
+              ]
+            },
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"format\": \"xlsx\",\n  \"parameters\": {\n    \"Branch\": \"KHI\"\n  }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Deliver later as the signed-in user (Report Server Run): HTTP 202\", function () { pm.expect([202]).to.include(pm.response.code); });",
+                  "try { pm.environment.set('delivery_session', pm.response.json().delivery.id); } catch (e) { console.log('could not save delivery_session', e); }"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Wait until the key's downloads are ready (repeats itself)",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-API-Key",
+                "value": "{{apiKey}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/deliveries",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "deliveries"
+              ]
+            },
+            "description": "",
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Wait until the key's downloads are ready (repeats itself): HTTP 200\", function () { pm.expect([200]).to.include(pm.response.code); });",
+                  "const items = pm.response.json().deliveries;\nconst tries = Number(pm.environment.get('deliveryTries') || 0);\nif (items.some(d => d.status === 'queued' || d.status === 'running') && tries < 60) { pm.environment.set('deliveryTries', tries + 1); postman.setNextRequest(pm.info.requestName); }\nelse { pm.environment.unset('deliveryTries'); pm.test('all made', function () { items.forEach(d => pm.expect(d.status).to.eql('ready')); }); }"
+                ]
+              }
+            },
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "setTimeout(function () {}, 500);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Collect the CSV file",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-API-Key",
+                "value": "{{apiKey}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/deliveries/{{delivery_csv}}/file",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "deliveries",
+                "{{delivery_csv}}",
+                "file"
+              ]
+            },
+            "description": "",
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Collect the CSV file: HTTP 200 or 409\", function () { pm.expect([200, 409]).to.include(pm.response.code); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Collect the Excel file",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-API-Key",
+                "value": "{{apiKey}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/deliveries/{{delivery_xlsx}}/file",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "deliveries",
+                "{{delivery_xlsx}}",
+                "file"
+              ]
+            },
+            "description": "",
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Collect the Excel file: HTTP 200 or 409\", function () { pm.expect([200, 409]).to.include(pm.response.code); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Collect the PDF file",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-API-Key",
+                "value": "{{apiKey}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/deliveries/{{delivery_pdf}}/file",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "deliveries",
+                "{{delivery_pdf}}",
+                "file"
+              ]
+            },
+            "description": "",
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Collect the PDF file: HTTP 200 or 409\", function () { pm.expect([200, 409]).to.include(pm.response.code); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Collect the Excel file asked for by URL",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-API-Key",
+                "value": "{{apiKey}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/deliveries/{{delivery_url}}/file",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "deliveries",
+                "{{delivery_url}}",
+                "file"
+              ]
+            },
+            "description": "",
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Collect the Excel file asked for by URL: HTTP 200 or 409\", function () { pm.expect([200, 409]).to.include(pm.response.code); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "One download's status (signed-in user)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/deliveries/{{delivery_session}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "deliveries",
+                "{{delivery_session}}"
+              ]
+            },
+            "description": ""
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"One download's status (signed-in user): HTTP 200\", function () { pm.expect([200]).to.include(pm.response.code); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Someone else cannot collect it (the key is not the session)",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-API-Key",
+                "value": "{{apiKey}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/deliveries/{{delivery_session}}/file",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "deliveries",
+                "{{delivery_session}}",
+                "file"
+              ]
+            },
+            "description": "",
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Someone else cannot collect it (the key is not the session): HTTP 404\", function () { pm.expect([404]).to.include(pm.response.code); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Forget a download (removes its file)",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "X-API-Key",
+                "value": "{{apiKey}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/deliveries/{{delivery_url}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "deliveries",
+                "{{delivery_url}}"
+              ]
+            },
+            "description": "",
+            "auth": {
+              "type": "noauth"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Forget a download (removes its file): HTTP 200 or 404\", function () { pm.expect([200, 404]).to.include(pm.response.code); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Capacity after the burst",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/admin/capacity",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "admin",
+                "capacity"
+              ]
+            },
+            "description": ""
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Capacity after the burst: HTTP 200\", function () { pm.expect([200]).to.include(pm.response.code); });"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
       "name": "13 Logs, audit and system (Admin)",
       "description": "",
       "item": [
@@ -6498,6 +8009,231 @@
                 "exec": [
                   "pm.test(\"Capacity: report places in use, background queue, limits: HTTP 200\", function () { pm.expect([200]).to.include(pm.response.code); });",
                   "pm.test('has limits', function () { pm.expect(pm.response.json().limits.maxConcurrent).to.be.above(0); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Report Server logs: every request today (system database)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/server/logs/requests?limit=50",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "server",
+                "logs",
+                "requests"
+              ],
+              "query": [
+                {
+                  "key": "limit",
+                  "value": "50"
+                }
+              ]
+            },
+            "description": ""
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Report Server logs: every request today (system database): HTTP 200\", function () { pm.expect([200]).to.include(pm.response.code); });",
+                  "pm.test('requests are recorded', function () { pm.expect(pm.response.json().totals.requests).to.be.above(0); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Report Server logs: only the errors",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/server/logs/requests?status=errors&limit=50",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "server",
+                "logs",
+                "requests"
+              ],
+              "query": [
+                {
+                  "key": "status",
+                  "value": "errors"
+                },
+                {
+                  "key": "limit",
+                  "value": "50"
+                }
+              ]
+            },
+            "description": ""
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Report Server logs: only the errors: HTTP 200\", function () { pm.expect([200]).to.include(pm.response.code); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Report Server logs: report runs",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/server/logs/runs?limit=50",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "server",
+                "logs",
+                "runs"
+              ],
+              "query": [
+                {
+                  "key": "limit",
+                  "value": "50"
+                }
+              ]
+            },
+            "description": ""
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Report Server logs: report runs: HTTP 200\", function () { pm.expect([200]).to.include(pm.response.code); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Report Server logs: service log",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/server/logs/service?lines=50&level=WARNING",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "server",
+                "logs",
+                "service"
+              ],
+              "query": [
+                {
+                  "key": "lines",
+                  "value": "50"
+                },
+                {
+                  "key": "level",
+                  "value": "WARNING"
+                }
+              ]
+            },
+            "description": ""
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Report Server logs: service log: HTTP 200\", function () { pm.expect([200]).to.include(pm.response.code); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Report Server logs: audit trail",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/server/logs/audit?limit=50",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "server",
+                "logs",
+                "audit"
+              ],
+              "query": [
+                {
+                  "key": "limit",
+                  "value": "50"
+                }
+              ]
+            },
+            "description": ""
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Report Server logs: audit trail: HTTP 200\", function () { pm.expect([200]).to.include(pm.response.code); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Report Server logs: downloads and capacity right now",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/server/logs/downloads",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "server",
+                "logs",
+                "downloads"
+              ]
+            },
+            "description": ""
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Report Server logs: downloads and capacity right now: HTTP 200\", function () { pm.expect([200]).to.include(pm.response.code); });"
                 ]
               }
             }

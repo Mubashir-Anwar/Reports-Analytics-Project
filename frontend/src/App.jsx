@@ -11,16 +11,20 @@ import SetupForm from './SetupForm.jsx';
 import DatasetQueryDialog from './DatasetQueryDialog.jsx';
 import SourceView from './SourceView.jsx';
 import ErrorDialog from './ErrorDialog.jsx';
+import { checkSetup, explainWarning } from './errorHelp.js';
+import { knownFields } from './fieldCheck.js';
+import { setTeamPlace } from './shared/TeamBar.jsx';
 import TableEditor from './TableEditor.jsx';
 import NavBar from './shared/NavBar.jsx';
 import Ribbon from './Ribbon.jsx';
 import './ribbon.css';
 import TemplateGallery from './TemplateGallery.jsx';
 import { AdaptersPanel, Outline, Palette, ServerPanel, WorkspacePanel } from './panels.jsx';
+import { DockSide, FloatingPanel, floatDropProps, useDockLayout, useNarrow } from './DockLayout.jsx';
 import { ZOOM_LIMITS, bandWidth, clampZoom, emptyDesign, findElement, getBand, setBand } from './designModel.js';
 import ComponentWizard from './ComponentWizard.jsx';
 import PublishDialog from './PublishDialog.jsx';
-import { buildMrd, downloadText, fileKind, parseMrd } from './mrd.js';
+import { buildMrd, downloadText, fileKind, parseMrd, splitReportFiles } from './mrd.js';
 import { blankReport, initialState, reducer, reportPayload } from './store.js';
 import { readClipboard } from './arrange.js';
 
@@ -56,15 +60,23 @@ export default function App() {
     } catch { return all; }
   });
   useEffect(() => { try { localStorage.setItem('designer-panels', JSON.stringify(panels)); } catch { /* ignore */ } }, [panels]);
-  const showLeft = panels.explorer || panels.outline;
-  const showRight = panels.palette || panels.properties;
+  const dock = useDockLayout();
+  const narrow = useNarrow();
+  const floatingNames = narrow ? [] : Object.keys(dock.layout.floating).filter((name) => panels[name]);
+  const sideShown = (side) => dock.layout.order[side].some((name) => panels[name])
+    || (narrow && Object.entries(dock.layout.floating).some(([name, f]) => panels[name] && (f.from || 'right') === side));
+  const showLeft = sideShown('left');
+  const showRight = sideShown('right');
+  const hidePanel = (name) => setPanels((p) => ({ ...p, [name]: false }));
   const [publishing, setPublishing] = useState(null); // { folders, folder, replace, busy }
+  const [clash, setClash] = useState(null); // Save hit an ID already in the workspace: { id, newId, error, busy }
   const [zoom, setZoom] = useState(1);
   const [message, setMessage] = useState({ text: 'Ready', kind: '' });
   const [refreshKey, setRefreshKey] = useState(0);
   const [importInfo, setImportInfo] = useState(null);
 
-  const [errorPopup, setErrorPopup] = useState(''); // errors open a popup with a hint (and stay in the status line)
+  const [errorPopup, setErrorPopup] = useState('');
+  const [setupFocus, setSetupFocus] = useState(null); // where an error's "Go there" points: Setup scrolls to it and highlights it // errors open a popup with a hint (and stay in the status line)
   const notify = useCallback((text, kind = '') => {
     setMessage({ text, kind });
     if (kind === 'error' && text) setErrorPopup(String(text));
@@ -197,22 +209,23 @@ export default function App() {
   /** Open a report from the designer's workspace. */
   const open = async (summary) => {
     if (state.dirty && !window.confirm('You have unsaved changes. Discard them and open another report?')) return;
-    try { load(await api.workspaceReport(summary.id)); notify(`Opened ${summary.id} from your workspace`, 'ok'); }
+    try { load(await api.workspaceReport(summary.id, summary.folder)); notify(`Opened ${summary.id} from your workspace`, 'ok'); }
     catch (error) { notify(`Could not open the report: ${error.message}`, 'error'); }
   };
 
-  /** Open a published report: its workspace copy if there is one, else a new workspace copy of the server version. */
+  /** Open a published report (<folder>/<ID>): its workspace copy in the same folder if there is one, else a new
+   *  workspace copy of the server version. */
   const openFromServer = async (item) => {
     if (state.dirty && !window.confirm('You have unsaved changes. Discard them and open another report?')) return;
     try {
-      const workspaceCopy = await api.workspaceReport(item.id).catch((error) => { if (error.status === 404) return null; throw error; });
+      const workspaceCopy = await api.workspaceReport(item.id, item.folder).catch((error) => { if (error.status === 404) return null; throw error; });
       if (workspaceCopy) {
         load(workspaceCopy);
         setLeftTab('workspace');
         notify(`${item.id} is already in your workspace — opened that copy. Publish it to update the server.`, 'ok');
         return;
       }
-      const published = await api.report(item.id);
+      const published = await api.report(item.id, item.folder);
       const saved = await api.saveWorkspace({ ...published, design: published.design }, true);
       load(published, saved.report);
       setRefreshKey((n) => n + 1);
@@ -222,16 +235,19 @@ export default function App() {
   };
 
   /** Open file…: a .mrd report file, or a Jaspersoft Studio .jrxml (converted). Nothing is saved until Save. */
-  const openFile = async (file) => {
-    if (!file) return;
+  const openFile = async (chosen) => {
+    // one report file, or a .jrxml together with the pictures it uses
+    const { report: file, images, skipped } = await splitReportFiles(chosen instanceof File ? [chosen] : chosen);
+    if (!file) { notify('Choose a .mrd or .jrxml report file (pictures can be chosen together with a .jrxml)', 'error'); return; }
+    if (skipped.length) notify(`Left out (over 2.4 MB): ${skipped.join(', ')}`, 'error');
     const text = await file.text();
     const kind = fileKind(text);
-    if (kind === 'jrxml') { importJrxml(text, file.name); return; }
+    if (kind === 'jrxml') { importJrxml(text, file.name, images); return; }
     if (kind !== 'mrd') { notify(`${file.name} is not a .mrd or .jrxml report file`, 'error'); return; }
     if (state.dirty && !window.confirm('You have unsaved changes. Opening a file will discard them. Continue?')) return;
     try {
       const definition = parseMrd(text);
-      const inWorkspace = await api.workspaceReport(definition.id).then(() => true).catch((error) => { if (error.status === 404) return false; throw error; });
+      const inWorkspace = await api.workspaceReport(definition.id, definition.folder || 'General').then(() => true).catch((error) => { if (error.status === 404) return false; throw error; });
       if (inWorkspace && !window.confirm(`${definition.id} is already in your workspace. Open the file anyway? When you Save, the file's version replaces the workspace copy.`)) return;
       load(definition);
       dispatch({ type: 'REPORT', patch: { isNew: !inWorkspace, status: null } });
@@ -246,23 +262,24 @@ export default function App() {
     notify(`Downloaded ${payload.id || 'report'}.mrd — open it again with “Open file…”, or upload it on /server (Add Resource)`, 'ok');
   };
 
-  // /designer?open=<ID> (from /server → "Open in Designer"): open that published report once connected
+  // /designer?open=<ID>&folder=<folder> (from /server → "Open in Designer"): open that published report once connected
   useEffect(() => {
     if (!ready) return;
-    const id = new URLSearchParams(window.location.search).get('open');
+    const query = new URLSearchParams(window.location.search);
+    const id = query.get('open');
     if (!id) return;
     window.history.replaceState(null, '', window.location.pathname);
-    openFromServer({ id });
+    openFromServer({ id, folder: query.get('folder') || undefined });
   }, [ready]); // eslint-disable-line react-hooks/exhaustive-deps -- only once, right after connecting
 
-  const importJrxml = async (text, name) => {
+  const importJrxml = async (text, name, images = {}) => {
     if (state.dirty && !window.confirm('You have unsaved changes. Importing a JRXML will discard them. Continue?')) return;
     const file = { name };
     try {
-      const result = await api.importJrxml(text);
+      const result = await api.importJrxml(text, images);
       dispatch({ type: 'LOAD', report: { ...blankReport(), ...result.report, extra: {} }, design: result.design });
       dispatch({ type: 'REPORT', patch: {} });
-      setImportInfo({ name: file.name, warnings: result.warnings, hints: result.hints, columns: result.report.columns.length, parameters: result.report.parameters.length });
+      setImportInfo({ name: file.name, warnings: result.warnings, places: result.warningElements || {}, hints: result.hints, columns: result.report.columns.length, parameters: result.report.parameters.length });
       setTab('design');
       notify(`JRXML imported: ${result.report.id} — review it, then Save`, 'ok');
     } catch (error) { notify(`JRXML import failed: ${error.message}`, 'error'); }
@@ -277,15 +294,38 @@ export default function App() {
       return null;
     }
     try {
-      const result = await api.saveWorkspace(reportPayload(state), report.isNew);
-      dispatch({ type: 'SAVED', id: report.id, status: result.report });
-      setRefreshKey((n) => n + 1);
-      const where = result.report.onServer ? 'The server still has the last published version.' : 'Not on the server yet.';
-      notify(result.readyToPublish
-        ? `Saved in your workspace ✓  ${where} Use “Publish to server” to update it.`
-        : `Saved in your workspace as a draft. Before publishing: ${result.problem}`, result.readyToPublish ? 'ok' : '');
-      return result;
-    } catch (error) { notify(`Save failed: ${error.message}`, 'error'); return null; }
+      return await saveAs(report.id, report.isNew);
+    } catch (error) {
+      if (error.status === 409 && report.isNew) { // the ID is already in the workspace: ask replace / new ID
+        setClash({ id: report.id, newId: `${report.id}_copy`, error: '', busy: false });
+        return null;
+      }
+      notify(`Save failed: ${error.message}`, 'error');
+      return null;
+    }
+  };
+  /** Save the open report under `id` (create=true refuses an ID that is already in the workspace). */
+  const saveAs = async (id, create) => {
+    // the draft was saved in status.folder before; Setup may have moved it to another folder
+    const result = await api.saveWorkspace({ ...reportPayload(state), id }, create, state.report.status?.folder);
+    dispatch({ type: 'SAVED', id, status: result.report });
+    setRefreshKey((n) => n + 1);
+    const where = result.report.onServer ? 'The server still has the last published version.' : 'Not on the server yet.';
+    notify(result.readyToPublish
+      ? `Saved in your workspace as ${id} ✓  ${where} Use “Publish to server” to update it.`
+      : `Saved in your workspace as a draft. Before publishing: ${result.problem}`, result.readyToPublish ? 'ok' : '');
+    return result;
+  };
+  const resolveClash = async (replace) => {
+    const id = replace ? clash.id : clash.newId.trim();
+    if (!replace && !/^[A-Za-z0-9_-]{1,80}$/.test(id)) { setClash({ ...clash, error: 'Use letters, numbers, _ and - only (no spaces).' }); return; }
+    setClash({ ...clash, busy: true, error: '' });
+    try {
+      await saveAs(id, !replace);
+      setClash(null);
+    } catch (error) {
+      setClash({ ...clash, busy: false, error: error.status === 409 ? `${id} is also already in your workspace — choose another ID.` : error.message });
+    }
   };
 
   /** Publish: save to the workspace if needed, then copy the report into a server folder. */
@@ -306,11 +346,11 @@ export default function App() {
     const { report } = state;
     setPublishing((p) => ({ ...p, busy: true }));
     try {
-      const result = await api.publish(report.id, { folder: publishing.folder, replace: publishing.replace });
+      const result = await api.publish(report.id, { folder: publishing.folder, replace: publishing.replace }, report.status?.folder || report.folder);
       dispatch({ type: 'STATUS', status: result.workspace });
       setPublishing(null);
       setRefreshKey((n) => n + 1);
-      notify(`Published to the server ✓  ${publishing.folder} / ${report.id}  —  /generate/${report.id}.pdf`, 'ok');
+      notify(`Published to the server ✓  ${publishing.folder} / ${report.id}  —  /generate/${report.id}.pdf?Folder=${publishing.folder}`, 'ok');
     } catch (error) {
       if (error.status === 409) setPublishing((p) => ({ ...p, busy: false, onServer: true, error: error.message }));
       else { setPublishing((p) => ({ ...p, busy: false, error: error.message })); }
@@ -391,6 +431,8 @@ export default function App() {
     saveFile,
   };
 
+  // the team bar shows others which report this is, and warns when someone else has the same one open
+  useEffect(() => { setTeamPlace({ place: state.report.id, title: state.report.id ? `${state.report.title || state.report.id}` : '' }); }, [state.report.id, state.report.title]);
   if (denied) return <NoAccess text={denied} />;
   if (!ready) return <div className="login"><p>Connecting to the server…</p></div>;
 
@@ -405,9 +447,61 @@ export default function App() {
     } else if (id === 'setup') { setQueryTab(null); setTab('setup'); }
     else if (id === 'adapters') { setLeftTab('adapters'); setDrawer('left'); }
     else if (id === 'parameters') setQueryTab('parameters');
+    else if (id === 'design') { setQueryTab(null); setTab('design'); }
+    else if (id.startsWith('make-optional:')) {
+      const names = id.slice('make-optional:'.length).split(',').map((n) => n.trim());
+      const { parameters } = stateRef.current.report;
+      const hit = parameters.filter((p) => names.includes(p.name) || names.includes(p.label));
+      dispatch({ type: 'REPORT', patch: { parameters: parameters.map((p) => (hit.includes(p) ? { ...p, required: false } : p)) } });
+      notify(`${hit.map((p) => p.name).join(', ')} may now stay empty — press Run again. Save to keep it.`, 'ok');
+    }
+  };
+
+  /** Add a field name to Setup → Fields (from the Expression Editor or the Fields list). */
+  const addField = (name) => {
+    const clean = String(name || '').trim();
+    if (!clean) return;
+    if (state.report.columns.includes(clean)) { notify(`${clean} is already in Fields`, 'ok'); return; }
+    dispatch({ type: 'REPORT', patch: { columns: [...state.report.columns, clean] } });
+    notify(`Added ${clean} to Fields (Setup → Fields). Save to keep it.`, 'ok');
+  };
+
+  /** "Go there" of the error popup: open the tab / section and highlight the field, row or query line. */
+  const goToProblem = (focus) => {
+    if (focus.target === 'design') {
+      setQueryTab(null);
+      setTab('design');
+      if (focus.elementId && findElement(state.design, focus.elementId)) dispatch({ type: 'SELECT', selection: { kind: 'element', id: focus.elementId } });
+      if (focus.note) notify(focus.note, 'ok');
+      return;
+    }
+    if (focus.target === 'datasets') { setQueryTab('datasets'); return; }
+    setQueryTab(null);
+    setTab('setup');
+    setSetupFocus({ ...focus, nonce: Date.now() });
   };
 
   const { report, design, selection, tool, past, future, dirty } = state;
+  const renderPanel = (name) => {
+    if (name === 'explorer') {
+      return (
+        <>
+          <div className="dock-tabs">
+            <button className={leftTab === 'workspace' ? 'on' : ''} onClick={() => setLeftTab('workspace')} title="Reports saved inside the designer">Workspace</button>
+            <button className={leftTab === 'server' ? 'on' : ''} onClick={() => setLeftTab('server')} title="Published reports on the report server">Server</button>
+            <button className={leftTab === 'adapters' ? 'on' : ''} onClick={() => setLeftTab('adapters')}>Data Adapters</button>
+          </div>
+          {leftTab === 'workspace' && <WorkspacePanel report={report} onOpen={open} onNew={newReport} notify={notify} refreshKey={refreshKey} onChanged={() => setRefreshKey((n) => n + 1)} />}
+          {leftTab === 'server' && <ServerPanel report={report} onOpenFromServer={openFromServer} openMenu={openMenu} notify={notify} refreshKey={refreshKey} onChanged={() => setRefreshKey((n) => n + 1)} />}
+          {leftTab === 'adapters' && <AdaptersPanel notify={notify} openMenu={openMenu} refreshKey={refreshKey} onChanged={() => setRefreshKey((n) => n + 1)} />}
+        </>
+      );
+    }
+    if (name === 'outline') return <Outline report={report} design={design} selection={selection} dispatch={dispatch} actions={actions} openMenu={openMenu} onDetectFields={() => setTab('setup')} onEditExpression={editExpression} />;
+    if (name === 'palette') return <Palette tool={tool} dispatch={dispatch} />;
+    return <Properties state={state} dispatch={dispatch} notify={notify} actions={actions} onEditExpression={editExpression} onOpenQuery={(t) => setQueryTab(t || 'query')} onOpenTable={setTableId} />;
+  };
+  const widths = { '--left-w': `${showLeft ? dock.layout.width.left : 0}px`, '--right-w': `${showRight ? dock.layout.width.right : 0}px` };
   return (
     <div className="app">
       <NavBar current="/designer" />
@@ -418,49 +512,33 @@ export default function App() {
         onNew={() => newReport(state.report.folder)} onOpenFile={openFile} onSave={save} onSaveFile={saveFile} onPublish={startPublish}
         onDemo={loadDemo} onTemplates={() => setTemplates(true)} onQuery={(which) => setQueryTab(which || 'query')}
         onAdapters={() => { setLeftTab('adapters'); setPanels((p) => ({ ...p, explorer: true })); setDrawer('left'); }}
+        onResetLayout={() => { dock.reset(); setPanels({ explorer: true, outline: true, palette: true, properties: true }); }}
+        panelSide={dock.sideOf} onEditExpression={editExpression} onGo={goToProblem}
       />
 
-      <div className={`workspace ${drawer ? `show-${drawer}` : ''} ${showLeft ? '' : 'hide-left'} ${showRight ? '' : 'hide-right'}`}>
+      <div className={`workspace ${drawer ? `show-${drawer}` : ''} ${showLeft ? '' : 'hide-left'} ${showRight ? '' : 'hide-right'}`} style={widths}>
         {drawer && <button type="button" className="drawer-backdrop" aria-label="Close the panel" onClick={() => setDrawer(null)} />}
-        <aside className="left">
-          <div className={`dock ${panels.explorer ? '' : 'off'}`} aria-label="Repository explorer">
-            <div className="dock-head">Repository explorer</div>
-            <div className="dock-tabs">
-              <button className={leftTab === 'workspace' ? 'on' : ''} onClick={() => setLeftTab('workspace')} title="Reports saved inside the designer">Workspace</button>
-              <button className={leftTab === 'server' ? 'on' : ''} onClick={() => setLeftTab('server')} title="Published reports on the report server">Server</button>
-              <button className={leftTab === 'adapters' ? 'on' : ''} onClick={() => setLeftTab('adapters')}>Data Adapters</button>
-            </div>
-            {leftTab === 'workspace' && <WorkspacePanel report={report} onOpen={open} onNew={newReport} notify={notify} refreshKey={refreshKey} onChanged={() => setRefreshKey((n) => n + 1)} />}
-            {leftTab === 'server' && <ServerPanel report={report} onOpenFromServer={openFromServer} openMenu={openMenu} notify={notify} refreshKey={refreshKey} onChanged={() => setRefreshKey((n) => n + 1)} />}
-            {leftTab === 'adapters' && <AdaptersPanel notify={notify} openMenu={openMenu} refreshKey={refreshKey} onChanged={() => setRefreshKey((n) => n + 1)} />}
-          </div>
-          <div className={`dock ${panels.outline ? '' : 'off'}`}>
-            <div className="dock-tabs"><button className="on">Outline</button></div>
-            <Outline report={report} design={design} selection={selection} dispatch={dispatch} actions={actions} openMenu={openMenu} onDetectFields={() => setTab('setup')} onEditExpression={editExpression} />
-          </div>
-        </aside>
+        <DockSide side="left" ops={dock} visible={panels} render={renderPanel} onHide={hidePanel} narrow={narrow} />
 
-        <main className="center">
+        <main className="center" {...floatDropProps(dock)}>
           <div className="tabs">
             {[['setup', 'Setup'], ['design', 'Design'], ['source', 'Source'], ['preview', 'Preview']].map(([id, label]) => (
               <button key={id} className={tab === id ? 'on' : ''} onClick={() => setTab(id)}>{label}</button>
             ))}
           </div>
           <div className="stage">
-            {tab === 'setup' && <SetupForm state={state} dispatch={dispatch} notify={notify} onTemplates={() => setTemplates(true)} refreshKey={refreshKey} />}
-            {tab === 'design' && <Canvas design={design} selection={selection} tool={tool} zoom={zoom} setZoom={setZoom} dispatch={dispatch} actions={actions} openMenu={openMenu} onEditExpression={editExpression} onPercentage={onPercentage} onWizard={onWizard} onOpenTable={setTableId} prefs={canvasPrefs} setPrefs={setCanvasPrefs} hasClipboard={Boolean(readClipboard()?.items?.length)} onQuery={() => setQueryTab('query')} onTemplates={() => setTemplates(true)} showToolbar={false} />}
+            {tab === 'setup' && <SetupForm state={state} dispatch={dispatch} notify={notify} onTemplates={() => setTemplates(true)} refreshKey={refreshKey} focus={setupFocus} onFocus={goToProblem} onClearFocus={() => setSetupFocus(null)} />}
+            {tab === 'design' && <Canvas knownFields={report.columns.length ? knownFields(report, design) : null} design={design} selection={selection} tool={tool} zoom={zoom} setZoom={setZoom} dispatch={dispatch} actions={actions} openMenu={openMenu} onEditExpression={editExpression} onPercentage={onPercentage} onWizard={onWizard} onOpenTable={setTableId} prefs={canvasPrefs} setPrefs={setCanvasPrefs} hasClipboard={Boolean(readClipboard()?.items?.length)} onQuery={() => setQueryTab('query')} onTemplates={() => setTemplates(true)} showToolbar={false} />}
             {tab === 'source' && <SourceView state={state} dispatch={dispatch} notify={notify} />}
             {tab === 'preview' && <Preview state={state} notify={notify} />}
           </div>
         </main>
 
-        <aside className="right">
-          <div className={`dock ${panels.palette ? '' : 'off'} ${panels.properties ? '' : 'grow'}`}><div className="dock-tabs"><button className="on">Palette</button></div><Palette tool={tool} dispatch={dispatch} /></div>
-          <div className={`dock grow ${panels.properties ? '' : 'off'}`}><div className="dock-tabs"><button className="on">Properties</button></div><Properties state={state} dispatch={dispatch} notify={notify} actions={actions} onEditExpression={editExpression} onOpenQuery={(t) => setQueryTab(t || 'query')} onOpenTable={setTableId} /></div>
-        </aside>
+        <DockSide side="right" ops={dock} visible={panels} render={renderPanel} onHide={hidePanel} narrow={narrow} />
       </div>
+      {floatingNames.map((name) => <FloatingPanel key={name} name={name} ops={dock} render={renderPanel} onHide={hidePanel} />)}
       <footer className={`status ${message.kind}`}>{message.text}</footer>
-      {errorPopup && <ErrorDialog message={errorPopup} onClose={() => setErrorPopup('')} onAction={errorAction} />}
+      {errorPopup && <ErrorDialog message={errorPopup} problems={checkSetup(state.report, state.design)} onClose={() => setErrorPopup('')} onAction={errorAction} onGo={goToProblem} />}
       <ContextMenu menu={menu} onClose={closeMenu} />
       {percent && (
         <div className="modal-back" onMouseDown={(e) => e.target === e.currentTarget && setPercent(null)}>
@@ -485,21 +563,32 @@ export default function App() {
       {templates && <TemplateGallery report={report} design={design} onApply={applyLayout} onClose={() => setTemplates(false)} />}
       {wizard && <ComponentWizard wizard={wizard} report={report} design={design} bandWidth={bandWidth(design)} onCancel={() => setWizard(null)} onDone={finishWizard} />}
       {exprId && findElement(design, exprId) && (
-        <ExpressionEditor element={findElement(design, exprId).element} report={report} design={design} onSave={saveExpression} onClose={() => setExprId(null)} />
+        <ExpressionEditor element={findElement(design, exprId).element} report={report} design={design} onSave={saveExpression} onClose={() => setExprId(null)} onAddField={addField} />
       )}
       {publishing && <PublishDialog publishing={publishing} setPublishing={setPublishing} report={report} design={design} onConfirm={confirmPublish} />}
-      {importInfo && (
-        <div className="modal-back" onClick={() => setImportInfo(null)}>
-          <div className="modal" onClick={(e) => e.stopPropagation()}>
-            <h3>JRXML imported</h3>
-            <p><b>{importInfo.name}</b> — {importInfo.parameters} parameters, {importInfo.columns} fields.</p>
-            {importInfo.hints?.dataAdapter && <p>Original Data Adapter: <code>{importInfo.hints.dataAdapter}</code>. Choose your adapter in the <b>Data Adapters</b> tab on the left, or in Setup.</p>}
-            {importInfo.warnings.length ? (<><p><b>Please check these yourself:</b></p><ul>{importInfo.warnings.map((w) => <li key={w}>{w}</li>)}</ul></>) : <p className="ok">No warnings.</p>}
-            <p className="muted">Nothing has been saved yet. Review it in the Design tab, then Save.</p>
-            <button className="btn primary" onClick={() => setImportInfo(null)}>OK</button>
-          </div>
+      {clash && (
+        <div className="modal-back" onMouseDown={(e) => e.target === e.currentTarget && !clash.busy && setClash(null)}>
+          <form className="modal clash-dialog" role="dialog" aria-label="Report ID already exists" onSubmit={(e) => { e.preventDefault(); resolveClash(false); }}>
+            <h3>⚠ {clash.id} is already in your workspace</h3>
+            <p>A report with the ID <b>{clash.id}</b> was saved before (for example, you opened the same file or JRXML again). What should happen?</p>
+            <div className="clash-choice">
+              <b>Replace it</b>
+              <p className="muted">The saved copy of {clash.id} is overwritten with what is open now. The server copy (if published) does not change until you publish.</p>
+              <button type="button" className="btn danger" disabled={clash.busy} onClick={() => resolveClash(true)}>Replace {clash.id}</button>
+            </div>
+            <div className="clash-choice">
+              <b>Keep both — save this one with a new ID</b>
+              <label className="modal-field">New report ID
+                <input autoFocus value={clash.newId} disabled={clash.busy} onChange={(e) => setClash({ ...clash, newId: e.target.value, error: '' })} />
+              </label>
+              <button type="submit" className="btn primary" disabled={clash.busy || !clash.newId.trim()}>Save as {clash.newId.trim() || '…'}</button>
+            </div>
+            {clash.error && <p className="error-text" role="alert">{clash.error}</p>}
+            <div className="row"><button type="button" className="btn" disabled={clash.busy} onClick={() => setClash(null)}>Cancel — don't save</button></div>
+          </form>
         </div>
       )}
+      {importInfo && <ImportDialog info={importInfo} onGo={(focus) => { setImportInfo(null); goToProblem(focus); }} onClose={() => setImportInfo(null)} />}
     </div>
   );
 }
@@ -519,4 +608,42 @@ function demoDesign() {
   d.bands.pageFooter = { height: 24, elements: [text({ expression: 'Page $V{PAGE_NUMBER} of $V{PAGE_COUNT}', x: 335, y: 5, width: 200, align: 'right', fontSize: 8, color: '#475569' })] };
   d.bands.summary = { height: 230, elements: [text({ expression: 'Grand total: $V{GrandTotal}', pattern: '#,##0.00', width: 300, bold: true, fontSize: 11, y: 6, height: 18 }), { ...text({}), type: 'chart', x: 0, y: 34, width: 400, height: 180, chartType: 'bar', categoryField: 'Branch', valueField: 'Amount', aggregate: 'Sum', title: 'Amount by branch' }] };
   return d;
+}
+
+/** After a JRXML import: each warning in plain words — what happened, where, what to do — with a Go there button. */
+function ImportDialog({ info, onGo, onClose }) {
+  const items = info.warnings.map((w) => ({ raw: w, ...explainWarning(w, info.places?.[w]) }));
+  const order = { todo: 0, fixed: 1, info: 2 };
+  items.sort((a, b) => order[a.level] - order[b.level]);
+  const todo = items.filter((i) => i.level === 'todo').length;
+  const label = { todo: 'To do', fixed: 'Fixed for you — check', info: 'For your information' };
+  return (
+    <div className="modal-back" onClick={onClose}>
+      <div className="modal import-dialog" onClick={(e) => e.stopPropagation()}>
+        <h3>JRXML imported</h3>
+        <p><b>{info.name}</b> — {info.parameters} parameters, {info.columns} fields.</p>
+        <ol className="import-next">
+          <li>Choose the data adapter{info.hints?.dataAdapter ? <> (in Jaspersoft it was <code>{info.hints.dataAdapter}</code>)</> : null}: <button type="button" className="linkish" onClick={() => onGo({ target: 'adapter', note: 'Choose the data adapter this report reads from.' })}>Setup → Data adapter</button></li>
+          {items.length > 0 && <li>{todo ? `Fix the ${todo} thing${todo > 1 ? 's' : ''} marked “To do” below` : 'Look at the items below'} (each has a Go there button).</li>}
+          <li>Preview it, then Save.</li>
+        </ol>
+        {items.length ? (
+          <ul className="import-warnings">
+            {items.map((item) => (
+              <li key={item.raw} className={item.level}>
+                <div className="iw-head"><span className={`iw-tag ${item.level}`}>{label[item.level]}</span><b>{item.title}</b></div>
+                {item.text && <p>{item.text}</p>}
+                {item.code && <pre className="iw-code">{item.code}</pre>}
+                {item.where && <p className="iw-where"><span>Where</span><code>{item.where}</code></p>}
+                {item.todo && <p className="iw-todo"><span>What to do</span>{item.todo}</p>}
+                {item.focus && <button type="button" className="btn sm primary-soft" onClick={() => onGo({ ...item.focus, note: `${item.title}. ${item.todo}` })}>➜ Go there</button>}
+              </li>
+            ))}
+          </ul>
+        ) : <p className="ok">No warnings: everything was imported.</p>}
+        <p className="muted">Nothing has been saved yet.</p>
+        <button className="btn primary" onClick={onClose}>OK</button>
+      </div>
+    </div>
+  );
 }

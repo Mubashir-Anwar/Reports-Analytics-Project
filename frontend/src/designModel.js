@@ -480,36 +480,77 @@ export function inferColumns(pipeline) {
   return [];
 }
 
-/** Form-first: build a sensible tabular design from the field list. */
-export function autoLayout(columns, labels = {}, title = 'Report', previous = emptyDesign()) {
+/** The choices of the Table report (asked in the layout gallery); the defaults are what a table got before. */
+export const TABLE_OPTIONS = {
+  showTitle: true, titleAlign: 'center',          // the report name at the top: left / center / right
+  infoBox: false,                                  // a bordered box top right: report ID, run date, page X of Y
+  headAlign: 'center', headVAlign: 'middle',       // column headings: left / center / right · top / middle / bottom
+  headBold: true, headFill: '#e2e8f0',             // '' = no background
+  headBorder: true, dataBorder: true,              // a border on every heading cell / every data cell
+  widths: 'text',                                  // 'text' = each column as wide as its heading, 'equal' = fill the page
+  pageNumbers: true, totalRecords: true,
+  sheetLayout: 'mixed',                            // Excel/CSV: mixed (headings pixel-perfect) / grid / table
+};
+
+/** Form-first: build a sensible tabular design from the field list (`options`: see TABLE_OPTIONS). */
+export function autoLayout(columns, labels = {}, title = 'Report', previous = emptyDesign(), options = {}) {
+  const o = { ...TABLE_OPTIONS, sheetLayout: previous.page?.sheetLayout || 'grid', ...options };
   const design = emptyDesign();
   design.groups = previous.groups.filter((g) => columns.includes(g.field));
-  const landscape = columns.length > 8;
-  design.page = landscape
-    ? { width: 842, height: 595, margins: { top: 30, right: 30, bottom: 30, left: 30 }, sheetLayout: previous.page?.sheetLayout || 'grid' }
-    : { ...design.page, sheetLayout: previous.page?.sheetLayout || 'grid' };
+  // Each column is as wide as its heading needs (the full field name, e.g. StageDDESales.Status), at least 60 pt;
+  // the page grows to hold all of them instead of squeezing every column to the same narrow width.
+  const size = columns.length > 12 ? 8 : 9;
+  const textWidth = (value) => Math.ceil(String(value).length * size * 0.58 + 12);
+  let widths = columns.map((col) => Math.min(260, Math.max(60, textWidth(labels[col] || col))));
+  let total = widths.reduce((sum, w) => sum + w, 0);
+  const landscape = columns.length > 8 || total > 535;
+  const margins = landscape ? { top: 30, right: 30, bottom: 30, left: 30 } : design.page.margins;
+  const base = landscape ? { width: 842, height: 595 } : { width: design.page.width, height: design.page.height };
+  if (o.widths === 'equal' && columns.length) {        // the same width for every column, filling the page width
+    const room = base.width - margins.left - margins.right;
+    const each = Math.max(40, Math.floor(room / columns.length));
+    widths = columns.map(() => each);
+    total = each * columns.length;
+  }
+  design.page = { ...design.page, ...base, margins, width: Math.min(PAGE_LIMITS.max, Math.max(base.width, total + margins.left + margins.right)),
+    sheetLayout: o.sheetLayout };
   const usable = bandWidth(design);
-  const count = Math.max(columns.length, 1);
-  const colWidth = Math.max(40, Math.floor(usable / count));
-  const size = count > 12 ? 7 : count > 8 ? 8 : 9;
+  const xs = widths.reduce((list, w, i) => [...list, i ? list[i - 1] + widths[i - 1] : 0], []);
   const place = (builder, bandKey, height) => {
-    const elements = columns.map((col, i) => builder(col, i * colWidth));
+    const elements = columns.map((col, i) => builder(col, xs[i], widths[i]));
     Object.assign(getBandRef(design, bandKey), { height, elements });
   };
-  design.bands.title = {
-    height: 46,
-    elements: [{ ...defaultElement('staticText', 0, 8), text: title, width: usable, height: 28, fontSize: 18, bold: true }],
-  };
-  place((col, x) => ({ ...defaultElement('staticText', x, 2), text: labels[col] || col, width: colWidth, height: 18, fontSize: size, bold: true, backColor: '#e2e8f0' }), 'columnHeader', 22);
-  place((col, x) => ({ ...defaultElement('textField', x, 1), expression: `$F{${col}}`, width: colWidth, height: 16, fontSize: size }), 'detail', 18);
-  design.bands.pageFooter = {
+  const line = { borderWidth: 0.5, borderColor: '#64748b' };
+  const span = Math.min(usable, total || usable);
+  const titleBand = [];
+  if (o.infoBox) {                                     // label | value rows in a bordered box at the right
+    const boxX = Math.max(0, span - 220);
+    const rows = [['Report ID:', { type: 'staticText', text: o.reportId || title }],
+      ['Run on:', { type: 'textField', expression: '$V{CURRENT_DATE}', pattern: 'dd-MMM-yyyy HH:mm' }],
+      ['Page:', { type: 'textField', expression: '$V{PAGE_NUMBER} of $V{PAGE_COUNT}' }]];
+    rows.forEach(([label, value], i) => {
+      titleBand.push({ ...defaultElement('staticText', boxX, 4 + i * 15), text: label, width: 70, height: 15, fontSize: 8, bold: true, ...line, padding: 2, vAlign: 'middle' });
+      const { type, ...rest } = value;
+      titleBand.push({ ...defaultElement(type, boxX + 70, 4 + i * 15), ...rest, width: 150, height: 15, fontSize: 8, ...line, padding: 2, vAlign: 'middle' });
+    });
+  }
+  if (o.showTitle) {
+    const room = o.infoBox ? Math.max(120, span - 230) : span;  // never under the info box
+    titleBand.push({ ...defaultElement('staticText', 0, 8), text: title, width: room, height: 28, fontSize: 18, bold: true, align: o.titleAlign, vAlign: 'middle' });
+  }
+  design.bands.title = { height: titleBand.length ? (o.infoBox ? 56 : 46) : 0, elements: titleBand };
+  const headLine = o.headBorder ? line : { borderWidth: 0 };
+  const dataLine = o.dataBorder ? line : { borderWidth: 0 };
+  place((col, x, w) => ({ ...defaultElement('staticText', x, 0), text: labels[col] || col, width: w, height: 22, fontSize: size, bold: o.headBold, backColor: o.headFill || null, ...headLine, align: o.headAlign, vAlign: o.headVAlign, padding: 2 }), 'columnHeader', 22);
+  place((col, x, w) => ({ ...defaultElement('textField', x, 0), expression: `$F{${col}}`, width: w, height: 18, fontSize: size, stretch: true, blankWhenNull: true, ...dataLine, vAlign: 'middle', padding: 2 }), 'detail', 18);
+  design.bands.pageFooter = o.pageNumbers ? {
     height: 24,
     elements: [{ ...defaultElement('textField', usable - 160, 4), expression: 'Page $V{PAGE_NUMBER} of $V{PAGE_COUNT}', width: 160, height: 16, align: 'right', fontSize: 8, color: '#475569' }],
-  };
-  design.bands.summary = {
+  } : emptyBand();
+  design.bands.summary = o.totalRecords ? {
     height: 28,
     elements: [{ ...defaultElement('textField', 0, 6), expression: 'Total records: $V{REPORT_COUNT}', width: 220, height: 16, bold: true }],
-  };
+  } : emptyBand();
   design.groups.forEach((g) => {
     design.bands.groupHeaders[g.name] = { height: 20, elements: [{ ...defaultElement('textField', 0, 2), expression: `$F{${g.field}}`, width: usable, height: 16, bold: true, backColor: '#f1f5f9' }] };
     design.bands.groupFooters[g.name] = emptyBand();

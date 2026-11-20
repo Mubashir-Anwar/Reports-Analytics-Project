@@ -139,6 +139,10 @@ class _SqlDocuments:
         with self.engine.begin() as connection:
             connection.execute(lines_table.insert().values(doc_key=_clean_key(key), line=line.rstrip("\n"), at=_now()))
 
+    def delete_lines(self, key: str) -> int:
+        with self.engine.begin() as connection:
+            return connection.execute(lines_table.delete().where(lines_table.c.doc_key == _clean_key(key))).rowcount or 0
+
     def lines(self, key: str) -> Iterable[str]:
         rows = self._all(sa.select(lines_table.c.id, lines_table.c.line).where(lines_table.c.doc_key == _clean_key(key))
                          .order_by(lines_table.c.id.desc()).limit(5000))

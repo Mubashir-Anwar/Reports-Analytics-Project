@@ -13,7 +13,7 @@ from pymongo.errors import PyMongoError
 from backend.app.connectors.errors import ConnectorQueryError, MongoReadAccessError
 from backend.app.connectors.mongo_fallback import _row_value
 from backend.app.constants import METADATA_KEYS, OUTPUT_FORMATS, REPORT_PATH, SIGNED_LINK_KEYS
-from backend.app.definitions import ReportDefinition, validate_parameters
+from backend.app.definitions import ReportDefinition, clean_folder, validate_parameters
 from backend.app.logs import LOG
 from backend.app.rendering.outputs import render_report_output
 from backend.app.security.access import client_address
@@ -38,8 +38,8 @@ def register(app: FastAPI, ctx: SimpleNamespace) -> None:
         summaries = published_report_summaries()
         if getattr(request.state, "report_scope", None) is None:
             return {"reports": summaries}
-        visible = {report_id for report_id, item in reports_by_id.items() if report_in_scope(request, item)}
-        return {"reports": [item for item in summaries if item.get("id") in visible]}
+        visible = {ref for ref, item in reports_by_id.items() if report_in_scope(request, item)}
+        return {"reports": [item for item in summaries if item.get("ref") in visible]}
 
     @app.get("/generate/{report_file}")
     def generate(report_file: str, request: Request) -> Response:
@@ -72,10 +72,12 @@ def register(app: FastAPI, ctx: SimpleNamespace) -> None:
             if not match:
                 raise HTTPException(status_code=400, detail="The path must be /generate/<REPORT_ID>.<pdf|xlsx|csv>")
             report_id, output_format = match.group(1), match.group(2).lower()
-            definition = reports_by_id.get(report_id)
-            if definition is None or not report_in_scope(request, definition):
-                definition = None                      # a report outside the caller's folders looks like a missing one
-                raise ctx.unknown_report(request, report_id)
+            # Folder= picks the report when the same ID is published in several folders (like a JasperReports
+            # Server path); without it the only report with this ID that the caller may run
+            folder = clean_folder(query_map.get("Folder"))
+            definition = reports_by_id.find(report_id, folder, lambda item: report_in_scope(request, item))
+            if definition is None:                     # a report outside the caller's folders looks like a missing one
+                raise ctx.unknown_report(request, report_id, folder)
             enabled_formats = (definition.editor_config or {}).get("formats", sorted(OUTPUT_FORMATS))
             if output_format not in enabled_formats:
                 raise HTTPException(status_code=400, detail=f"The {output_format.upper()} format is not enabled for this report")
@@ -88,7 +90,7 @@ def register(app: FastAPI, ctx: SimpleNamespace) -> None:
             with ctx.run_gate.slot(caller_of(access, address=client_address(request))):
                 rows = run_report_rows(definition, parameters, definition.connection_id, max_rows=settings.max_rows, limit_rows=False)
                 rows = [{key: _row_value(row, key) for key in definition.columns} for row in rows]
-                body, media_type = render_report_output(definition, parameters, rows, output_format, subreport_loader(),
+                body, media_type = render_report_output(definition, parameters, rows, output_format, subreport_loader(None, definition.folder),
                                                         dataset_loader(definition.connection_id, definition.report_id))
                 row_count = len(rows)
                 del rows

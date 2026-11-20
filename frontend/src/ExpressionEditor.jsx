@@ -1,5 +1,7 @@
 import { useMemo, useRef, useState } from 'react';
 import { BUILTIN_VARIABLES } from './designModel.js';
+import { missingFields, similarFields, knownFields } from './fieldCheck.js';
+import HighlightArea, { knownNames } from './ExprHighlight.jsx';
 
 const TOKEN = /\$[FPV]\{[^{}]+\}/;
 
@@ -24,7 +26,7 @@ const FUNCTIONS = [
  * functions below; double-click (or Insert) puts the item at the cursor.
  * For a Static Text, inserting a field turns it into a Text Field (a static text cannot show data).
  */
-export default function ExpressionEditor({ element, report, design, onSave, onClose }) {
+export default function ExpressionEditor({ element, report, design, onSave, onClose, onAddField }) {
   const isStatic = element.type === 'staticText';
   const [text, setText] = useState(isStatic ? element.text || '' : element.expression || '');
   const [category, setCategory] = useState('fields');
@@ -48,7 +50,13 @@ export default function ExpressionEditor({ element, report, design, onSave, onCl
 
   const items = groups[category].items.filter((item) => !filter || item.name.toLowerCase().includes(filter.toLowerCase()));
   const willConvert = isStatic && TOKEN.test(text);
+  const missing = missingFields(text, report, design);
+  const typed = filter.trim().replace(/^\$F\{|\}$/g, '');
+  const filterSimilar = category === 'fields' && typed && !items.length ? similarFields(typed, knownFields(report, design)) : [];
+  /** Put `name` in place of $F{old} everywhere in the expression. */
+  const useInstead = (old, name) => setText(text.split(`$F{${old}}`).join(`$F{${name}}`));
   const javaMode = text.trimStart().startsWith('=');
+  const known = useMemo(() => knownNames(report, design, BUILTIN_VARIABLES), [report, design]);
 
   const insert = (item) => {
     const node = area.current;
@@ -87,7 +95,12 @@ export default function ExpressionEditor({ element, report, design, onSave, onCl
               : 'Text with $F{…} / $P{…} / $V{…} is filled in as written (e.g. “Branch: $F{Branch}”). Start with = for a Java-style expression (e.g. =$F{A} + " " + $F{B}).'}
           </p>
         </div>
-        <textarea ref={area} className="code expr-text" rows={5} spellCheck={false} autoFocus value={text} onChange={(e) => setText(e.target.value)} />
+        <HighlightArea ref={area} className="expr-text" rows={5} autoFocus value={text} known={known} onChange={(e) => setText(e.target.value)} />
+        <p className="hl-legend">
+          <span className="tk-field">$F&#123;field&#125;</span><span className="tk-param">$P&#123;parameter&#125;</span><span className="tk-var">$V&#123;variable&#125;</span>
+          <span className="hl-plain">plain text</span>{javaMode && <><span className="tk-string">"text"</span><span className="tk-number">123</span><span className="tk-call">method()</span></>}
+          <span className="tk-field tk-missing">not in the report</span>
+        </p>
         <div className="expr-browser">
           <ul className="expr-cats">
             {Object.entries(groups).map(([key, group]) => (
@@ -102,7 +115,18 @@ export default function ExpressionEditor({ element, report, design, onSave, onCl
                   {category === 'functions' ? item.name : item.insert}
                 </li>
               ))}
-              {!items.length && <li className="muted">{category === 'fields' ? 'No fields yet — Detect fields on the Setup tab.' : 'Nothing here yet.'}</li>}
+              {!items.length && category === 'fields' && !report.columns.length && <li className="muted">No fields yet — press “Read fields” on the Setup tab, or add one: type its name in Filter.</li>}
+              {!items.length && category === 'fields' && report.columns.length > 0 && typed && (
+                <li className="expr-nomatch">
+                  <span>No field is called <b>{typed}</b> (the report has {report.columns.length} fields).</span>
+                  {filterSimilar.map((s) => (
+                    <button key={s.name} type="button" className="btn sm" onClick={() => { setFilter(s.name); setPicked(null); }} title={s.why}>Did you mean {s.name}?</button>
+                  ))}
+                  {onAddField && <button type="button" className="btn sm primary-soft" onClick={() => onAddField(typed)}>＋ Add “{typed}” to Fields</button>}
+                  <small className="muted">Adding it here is enough when the query returns it (also nested, like assignTo.Name). Otherwise add it to the $project of the query too.</small>
+                </li>
+              )}
+              {!items.length && category !== 'fields' && <li className="muted">Nothing here yet.</li>}
             </ul>
           </div>
           <div className="expr-info">
@@ -116,6 +140,19 @@ export default function ExpressionEditor({ element, report, design, onSave, onCl
             ) : <small className="muted">Click an item to see it; double-click to insert it at the cursor.</small>}
           </div>
         </div>
+        {missing.length > 0 && (
+          <div className="expr-missing" role="alert">
+            {missing.map((m) => (
+              <div key={m.name}>
+                <p><b>⚠ $F&#123;{m.name}&#125; is not a field of this report</b> — it prints empty. Where: Setup → 2 Data adapter and query → Fields.</p>
+                <div className="row">
+                  {m.similar.map((s) => <button key={s.name} type="button" className="btn sm" title={s.why} onClick={() => useInstead(m.name, s.name)}>Use {s.name} instead <small>({s.why})</small></button>)}
+                  {onAddField && <button type="button" className="btn sm primary-soft" onClick={() => onAddField(m.name)}>＋ Add {m.name} to Fields</button>}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
         {willConvert && <p className="expr-note">This contains data ($F/$P/$V), so it will be saved as a <b>Text Field</b>.</p>}
         <div className="row wizard-buttons">
           <span className="muted" style={{ marginRight: 'auto', fontSize: 12 }}>Ctrl+Enter = OK</span>

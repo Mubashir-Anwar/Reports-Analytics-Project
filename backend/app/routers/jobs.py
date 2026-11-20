@@ -12,7 +12,7 @@ from typing import Any
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, Response
 
-from backend.app.definitions import validate_parameters
+from backend.app.definitions import AmbiguousReport, clean_folder, validate_parameters
 from backend.app.jobs import mailer, schedule, store
 from backend.app.jobs.runner import JobRunner
 from backend.app.logs import LOG
@@ -34,7 +34,10 @@ def register(app: FastAPI, ctx: SimpleNamespace) -> None:
         return session["role"] == "admin" or item.get("owner") == session["username"]
 
     def view(job: dict[str, Any]) -> dict[str, Any]:
-        definition = reports_by_id.get(job["reportId"])
+        try:
+            definition = runner.report(job["reportId"], job.get("folder"))
+        except AmbiguousReport:
+            definition = None
         return {**job, "describe": schedule.describe(job["recurrence"]), "title": definition.title if definition else job["reportId"],
                 "published": definition is not None}
 
@@ -53,10 +56,14 @@ def register(app: FastAPI, ctx: SimpleNamespace) -> None:
 
     def checked(payload: dict[str, Any], session: dict[str, Any]) -> dict[str, Any]:
         try:
-            job = schedule.clean_job(payload, report_ids={rid for rid, d in reports_by_id.items() if d.editor_config is not None
-                                                          and ctx.report_level(session, d) >= permissions.RUN},
+            may_run = lambda d: d.editor_config is not None and ctx.report_level(session, d) >= permissions.RUN  # noqa: E731
+            job = schedule.clean_job(payload, report_ids={d.report_id for d in reports_by_id.values() if may_run(d)},
                                      allow_email=role_at_least(session["role"], "designer"))
-            definition = reports_by_id[job["reportId"]]
+            # "folder" names which report when the same ID is published in several folders
+            definition = reports_by_id.find(job["reportId"], clean_folder(payload.get("folder")), may_run)
+            if definition is None:
+                raise ValueError("Choose a report that is published on the server")
+            job["folder"] = definition.folder
             # parameter values are checked now (relative dates as of today), so mistakes show up when saving
             prompted = {spec.name for spec in definition.parameters if spec.prompt}
             today = datetime.now(schedule.zone(job["timezone"])).date()
@@ -77,9 +84,11 @@ def register(app: FastAPI, ctx: SimpleNamespace) -> None:
                 "canEmail": role_at_least(session["role"], "designer")}
 
     @app.get("/api/server/schedules")
-    def list_schedules(request: Request, reportId: str = "") -> dict[str, Any]:  # noqa: N803 - query name
+    def list_schedules(request: Request, reportId: str = "", folder: str = "") -> dict[str, Any]:  # noqa: N803 - query name
         session = require_session(request)
-        items = [view(j) for j in store.load_schedules() if visible(j, session) and (not reportId or j.get("reportId") == reportId)]
+        where = clean_folder(folder)
+        items = [view(j) for j in store.load_schedules() if visible(j, session) and (not reportId or j.get("reportId") == reportId)
+                 and (where is None or j.get("folder") in (None, "", where))]
         return {"schedules": sorted(items, key=lambda j: j.get("nextRunAt") or "9999")}
 
     @app.post("/api/server/schedules")
@@ -148,15 +157,15 @@ def register(app: FastAPI, ctx: SimpleNamespace) -> None:
         session = require_session(request, "designer")
         require_json_request(request)
         _items, job = find_job(job_id, session)
-        ctx.require_report(session, job["reportId"], permissions.RUN)
-        return {"run": runner.enqueue(job["reportId"], job["format"], job["parameters"], session["username"], "manual", job)}
+        definition = ctx.require_report(session, job["reportId"], permissions.RUN, folder=job.get("folder") or None)
+        return {"run": runner.enqueue(job["reportId"], job["format"], job["parameters"], session["username"], "manual", job, definition.folder)}
 
     @app.post("/api/server/reports/{report_id}/background")
     async def run_in_background(report_id: str, request: Request) -> dict[str, Any]:
         """Like Run, but the file is made in the background and kept under Runs (for big reports)."""
         session = require_session(request)
         require_json_request(request)
-        definition = ctx.require_report(session, report_id, permissions.RUN)
+        definition = ctx.require_report(session, report_id, permissions.RUN, folder=clean_folder(request.query_params.get("folder")))
         payload = await json_body(request)
         output_format = str(payload.get("format", "pdf")).lower()
         raw = payload.get("parameters") or {}
@@ -173,7 +182,7 @@ def register(app: FastAPI, ctx: SimpleNamespace) -> None:
         active = [r for r in store.load_runs() if r.get("owner") == session["username"] and r.get("status") in ("queued", "running")]
         if len(active) >= 5:
             raise HTTPException(status_code=429, detail="You already have 5 runs waiting; wait for them to finish")
-        return {"run": runner.enqueue(report_id, output_format, values, session["username"], "background")}
+        return {"run": runner.enqueue(report_id, output_format, values, session["username"], "background", None, definition.folder)}
 
     @app.get("/api/server/runs")
     def list_runs(request: Request, jobId: str = "", limit: int = 100) -> dict[str, Any]:  # noqa: N803 - query name

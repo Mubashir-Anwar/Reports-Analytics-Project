@@ -70,3 +70,85 @@ def clear_failures(client: str) -> None:
         if client in data:
             data.pop(client)
             store.write_json(FAILURES_KEY, data)
+
+
+# ----------------------------------------------------------------- one browser per user
+# Signing in on another browser (or a private window) replaces the session there: the old one is told so and is signed
+# out GRACE seconds later. REPORTING_SINGLE_SESSION=false lets a user stay signed in on several browsers.
+ACTIVE_KEY = "meta/active-sessions.json"
+REPLACED_KEY = "meta/replaced-sessions.json"
+_replaced_cache: dict[str, object] = {"at": 0.0, "replaced": {}, "store": None}
+
+
+def single_session() -> bool:
+    import os  # noqa: PLC0415
+    return os.getenv("REPORTING_SINGLE_SESSION", "true").strip().lower() not in ("0", "false", "no", "off")
+
+
+def grace_seconds() -> float:
+    import os  # noqa: PLC0415
+    try:
+        return max(0.0, min(float(os.getenv("REPORTING_SINGLE_SESSION_GRACE", "10")), 300.0))
+    except ValueError:
+        return 10.0
+
+
+def claim_session(username: str, nonce: str, agent: str, lifetime_seconds: float) -> dict | None:
+    """Make `nonce` the user's one session. Returns the session it replaces ({agent, at}) or None."""
+    if not single_session() or not username or not nonce:
+        return None
+    key = username.casefold()
+    with _LOCK:
+        store = get_store()
+        active = {u: item for u, item in (store.read_json(ACTIVE_KEY) or {}).items() if item.get("exp", 0) > _now()}
+        previous = active.get(key)
+        active[key] = {"nonce": nonce, "agent": agent[:120], "at": _now(), "exp": _now() + lifetime_seconds}
+        store.write_json(ACTIVE_KEY, active)
+        if not previous or previous.get("nonce") == nonce:
+            return None
+        replaced = {n: item for n, item in (store.read_json(REPLACED_KEY) or {}).items() if item.get("exp", 0) > _now()}
+        replaced[previous["nonce"]] = {"logoutAt": _now() + grace_seconds(), "agent": agent[:120], "exp": previous.get("exp", _now() + 3600)}
+        store.write_json(REPLACED_KEY, replaced)
+        _replaced_cache.update({"at": _now(), "replaced": replaced, "store": _where(store)})
+    return {"agent": previous.get("agent", ""), "at": previous.get("at")}
+
+
+def release_session(username: str, nonce: str) -> None:
+    """Sign-out: the user has no active session any more (a later sign-in replaces nothing)."""
+    if not username or not nonce:
+        return
+    with _LOCK:
+        store = get_store()
+        active = store.read_json(ACTIVE_KEY) or {}
+        if (active.get(username.casefold()) or {}).get("nonce") == nonce:
+            active.pop(username.casefold())
+            store.write_json(ACTIVE_KEY, active)
+
+
+def replaced(nonce: str | None) -> dict | None:
+    """{logoutAt, agent} when this session was replaced by a sign-in on another browser."""
+    if not nonce:
+        return None
+    store = get_store()
+    if _now() - float(_replaced_cache["at"]) > CACHE_SECONDS or _replaced_cache["store"] != _where(store):
+        try:
+            _replaced_cache.update({"at": _now(), "replaced": store.read_json(REPLACED_KEY) or {}, "store": _where(store)})
+        except (OSError, ValueError):
+            pass
+    return _replaced_cache["replaced"].get(nonce)  # type: ignore[union-attr]
+
+
+def replaced_and_over(nonce: str | None) -> bool:
+    item = replaced(nonce)
+    return bool(item and item.get("logoutAt", 0) <= _now())
+
+
+def describe_agent(user_agent: str, address: str = "") -> str:
+    """'Firefox on Windows (10.0.0.5)' from a User-Agent header."""
+    ua = user_agent or ""
+    browser = next((name for token, name in (("Edg/", "Edge"), ("OPR/", "Opera"), ("Firefox/", "Firefox"), ("Chrome/", "Chrome"),
+                                              ("Safari/", "Safari")) if token in ua), "a browser")
+    system = next((name for token, name in (("Windows", "Windows"), ("Android", "Android"), ("iPhone", "iPhone"), ("iPad", "iPad"),
+                                             ("Mac OS", "macOS"), ("Linux", "Linux")) if token in ua), "")
+    text = f"{browser} on {system}" if system else browser
+    return f"{text} ({address})" if address else text

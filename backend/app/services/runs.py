@@ -16,14 +16,14 @@ from backend.app.connectors import mongodb, sql as sql_connector
 from backend.app.connectors.errors import ConnectorQueryError, MongoReadAccessError
 from backend.app.connectors.mongo_fallback import _row_value
 from backend.app.constants import METADATA_KEYS, OUTPUT_FORMATS
-from backend.app.definitions import ReportDefinition, _dynamic_report, _safe_value, compile_dataset, validate_parameters
+from backend.app.definitions import AmbiguousReport, ReportDefinition, _dynamic_report, _safe_value, compile_dataset, validate_parameters
 from backend.app.logs import LOG
 from backend.app.queries.mongo_query import resolve_collection
 from backend.app.rendering import engine as designer_render
 from backend.app.rendering.outputs import render_report_output
 from backend.app.services.capacity import caller_of
 
-__all__ = ['admin_parameters', 'run_report_rows', 'iter_report_rows', 'too_many_rows', 'subreport_loader', 'dataset_loader', 'draft_definition', 'preview_definition', 'run_definition_file']
+__all__ = ['admin_parameters', 'run_report_rows', 'iter_report_rows', 'too_many_rows', 'subreport_target', 'subreport_loader', 'dataset_loader', 'draft_definition', 'preview_definition', 'run_definition_file']
 
 
 def admin_parameters(ctx: SimpleNamespace, payload: dict[str, Any], definition: ReportDefinition) -> dict[str, Any]:
@@ -91,8 +91,20 @@ def iter_report_rows(ctx: SimpleNamespace, definition: ReportDefinition, paramet
         yield row
 
 
-def subreport_loader(ctx: SimpleNamespace, allowed: Any = None) -> Any:
+def subreport_target(ctx: SimpleNamespace, parent: Any, report_id: str) -> ReportDefinition | None:
+    """The report a Subreport element names: the one with this ID in the parent report's folder first, otherwise the
+    only published report with this ID. Raises AmbiguousReport when the ID is in several other folders."""
+    folder = parent.folder if isinstance(parent, ReportDefinition) else parent
+    if folder:
+        found = dict.get(ctx.reports_by_id, f"{folder}/{report_id}")
+        if found is not None:
+            return found
+    return ctx.reports_by_id.find(report_id)
+
+
+def subreport_loader(ctx: SimpleNamespace, allowed: Any = None, folder: str | None = None) -> Any:
     """Loader for Subreport elements during one render: runs a published report with the given parameters.
+    `folder` is the main report's folder (a subreport there wins over one with the same ID elsewhere).
     Results are cached per (report, parameters); at most 200 different runs per report."""
     cache: dict[tuple[str, tuple[tuple[str, str], ...]], dict[str, Any]] = {}
 
@@ -102,8 +114,12 @@ def subreport_loader(ctx: SimpleNamespace, allowed: Any = None) -> Any:
             return cache[key]
         if len(cache) >= 200:
             raise ValueError("more than 200 different subreport runs in one report")
-        definition = ctx.reports_by_id.get(report_id)
-        if definition is None or (allowed is not None and not allowed(report_id)):
+        try:
+            definition = ctx.subreport_target(folder, report_id)
+        except AmbiguousReport as exc:
+            raise ValueError(f"the report ID {report_id} is in several folders ({', '.join(exc.folders[:3])}); "
+                             "publish the subreport in the same folder as this report") from None
+        if definition is None or (allowed is not None and not allowed(definition)):
             raise ValueError("this report is not published on the server")  # hidden by a folder permission looks the same
         design = (definition.editor_config or {}).get("design")
         if not design:
@@ -241,7 +257,7 @@ def run_definition_file(ctx: SimpleNamespace, definition: ReportDefinition, payl
             rows = ctx.run_report_rows(definition, parameters, connection_id, max_rows=ctx.settings.max_rows, limit_rows=False)
             rows = [{key: _row_value(row, key) for key in definition.columns} for row in rows]
             body, media_type = render_report_output(definition, parameters, rows, output_format,
-                                                    ctx.subreport_loader(ctx.report_allowed_for(session)),
+                                                    ctx.subreport_loader(ctx.report_allowed_for(session), definition.folder),
                                                     ctx.dataset_loader(connection_id, definition.report_id))
             row_count = len(rows)
             del rows

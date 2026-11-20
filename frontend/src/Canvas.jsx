@@ -1,4 +1,6 @@
-import { useEffect, useRef, useState } from 'react';
+import { fieldRefs } from './fieldCheck.js';
+import { Highlighted } from './ExprHighlight.jsx';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   CSS_FONT, PAGE_LIMITS, ZOOM_LIMITS, bandKeys, bandLabel, bandWidth, clampZoom, contentBottom, contentRight, defaultElement,
   BACKDROP_TYPES, CONTAINER_TYPES, bandPresent, describeElement, getBand, resizeElement, setBand,
@@ -76,7 +78,65 @@ function CrosstabView({ element, zoom }) {
   );
 }
 
-function ElementView({ element, selected, primary, zoom, onPointerDown, onResizeDown, onContextMenu, onDoubleClick }) {
+/** Ribbon → Hide sets Print When Expression to `false`: the element stays in the design but is never printed. */
+const isHidden = (element) => String(element.printWhenExpression || '').trim() === 'false';
+
+/** Typing a Static Text right on the canvas: Enter keeps it, Shift+Enter is a new line, Esc cancels. */
+function InlineText({ element, onCommit, onCancel, onMore }) {
+  const [value, setValue] = useState(element.text || '');
+  const done = useRef(false);
+  const finish = (keep) => {
+    if (done.current) return;
+    done.current = true;
+    if (keep && value !== (element.text || '')) onCommit(value); else onCancel();
+  };
+  return (
+    <div className="inline-text" onPointerDown={(e) => e.stopPropagation()} onDoubleClick={(e) => e.stopPropagation()}>
+      <textarea
+        autoFocus
+        value={value}
+        onFocus={(e) => e.target.select()}
+        onChange={(e) => setValue(e.target.value)}
+        onBlur={() => finish(true)}
+        onKeyDown={(e) => {
+          e.stopPropagation();                         // Delete / arrows edit the text, not the design
+          if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); finish(true); }
+          if (e.key === 'Escape') { e.preventDefault(); finish(false); }
+        }}
+      />
+      <div className="inline-text-help">
+        Enter = OK · Shift+Enter = new line · Esc = cancel ·{' '}
+        <button type="button" className="linkish" onMouseDown={(e) => { e.preventDefault(); done.current = true; onMore(); }}>show data ($F/$P/$V)…</button>
+      </div>
+    </div>
+  );
+}
+
+/** Paragraph (line spacing, indents) and Rotation of a text element, as CSS for the canvas. */
+function paragraphCss(element, zoom) {
+  const size = element.fontSize * zoom;
+  const amount = element.lineSpacingSize || 1;
+  const lineHeight = {
+    '1_1_2': `${size * 1.8}px`, Double: `${size * 2.4}px`, Proportional: `${size * 1.2 * amount}px`,
+    Fixed: `${Math.max(amount, 1) * zoom}px`, AtLeast: `${Math.max(size * 1.2, amount * zoom)}px`,
+  }[element.lineSpacing] || undefined;
+  return {
+    lineHeight,
+    ...(element.leftIndent ? { paddingLeft: element.leftIndent * zoom } : {}),
+    ...(element.rightIndent ? { paddingRight: element.rightIndent * zoom } : {}),
+    ...(element.firstLineIndent ? { textIndent: element.firstLineIndent * zoom } : {}),
+  };
+}
+
+const ROTATION_CSS = {
+  Left: { writingMode: 'vertical-rl', transform: 'rotate(180deg)', height: '100%' },
+  Right: { writingMode: 'vertical-rl', height: '100%' },
+  UpsideDown: { transform: 'rotate(180deg)', width: '100%' },
+};
+
+function ElementView({ element, selected, primary, zoom, onPointerDown, onResizeDown, onContextMenu, onDoubleClick, known, editing, onCommitText, onCancelText, onMoreText }) {
+  // fields this text field uses that the report does not have: shown red, explained in the tooltip
+  const lost = known && element.type === 'textField' ? fieldRefs(element.expression).filter((f) => !known.has(f)) : [];
   const borderStyle = DASH[element.lineStyle] || 'solid';
   const sides = element.borders || null;
   const sideBorder = (side) => (sides && sides[side] ? `${sides[side]}px ${borderStyle} ${element.borderColor || '#000'}` : undefined);
@@ -93,7 +153,8 @@ function ElementView({ element, selected, primary, zoom, onPointerDown, onResize
     textAlign: element.align === 'justified' ? 'justify' : element.align,
     ...(['staticText', 'textField'].includes(element.type) ? { display: 'flex', flexDirection: 'column', justifyContent: { top: 'flex-start', middle: 'center', bottom: 'flex-end' }[element.vAlign || 'top'] } : {}),
     color: element.color,
-    background: element.backColor || undefined,
+    background: (!element.transparent && element.backColor) || undefined,
+    ...(['staticText', 'textField'].includes(element.type) ? paragraphCss(element, zoom) : {}),
     border: element.borderWidth && !['line', 'break'].includes(element.type) ? `${element.borderWidth * zoom}px ${borderStyle} ${element.borderColor || '#000'}` : undefined,
     ...(sides ? { borderTop: sideBorder('top'), borderRight: sideBorder('right'), borderBottom: sideBorder('bottom'), borderLeft: sideBorder('left') } : {}),
     ...(element.type === 'ellipse' ? { borderRadius: '50%' } : {}),
@@ -127,23 +188,28 @@ function ElementView({ element, selected, primary, zoom, onPointerDown, onResize
     body = <span className="el-text el-markup" dangerouslySetInnerHTML={{ __html: safeMarkupHtml(element.text, element.markup) }} />;
   } else if (element.type !== 'rectangle') {
     body = (
-      <span className={`el-text ${element.type === 'textField' ? 'is-field' : ''}`}>
-        {describeElement(element)}
+      <span className={`el-text ${element.type === 'textField' ? 'is-field' : ''} ${lost.length ? 'missing-field' : ''}`}>
+        {element.type === 'textField' && element.expression ? <Highlighted text={element.expression} known={known ? { F: known } : null} /> : describeElement(element)}
         {element.type === 'textField' && element.markup && element.markup !== 'none' && <small className="el-badge">{element.markup}</small>}
       </span>
     );
   }
+  if (body && ROTATION_CSS[element.rotation] && ['staticText', 'textField'].includes(element.type)) {
+    body = <span className="el-rotated" style={ROTATION_CSS[element.rotation]}>{body}</span>;
+  }
   return (
     <div
       data-id={element.id}
-      className={`el el-${element.type} ${selected ? 'selected' : ''} ${selected && !primary ? 'secondary' : ''} ${element.locked ? 'locked' : ''}`}
+      className={`el el-${element.type} ${lost.length ? 'has-missing-field' : ''} ${selected ? 'selected' : ''} ${selected && !primary ? 'secondary' : ''} ${element.locked ? 'locked' : ''} ${isHidden(element) ? 'el-hidden' : ''}`}
       style={style}
       onPointerDown={onPointerDown}
       onContextMenu={onContextMenu}
       onDoubleClick={onDoubleClick}
-      title={`${element.type} · ${Math.round(element.x)},${Math.round(element.y)} · ${Math.round(element.width)}×${Math.round(element.height)}${element.locked ? ' · locked' : ''}`}
+      title={`${element.label ? `${element.label} · ` : ''}${element.type} · ${Math.round(element.x)},${Math.round(element.y)} · ${Math.round(element.width)}×${Math.round(element.height)}${element.locked ? ' · locked' : ''}${isHidden(element) ? ' · hidden (not printed)' : ''}${element.stretch ? ' · stretches with long text' : ''}${lost.length ? `
+⚠ Not in Setup → Fields: ${lost.join(', ')} — prints empty. Double-click to fix it (or add it to Fields).` : ''}`}
     >
-      {body}
+      {editing ? <InlineText element={element} onCommit={onCommitText} onCancel={onCancelText} onMore={onMoreText} /> : body}
+      {element.stretch && <span className="el-stretch" aria-hidden="true">↕</span>}
       {element.locked && selected && <span className="el-lock" title="Locked: unlock it to move or resize">🔒</span>}
       {primary && !element.locked && <span className="handle" onPointerDown={onResizeDown} />}
     </div>
@@ -252,7 +318,8 @@ function CanvasToolbar({ count, lockedAll, actions, prefs, setPrefs, hasClipboar
   );
 }
 
-export default function Canvas({ design, selection, tool, zoom, setZoom, dispatch, actions, openMenu, onEditExpression, onPercentage, onWizard, onOpenTable, prefs, setPrefs, hasClipboard, onQuery, onTemplates, showToolbar = true }) {
+export default function Canvas({ knownFields: knownList, design, selection, tool, zoom, setZoom, dispatch, actions, openMenu, onEditExpression, onPercentage, onWizard, onOpenTable, prefs, setPrefs, hasClipboard, onQuery, onTemplates, showToolbar = true }) {
+  const known = useMemo(() => (knownList ? new Set(knownList) : null), [knownList]);
   const bandRefs = useRef({});
   const scrollRef = useRef(null);
   const pageRef = useRef(null);
@@ -261,6 +328,7 @@ export default function Canvas({ design, selection, tool, zoom, setZoom, dispatc
   const [snapLines, setSnapLines] = useState(null); // { x: [px], y: [{ key, y }] }
   const [marquee, setMarquee] = useState(null); // client-space rectangle
   const [guideDrag, setGuideDrag] = useState(null); // { index, x, remove }
+  const [editingText, setEditingText] = useState(null); // id of the Static Text being typed on the canvas
 
   // Ctrl + mouse wheel zooms the canvas (non-passive listener so the browser page zoom is not triggered).
   useEffect(() => {
@@ -390,9 +458,16 @@ export default function Canvas({ design, selection, tool, zoom, setZoom, dispatc
       select(toggleInSelection(selection, element.id));
       return;
     }
-    const groupIds = mode === 'move' && idSet.has(element.id) ? ids : [element.id];
+    // Dragging (moving or resizing) an element of a multi-selection works on the whole selection.
+    const groupIds = idSet.has(element.id) ? ids : [element.id];
     select(groupIds.length > 1 ? selectionOf(groupIds, element.id) : { kind: 'element', id: element.id });
     if (element.locked) return;
+    // Resizing one of several selected elements: all of them grow or shrink by the same amount.
+    const resizeGroup = mode !== 'move' && groupIds.length > 1 && element.type !== 'table';
+    const groupSizes = resizeGroup
+      ? Object.fromEntries(bandKeys(design).flatMap((key) => getBand(design, key).elements)
+        .filter((el) => groupIds.includes(el.id) && !el.locked).map((el) => [el.id, { w: el.width, h: el.height, type: el.type }]))
+      : null;
 
     dispatch({ type: 'SNAPSHOT' });
     const start = { x: event.clientX, y: event.clientY, ex: element.x, ey: element.y, ew: element.width, eh: element.height };
@@ -464,6 +539,24 @@ export default function Canvas({ design, selection, tool, zoom, setZoom, dispatc
         const columns = (element.columns || []).map((c) => ({ ...c, width: Math.max(5, Math.round(c.width * factor)) }));
         setDragInfo({ kind: 'resize', text: `Table width ${newWidth}px · columns scaled` });
         dispatch({ type: 'LIVE', update: () => patchElements(base, { [element.id]: { width: newWidth, columns } }) });
+      } else if (resizeGroup) {
+        let right = start.ex + start.ew + dx;
+        let bottom = start.ey + start.eh + dy;
+        if (prefs.snapGrid) { right = snapToGrid(right, prefs.gridSize); bottom = snapToGrid(bottom, prefs.gridSize); }
+        if (prefs.smartGuides) {
+          const sx = nearestSnap(right, 0, targets.xs, threshold);
+          if (sx) { right = sx.line; lines.x.push(sx.line); }
+          const sy = nearestSnap(bottom, 0, targets.ys, threshold);
+          if (sy) { bottom = sy.line; lines.y.push({ key: bandKey, y: sy.line }); }
+        }
+        const dw = Math.round(right - start.ex - start.ew);
+        const dh = Math.round(bottom - start.ey - start.eh);
+        const patches = Object.fromEntries(Object.entries(groupSizes).map(([id, s]) => [id, {
+          width: Math.max(MIN_W, s.w + dw),
+          height: s.type === 'line' ? s.h : Math.max(MIN_H, s.h + dh),
+        }]));
+        setDragInfo({ kind: 'resize', text: `${Object.keys(patches).length} elements · width ${dw >= 0 ? '+' : ''}${dw}px · height ${dh >= 0 ? '+' : ''}${dh}px` });
+        dispatch({ type: 'LIVE', update: () => patchElements(base, patches) });
       } else {
         // Like a table column: the columns to the right move along (hold Alt to resize only this element).
         const shift = !e.altKey && !BACKDROP_TYPES.has(element.type);
@@ -488,7 +581,11 @@ export default function Canvas({ design, selection, tool, zoom, setZoom, dispatc
       window.removeEventListener('pointerup', up);
       setDragInfo(null);
       setSnapLines(null);
-      if (mode !== 'move') { dispatch({ type: 'LIVE', update: (d) => settleBands(d, [bandKey]) }); return; }
+      if (mode !== 'move') {
+        const keys = resizeGroup ? bandKeys(base).filter((key) => getBand(base, key).elements.some((el) => groupSizes[el.id])) : [bandKey];
+        dispatch({ type: 'LIVE', update: (d) => settleBands(d, keys) });
+        return;
+      }
       const over = oneBand ? bandAt(e.clientY) : null;
       if (over && over.key !== bandKey) {
         // carry the elements to the band under the pointer, keeping their offsets to the dragged one
@@ -686,6 +783,7 @@ export default function Canvas({ design, selection, tool, zoom, setZoom, dispatc
                   {band.elements.map((element) => (
                     <ElementView
                       key={element.id}
+                      known={known}
                       element={element}
                       zoom={zoom}
                       selected={idSet.has(element.id)}
@@ -693,7 +791,12 @@ export default function Canvas({ design, selection, tool, zoom, setZoom, dispatc
                       onPointerDown={beginDrag(key, element, 'move')}
                       onResizeDown={beginDrag(key, element, 'resize')}
                       onContextMenu={elementContextMenu(element.id)}
-                      onDoubleClick={['staticText', 'textField'].includes(element.type) ? (e) => { e.stopPropagation(); onEditExpression(element.id); }
+                      editing={editingText === element.id}
+                      onCommitText={(text) => { setEditingText(null); dispatch({ type: 'DESIGN', update: (d) => patchElements(d, { [element.id]: { text } }) }); }}
+                      onCancelText={() => setEditingText(null)}
+                      onMoreText={() => { setEditingText(null); onEditExpression(element.id); }}
+                      onDoubleClick={element.type === 'staticText' && !element.locked ? (e) => { e.stopPropagation(); select({ kind: 'element', id: element.id }); setEditingText(element.id); }
+                        : ['staticText', 'textField'].includes(element.type) ? (e) => { e.stopPropagation(); onEditExpression(element.id); }
                         : element.type === 'table' && onOpenTable ? (e) => { e.stopPropagation(); onOpenTable(element.id); } : undefined}
                     />
                   ))}

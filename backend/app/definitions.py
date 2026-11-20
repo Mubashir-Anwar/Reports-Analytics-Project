@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 from bson import ObjectId
+from fastapi import HTTPException
 
 from backend.app.constants import (
     COLLECTION_PARAM_VALUE,
@@ -68,6 +69,96 @@ class ReportDefinition:
     editor_config: dict[str, Any] | None = None
     query_language: str = "mongosh"  # "sql" = a SQL data adapter runs `sql` instead of the pipeline
     sql: Any = None  # queries.sql_query.PreparedSql for SQL reports
+
+    @property
+    def folder(self) -> str:
+        """The repository folder (like JasperReports Server, the same ID may be used again in another folder)."""
+        try:
+            return normalize_folder_path((self.editor_config or {}).get("folder", "General"))
+        except ValueError:
+            return "General"
+
+    @property
+    def ref(self) -> str:
+        """What names one published report on the server: <folder>/<ID>."""
+        return f"{self.folder}/{self.report_id}"
+
+
+def report_ref(folder: str, report_id: str) -> str:
+    return f"{folder}/{report_id}"
+
+
+def clean_folder(value: Any) -> str | None:
+    """A folder sent by a caller ("cascade/KMBLGL/Reports/", "/cascade/…") in the repository's form; "" or None = not given;
+    an invalid folder is given back as "" so it can match nothing."""
+    if value is None or not str(value).strip().strip("/\\"):
+        return None
+    try:
+        return normalize_folder_path(value)
+    except ValueError:
+        return ""
+
+
+class AmbiguousReport(HTTPException):
+    """The same report ID is published in more than one folder and the caller did not say which one."""
+
+    def __init__(self, report_id: str, folders: list[str]):
+        self.report_id, self.folders = report_id, sorted(folders)
+        shown = ", ".join(self.folders[:5]) + (" …" if len(self.folders) > 5 else "")
+        super().__init__(status_code=409, detail=f"The report ID {report_id} is in more than one folder ({shown}); "
+                                                 f"say which one with Folder (for example Folder={self.folders[0]})")
+
+
+class ReportRegistry(dict):
+    """The published reports, keyed by <folder>/<ID>.
+
+    Looking up a plain ID still works while that ID is used in one folder only; when it is in several folders the
+    lookup raises AmbiguousReport (409), so a report is never taken from the wrong folder. Pass the folder (find)
+    or the full <folder>/<ID> to choose."""
+
+    def add(self, definition: ReportDefinition) -> ReportDefinition:
+        dict.__setitem__(self, definition.ref, definition)
+        return definition
+
+    def discard(self, definition: ReportDefinition) -> None:
+        dict.pop(self, definition.ref, None)
+
+    def matching(self, report_id: str) -> list[ReportDefinition]:
+        return [item for item in dict.values(self) if item.report_id == report_id]
+
+    def find(self, report_id: str, folder: str | None = None, visible: Callable[[ReportDefinition], bool] | None = None) -> ReportDefinition | None:
+        """The report with this ID in this folder; without a folder the only one with this ID (among the visible ones)."""
+        if folder is not None:
+            found = dict.get(self, report_ref(folder, report_id)) if folder else None
+            return found if found is not None and (visible is None or visible(found)) else None
+        candidates = [item for item in self.matching(report_id) if visible is None or visible(item)]
+        if len(candidates) > 1:
+            raise AmbiguousReport(report_id, [item.folder for item in candidates])
+        return candidates[0] if candidates else None
+
+    def get(self, key: Any, default: Any = None) -> Any:
+        key = str(key)
+        if "/" in key:
+            return dict.get(self, key, default)
+        found = self.find(key)
+        return default if found is None else found
+
+    def __contains__(self, key: object) -> bool:
+        key = str(key)
+        return dict.__contains__(self, key) if "/" in key else bool(self.matching(key))
+
+    def __getitem__(self, key: Any) -> ReportDefinition:
+        found = self.get(key)
+        if found is None:
+            raise KeyError(key)
+        return found
+
+    def __setitem__(self, key: Any, value: ReportDefinition) -> None:
+        self.add(value)
+
+    def update(self, other: Any = (), **extra: Any) -> None:            # keys are always the reports' own refs
+        for item in (other.values() if isinstance(other, dict) else [v for _, v in other]):
+            self.add(item)
 
 
 def _normalize_canvas_position(raw: Any, default: dict[str, float]) -> dict[str, float]:
@@ -221,7 +312,8 @@ def _dynamic_report(payload: dict[str, Any], source_path: Path | None = None) ->
         raise ValueError("Read the fields of the SQL query first (Setup → Read fields), or type the column names")
     if not isinstance(columns, list) or not columns or not all(isinstance(column, str) for column in columns):
         raise ValueError("No output columns found in a $project, $group or $count stage; list the fields under Output columns")
-    formats = payload.get("formats", sorted(OUTPUT_FORMATS))
+    columns = list(dict.fromkeys(column.strip() for column in columns if column.strip()))  # the same field twice is one column
+    formats =payload.get("formats", sorted(OUTPUT_FORMATS))
     if not isinstance(formats, list) or not formats or any(not isinstance(value, str) or value.lower() not in OUTPUT_FORMATS for value in formats):
         raise ValueError("Report formats must be one or more of csv, xlsx and pdf")
     formats = list(dict.fromkeys(value.lower() for value in formats))
@@ -300,9 +392,15 @@ def _dynamic_report(payload: dict[str, Any], source_path: Path | None = None) ->
                 compile_dataset(dataset, report_id, connection_id)
             except ValueError as exc:
                 raise ValueError(f"Dataset {dataset['name']}: {exc}") from None
-    display_names = [layout["columnLabels"][column].casefold() for column in columns]
-    if len(display_names) != len(set(display_names)):
-        raise ValueError("Give every exported column a different display name")
+    # Excel/CSV headers must differ: "amount" next to "Amount" (or two fields given the same label) becomes "amount (2)"
+    taken: set[str] = set()
+    for column in columns:
+        label = layout["columnLabels"][column]
+        unique, number = label, 2
+        while unique.casefold() in taken:
+            unique, number = f"{label} ({number})", number + 1
+        taken.add(unique.casefold())
+        layout["columnLabels"][column] = unique
 
     def build_pipeline(params: dict[str, Any]) -> list[dict[str, Any]]:
         resolved = copy.deepcopy(pipeline)
@@ -401,8 +499,8 @@ def compile_dataset(dataset: dict[str, Any], report_id: str, connection_id: str)
     })
 
 
-def discover_reports() -> dict[str, ReportDefinition]:
-    registry: dict[str, ReportDefinition] = {}
+def discover_reports() -> ReportRegistry:
+    registry = ReportRegistry()
     from backend.app.storage.store import get_store
     loaded_from: dict[str, str] = {}
     for key, payload in get_store().read_many("reports"):
@@ -414,10 +512,10 @@ def discover_reports() -> dict[str, ReportDefinition]:
         except (OSError, ValueError, TypeError, KeyError, AttributeError) as exc:
             LOG.error("Skipping invalid report definition %s: %s", key, exc)
             continue
-        if definition.report_id in loaded_from:
-            LOG.warning("Duplicate report ID %s in %s and %s; using %s", definition.report_id, loaded_from[definition.report_id], key, key)
-        loaded_from[definition.report_id] = key
-        registry[definition.report_id] = definition
+        if definition.ref in loaded_from:
+            LOG.warning("Report %s is stored twice (%s and %s); using %s", definition.ref, loaded_from[definition.ref], key, key)
+        loaded_from[definition.ref] = key
+        registry.add(definition)
     return registry
 
 

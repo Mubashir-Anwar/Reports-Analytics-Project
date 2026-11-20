@@ -4,11 +4,13 @@ Every function takes the service context `ctx` first; create_context() binds the
 from __future__ import annotations
 
 import copy
+import threading
 from datetime import datetime, timezone
 from types import SimpleNamespace
 from typing import Any
 
 from backend.app.constants import REPORT_ID_PATTERN, WORKSPACE_META
+from backend.app.definitions import AmbiguousReport
 from backend.app.logs import LOG
 from backend.app.storage.files import normalize_folder_path, workspace_key
 from backend.app.storage.store import get_store
@@ -30,8 +32,16 @@ def workspace_file(ctx: SimpleNamespace, report_id: str, folder: str) -> str:
     return workspace_key(report_id, folder)
 
 
+_SEEDING = threading.Lock()   # the designer loads several lists at once; only one of them seeds the workspace
+
+
 def ensure_workspace(ctx: SimpleNamespace) -> None:
     """First use: start the workspace with a copy of what is already on the server."""
+    with _SEEDING:
+        _seed_workspace(ctx)
+
+
+def _seed_workspace(ctx: SimpleNamespace) -> None:
     store = get_store()
     started = store.has_dir("workspace") or bool(store.keys("workspace") or store.dirs("workspace"))
     if started:
@@ -64,17 +74,32 @@ def workspace_entries(ctx: SimpleNamespace) -> list[tuple[str, dict[str, Any]]]:
     return found
 
 
-def find_workspace_entry(ctx: SimpleNamespace, report_id: str) -> tuple[str, dict[str, Any]] | None:
-    return next((item for item in ctx.workspace_entries() if item[1]["id"] == report_id), None)
+def _draft_folder(data: dict[str, Any]) -> str:
+    try:
+        return normalize_folder_path(data.get("folder", "General"))
+    except ValueError:
+        return "General"
+
+
+def find_workspace_entry(ctx: SimpleNamespace, report_id: str, folder: str | None = None) -> tuple[str, dict[str, Any]] | None:
+    """The draft with this ID in this workspace folder; without a folder the only draft with this ID (409 when the
+    workspace has it in several folders, like the server)."""
+    found = [item for item in ctx.workspace_entries() if item[1]["id"] == report_id]
+    if folder is not None:
+        return next((item for item in found if _draft_folder(item[1]) == folder), None)
+    if len(found) > 1:
+        raise AmbiguousReport(report_id, [_draft_folder(item[1]) for item in found])
+    return found[0] if found else None
 
 
 def workspace_summary(ctx: SimpleNamespace, data: dict[str, Any]) -> dict[str, Any]:
     meta = data.get(WORKSPACE_META) or {}
     published_at = meta.get("publishedAt") or ""
-    on_server = data["id"] in ctx.reports_by_id
+    folder = _draft_folder(data)
+    on_server = f"{meta.get('publishedFolder') or folder}/{data['id']}" in ctx.reports_by_id
     return {
-        "id": data["id"], "title": data.get("title") or data["id"], "description": data.get("description", ""),
-        "folder": data.get("folder", "General"), "updatedAt": meta.get("updatedAt", ""),
+        "id": data["id"], "ref": f"{folder}/{data['id']}", "title": data.get("title") or data["id"], "description": data.get("description", ""),
+        "folder": folder, "updatedAt": meta.get("updatedAt", ""),
         "publishedAt": published_at if on_server else "", "publishedFolder": meta.get("publishedFolder", "") if on_server else "",
         "onServer": on_server,
         "changedSincePublish": bool(on_server and published_at and meta.get("updatedAt", "") > published_at),
@@ -92,9 +117,10 @@ def workspace_folders(ctx: SimpleNamespace, entries: list[tuple[str, dict[str, A
     return sorted(found, key=lambda item: (item.casefold(), item))
 
 
-def sync_workspace_copy(ctx: SimpleNamespace, report_id: str, update: Any) -> None:
-    """A change made on the server is also made in the designer's workspace copy, so the next publish keeps it."""
-    entry = ctx.find_workspace_entry(report_id)
+def sync_workspace_copy(ctx: SimpleNamespace, definition: Any, update: Any) -> None:
+    """A change made on the server is also made in the designer's workspace copy (same folder and ID), so the next
+    publish keeps it."""
+    entry = ctx.find_workspace_entry(definition.report_id, definition.folder)
     if entry is None:
         return
     path, data = entry

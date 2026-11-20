@@ -1,4 +1,7 @@
 // /server API: the login session is an HttpOnly cookie, so no token is kept in the page.
+import { downloadLater, saveUrl, trackDownload } from '../shared/downloads.js';
+import { reach } from '../shared/session.js';
+
 let onSignedOut = () => {};
 export const whenSignedOut = (handler) => { onSignedOut = handler; };
 
@@ -8,7 +11,7 @@ async function call(path, { method = 'GET', body, raw = false } = {}) {
     options.headers['Content-Type'] = 'application/json'; // the server refuses cookie writes that are not JSON
     options.body = JSON.stringify(body);
   }
-  const response = await fetch(path, options);
+  const response = await reach(path, options);
   if (!response.ok) {
     let detail = '';
     try { detail = (await response.json()).detail || ''; } catch { /* not JSON */ }
@@ -24,6 +27,16 @@ async function call(path, { method = 'GET', body, raw = false } = {}) {
   return raw ? response : response.json();
 }
 
+/** A server report is <folder>/<ID> (the same ID may be published in several folders). The API takes the ID in the
+ *  path and the folder as ?folder=; these helpers accept a ref ("cascade/KMBL/Reports/KFS") or a plain ID. */
+export const splitRef = (ref) => { const s = String(ref || ''); const i = s.lastIndexOf('/'); return i > 0 ? [s.slice(0, i), s.slice(i + 1)] : ['', s]; };
+export const idOf = (ref) => splitRef(ref)[1];
+const reportUrl = (ref, suffix = '', extra = '') => {
+  const [folder, id] = splitRef(ref);
+  const query = [folder ? `folder=${encodeURIComponent(folder)}` : '', extra].filter(Boolean).join('&');
+  return `/api/server/reports/${encodeURIComponent(id)}${suffix}${query ? `?${query}` : ''}`;
+};
+
 export const serverApi = {
   me: () => call('/api/server/me'),
   login: (username, password) => call('/api/server/login', { method: 'POST', body: { username, password } }),
@@ -32,11 +45,11 @@ export const serverApi = {
   createFolder: (path) => call('/api/server/folders', { method: 'POST', body: { path } }),
   deleteFolder: (path, recursive = false) => call('/api/server/folders', { method: 'DELETE', body: { path, recursive } }),
   folderContents: (path) => call(`/api/server/folders/contents?path=${encodeURIComponent(path)}`),
-  deleteReport: (id) => call(`/api/server/reports/${encodeURIComponent(id)}`, { method: 'DELETE', body: {} }),
-  details: (id) => call(`/api/server/reports/${encodeURIComponent(id)}`),
-  edit: (id, changes) => call(`/api/server/reports/${encodeURIComponent(id)}`, { method: 'PUT', body: changes }),
-  copy: (id, folder, newId) => call(`/api/server/reports/${encodeURIComponent(id)}/copy`, { method: 'POST', body: { folder, ...(newId ? { newId } : {}) } }),
-  move: (id, folder) => call(`/api/server/reports/${encodeURIComponent(id)}/move`, { method: 'POST', body: { folder } }),
+  deleteReport: (ref) => call(reportUrl(ref), { method: 'DELETE', body: {} }),
+  details: (ref) => call(reportUrl(ref)),
+  edit: (ref, changes) => call(reportUrl(ref), { method: 'PUT', body: changes }),
+  copy: (ref, folder, newId) => call(reportUrl(ref, '/copy'), { method: 'POST', body: { folder, ...(newId ? { newId } : {}) } }),
+  move: (ref, folder) => call(reportUrl(ref, '/move'), { method: 'POST', body: { folder } }),
   upload: (body) => call('/api/server/upload', { method: 'POST', body }),
   connections: () => call('/api/server/connections'),
   // dashboards (Analytics) published in the same folders
@@ -51,32 +64,39 @@ export const serverApi = {
   permissions: (path) => call(`/api/server/permissions?path=${encodeURIComponent(path || '')}`),
   setPermissions: (path, rules) => call('/api/server/permissions', { method: 'PUT', body: { path, rules } }),
   // versions of a server report
-  versions: (id) => call(`/api/server/reports/${encodeURIComponent(id)}/versions`),
-  version: (id, number) => call(`/api/server/reports/${encodeURIComponent(id)}/versions/${number}`),
-  restoreVersion: (id, number) => call(`/api/server/reports/${encodeURIComponent(id)}/versions/${number}/restore`, { method: 'POST', body: {} }),
+  versions: (ref) => call(reportUrl(ref, '/versions')),
+  version: (ref, number) => call(reportUrl(ref, `/versions/${number}`)),
+  restoreVersion: (ref, number) => call(reportUrl(ref, `/versions/${number}/restore`), { method: 'POST', body: {} }),
   // schedules and background runs
   scheduleInfo: () => call('/api/server/schedules/info'),
-  schedules: (reportId = '') => call(`/api/server/schedules${reportId ? `?reportId=${encodeURIComponent(reportId)}` : ''}`),
+  schedules: (ref = '') => {
+    const [folder, id] = splitRef(ref);
+    return call(`/api/server/schedules${id ? `?reportId=${encodeURIComponent(id)}${folder ? `&folder=${encodeURIComponent(folder)}` : ''}` : ''}`);
+  },
   createSchedule: (body) => call('/api/server/schedules', { method: 'POST', body }),
   updateSchedule: (id, body) => call(`/api/server/schedules/${encodeURIComponent(id)}`, { method: 'PUT', body }),
   enableSchedule: (id, enabled) => call(`/api/server/schedules/${encodeURIComponent(id)}/enabled`, { method: 'POST', body: { enabled } }),
   deleteSchedule: (id, outputs) => call(`/api/server/schedules/${encodeURIComponent(id)}${outputs ? '?outputs=true' : ''}`, { method: 'DELETE', body: {} }),
   runScheduleNow: (id) => call(`/api/server/schedules/${encodeURIComponent(id)}/run`, { method: 'POST', body: {} }),
-  runInBackground: (id, parameters, format) => call(`/api/server/reports/${encodeURIComponent(id)}/background`, { method: 'POST', body: { parameters, format } }),
+  runInBackground: (ref, parameters, format) => call(reportUrl(ref, '/background'), { method: 'POST', body: { parameters, format } }),
+  /** Report Server → Logs (admins): requests | runs | service | audit | downloads */
+  logs: (kind, query) => call(`/api/server/logs/${kind}${query && String(query) ? `?${query}` : ''}`),
   runs: (jobId = '') => call(`/api/server/runs${jobId ? `?jobId=${encodeURIComponent(jobId)}` : ''}`),
   deleteRun: (id) => call(`/api/server/runs/${encodeURIComponent(id)}`, { method: 'DELETE', body: {} }),
-  async runFile(id) {
-    const response = await call(`/api/server/runs/${encodeURIComponent(id)}/file`, { raw: true });
-    const name = (response.headers.get('Content-Disposition') || '').match(/filename="([^"]+)"/)?.[1] || id;
-    return { blob: await response.blob(), name };
+  /** A finished background run's file: a normal browser download (nothing to wait for in the page). */
+  runFile(id) { saveUrl(`/api/server/runs/${encodeURIComponent(id)}/file`); },
+  /** The report's .mrd file: a normal browser download. */
+  download(ref) { saveUrl(reportUrl(ref, '/file')); },
+  /** Run now; the file is made on the server in the background and saved when ready (on any page). */
+  runLater(ref, parameters, format, label) {
+    return downloadLater(label || `${idOf(ref)}.${format || 'pdf'}`, reportUrl(ref, '/run'),
+      { method: 'POST', body: { parameters, format } });
   },
-  async download(id) {
-    const response = await call(`/api/server/reports/${encodeURIComponent(id)}/file`, { raw: true });
-    return response.blob();
-  },
-  async run(id, parameters, format) {
-    const response = await call(`/api/server/reports/${encodeURIComponent(id)}/run`, { method: 'POST', body: { parameters, format }, raw: true });
-    return response.blob();
+  run(ref, parameters, format) {
+    return trackDownload(`${idOf(ref)}.${format || 'pdf'}`, async () => {
+      const response = await call(reportUrl(ref, '/run'), { method: 'POST', body: { parameters, format }, raw: true });
+      return response.blob();
+    });
   },
 };
 

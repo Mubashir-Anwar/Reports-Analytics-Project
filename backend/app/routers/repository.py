@@ -9,7 +9,7 @@ from typing import Any
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import Response
 
-from backend.app.definitions import _dynamic_report
+from backend.app.definitions import _dynamic_report, clean_folder
 from backend.app.mrd import parse_report_definition_xml, render_report_definition_xml
 from backend.app.storage.files import add_saved_folder, list_saved_folders, normalize_folder_path
 
@@ -78,7 +78,7 @@ def register(app: FastAPI, ctx: SimpleNamespace) -> None:
     @app.get("/api/admin/reports/{report_id}")
     def admin_get_report(report_id: str, request: Request) -> dict[str, Any]:
         require_admin(request, "designer")
-        definition = reports_by_id.get(report_id)
+        definition = ctx.report_for_request(request, report_id)        # ?folder= when the ID is in several folders
         if definition is None:
             raise HTTPException(status_code=404, detail="Report ID is not registered")
         return admin_report_payload(definition)
@@ -86,7 +86,7 @@ def register(app: FastAPI, ctx: SimpleNamespace) -> None:
     @app.get("/api/admin/reports/{report_id}/definition.xml")
     def admin_export_report_definition(report_id: str, request: Request) -> Response:
         require_admin(request, "designer")
-        definition = reports_by_id.get(report_id)
+        definition = ctx.report_for_request(request, report_id)
         if definition is None or definition.editor_config is None:
             raise HTTPException(status_code=404, detail="Saved report definition not found")
         body = render_report_definition_xml(admin_report_payload(definition))
@@ -116,14 +116,15 @@ def register(app: FastAPI, ctx: SimpleNamespace) -> None:
             raise HTTPException(status_code=422, detail=f"The XML file could not be read: {exc}") from None
         except (TypeError, ValueError, KeyError) as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from None
-        existing = reports_by_id.get(definition.report_id)
+        existing = dict.get(reports_by_id, definition.ref)              # the same ID in another folder is another report
         replace_existing = request_payload.get("replace") is True
         if existing is not None and not replace_existing:
-            raise HTTPException(status_code=409, detail="A report with this ID already exists; confirm that it should be replaced")
+            raise HTTPException(status_code=409, detail=f"A report with this ID already exists in /{definition.folder}; confirm that it should be replaced")
         try:
             saved = save_report_payload(
                 definition_payload,
                 expected_id=definition.report_id if existing is not None else None,
+                previous=existing,
             )
         except HTTPException:
             raise
@@ -145,17 +146,23 @@ def register(app: FastAPI, ctx: SimpleNamespace) -> None:
             payload = await request.json()
         except Exception:
             raise HTTPException(status_code=400, detail="Send a valid JSON body") from None
-        return {"report": admin_report_payload(save_report_payload(payload, report_id))}
+        # ?folder= is the report being changed (the payload's folder may move it); without it the report in the
+        # payload's folder, or the only report with this ID
+        previous = ctx.report_for_request(request, report_id) if request.query_params.get("folder") else None
+        if previous is None and isinstance(payload, dict):
+            target = clean_folder(payload.get("folder")) or "General"
+            previous = dict.get(reports_by_id, f"{target}/{report_id}") or reports_by_id.find(report_id)
+        return {"report": admin_report_payload(save_report_payload(payload, report_id, previous=previous))}
 
     @app.delete("/api/admin/reports/{report_id}")
     def admin_delete_report(report_id: str, request: Request) -> dict[str, str]:
         require_admin(request)
-        return delete_published_report(report_id)
+        return delete_published_report(report_id, clean_folder(request.query_params.get("folder")))
 
     @app.post("/api/admin/reports/{report_id}/preview")
     async def admin_preview_report(report_id: str, request: Request) -> dict[str, Any]:
         require_admin(request, "designer")
-        definition = reports_by_id.get(report_id)
+        definition = ctx.report_for_request(request, report_id)
         if definition is None:
             raise HTTPException(status_code=404, detail="Report ID is not registered")
         try:
@@ -169,7 +176,7 @@ def register(app: FastAPI, ctx: SimpleNamespace) -> None:
         """Run the full report from the admin/designer Preview and return the file (any format,
         any data adapter). Same rendering as /generate; recorded in the audit log."""
         require_admin(request, "designer")
-        definition = reports_by_id.get(report_id)
+        definition = ctx.report_for_request(request, report_id)
         if definition is None:
             raise HTTPException(status_code=404, detail="Report ID is not registered")
         try:

@@ -1,9 +1,10 @@
 // Report schedules and background runs (JasperReports Server: Schedule → Recurrence, Parameters, Output, Notifications;
 // and the list of report outputs).
-import { useCallback, useEffect, useState } from 'react';
-import { Notice, downloadBlob, formatWhen } from '../portal/Shell.jsx';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { Notice, formatWhen } from '../portal/Shell.jsx';
 import { FORMAT_LABELS } from './RunPanel.jsx';
 import { serverApi } from './serverApi.js';
+import { optionalFilters } from '../errorHelp.js';
 
 const DAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 const RELATIVE = [
@@ -22,12 +23,34 @@ export function StatusChip({ status }) {
 
 function emptySchedule(report, info) {
   return {
-    label: report?.title || '', reportId: report?.id || '', format: report?.defaultFormat || 'pdf',
+    label: report?.title || '', reportId: report?.id || '', folder: report?.folder || '', format: report?.defaultFormat || 'pdf',
     recurrence: { type: 'daily', time: '08:00', weekdays: [0], day: 1, every: 60, at: '' },
     timezone: info?.timezone && info.timezone !== 'UTC' ? info.timezone : browserZone(),
     parameters: Object.fromEntries((report?.parameters || []).filter((p) => !p.computed).map((p) => [p.name, p.type === 'date' ? '{yesterday}' : (p.default ?? '')])),
     keep: 10, enabled: true, email: { to: '', subject: '', message: '', attach: true },
   };
+}
+
+/**
+ * A schedule's date: every relative date in one list (a <datalist> would only show the entries matching the text
+ * already typed, e.g. just "Yesterday"), or "Exact date…" with a calendar.
+ */
+function DateChoice({ value, onChange }) {
+  const relative = RELATIVE.some(([v]) => v === value);
+  const [exact, setExact] = useState(!relative && value !== '');
+  const exactValue = /^\d{4}-\d{2}-\d{2}$/.test(value) ? value : '';
+  return (
+    <span className="date-choice">
+      <select value={exact ? 'exact' : value} onChange={(e) => {
+        if (e.target.value === 'exact') { setExact(true); onChange(exactValue || new Date().toISOString().slice(0, 10)); } else { setExact(false); onChange(e.target.value); }
+      }}>
+        {!exact && !relative && <option value="">—</option>}
+        {RELATIVE.map(([v, l]) => <option key={v} value={v}>{l}  ·  {v}</option>)}
+        <option value="exact">Exact date…</option>
+      </select>
+      {exact && <input type="date" value={exactValue} onChange={(e) => onChange(e.target.value)} aria-label="Exact date" />}
+    </span>
+  );
 }
 
 /** Create or edit one schedule. `report` = the report's details (parameters, formats). */
@@ -43,6 +66,7 @@ export function ScheduleDialog({ report, job, info, onClose, onSaved }) {
   const setEmail = (patch) => setForm((f) => ({ ...f, email: { ...f.email, ...patch } }));
   const rec = form.recurrence;
   const parameters = (report?.parameters || []).filter((p) => !p.computed);
+  const filters = optionalFilters(report);
 
   const save = async () => {
     setBusy(true);
@@ -110,7 +134,6 @@ export function ScheduleDialog({ report, job, info, onClose, onSaved }) {
         {step === 'values' && (
           <div className="stack">
             {!parameters.length && <p className="muted">This report has no parameters.</p>}
-            <datalist id="relative-dates">{RELATIVE.map(([v, l]) => <option key={v} value={v}>{l}</option>)}</datalist>
             <div className="params">
               {parameters.map((p) => (
                 <label key={p.name} className="field">
@@ -121,14 +144,17 @@ export function ScheduleDialog({ report, job, info, onClose, onSaved }) {
                       {p.allowedValues.map((v) => <option key={String(v)} value={String(v)}>{String(v)}</option>)}
                     </select>
                   ) : (
-                    <input list={p.type === 'date' ? 'relative-dates' : undefined} value={form.parameters[p.name] ?? ''}
-                      placeholder={p.type === 'date' ? '{yesterday} or 2026-01-31' : ''}
-                      onChange={(e) => set({ parameters: { ...form.parameters, [p.name]: e.target.value } })} />
+                    p.type === 'date' ? (
+                      <DateChoice value={form.parameters[p.name] ?? ''} onChange={(value) => set({ parameters: { ...form.parameters, [p.name]: value } })} />
+                    ) : (
+                      <input value={form.parameters[p.name] ?? ''} onChange={(e) => set({ parameters: { ...form.parameters, [p.name]: e.target.value } })} />
+                    )
                   )}
+                  {p.required && filters[p.name] && <span className="hint warn-text">Empty gives all records in this report, but it is marked Required — untick Required on the report's Parameters tab to leave it empty.</span>}
                 </label>
               ))}
             </div>
-            {parameters.some((p) => p.type === 'date') && <p className="muted">Dates can be <b>relative</b>, worked out on the day the job runs: <code>{'{yesterday}'}</code>, <code>{'{today-7}'}</code>, <code>{'{prevMonthStart}'}</code>… (pick from the list).</p>}
+            {parameters.some((p) => p.type === 'date') && <p className="muted">Dates can be <b>relative</b>, worked out on the day the job runs: <code>{'{yesterday}'}</code>, <code>{'{today-7}'}</code>, <code>{'{prevMonthStart}'}</code>… (pick from the list, or choose “Exact date…”).</p>}
           </div>
         )}
 
@@ -164,15 +190,58 @@ export function ScheduleDialog({ report, job, info, onClose, onSaved }) {
   );
 }
 
+const dueSoon = (items) => items?.some((job) => (job.enabled && job.nextRunAt && new Date(job.nextRunAt) - Date.now() < 15 * 60000)
+  || ['queued', 'running'].includes(job.lastRun?.status));
+
+/**
+ * A scheduled run happens on the server, so nothing on the page would change: on a report's page this watches its
+ * schedules near their time and says when one has run (records, empty file, or the error) — on whatever tab is open.
+ */
+export function ScheduleWatcher({ report, onMessage }) {
+  const [items, setItems] = useState(null);
+  const seen = useRef(null);
+  const load = useCallback(() => serverApi.schedules(report?.ref || report?.id || '').then((r) => setItems(r.schedules)).catch(() => {}), [report?.ref, report?.id]);
+  useEffect(() => {
+    load();
+    const every = setInterval(load, 60000);            // picks up schedules made after the page opened
+    return () => clearInterval(every);
+  }, [load]);
+  const soon = dueSoon(items);
+  useEffect(() => {
+    if (!soon) return undefined;
+    const timer = setInterval(load, 10000);
+    return () => clearInterval(timer);
+  }, [soon, load]);
+  useEffect(() => {
+    if (!items) return;
+    if (items.some((job) => ['queued', 'running'].includes(job.lastRun?.status))) return;
+    const now = Object.fromEntries(items.map((job) => [job.id, job.lastRun?.runId || '']));
+    if (seen.current) {
+      items.filter((job) => job.lastRun && seen.current[job.id] !== now[job.id]).forEach((job) => onMessage(job.lastRun.status === 'success'
+        ? { kind: job.lastRun.rowCount ? 'ok' : 'warn', text: `Schedule “${job.label}” ran at ${formatWhen(job.lastRun.at)}: ${job.lastRun.rowCount ?? 0} records${job.lastRun.rowCount ? '' : ' — the file is empty; check the schedule’s parameter values'}. Download it on the Schedules tab or under Runs.` }
+        : { kind: 'error', text: `Schedule “${job.label}” failed at ${formatWhen(job.lastRun.at)}: ${job.lastRun.error}` }));
+    }
+    seen.current = now;
+  }, [items]); // eslint-disable-line react-hooks/exhaustive-deps -- only when the list changes
+  return null;
+}
+
 /** Schedules (all, or of one report). */
 export function SchedulesList({ report, info, onMessage, version = 0 }) {
   const [items, setItems] = useState(null);
   const [editing, setEditing] = useState(null); // { job?, report? }
-  const load = useCallback(() => serverApi.schedules(report?.id || '').then((r) => setItems(r.schedules)).catch((e) => { setItems([]); onMessage({ kind: 'error', text: e.message }); }), [report?.id, onMessage]);
+  const load = useCallback(() => serverApi.schedules(report?.ref || report?.id || '').then((r) => setItems(r.schedules)).catch((e) => { setItems([]); onMessage({ kind: 'error', text: e.message }); }), [report?.ref, report?.id, onMessage]);
   useEffect(() => { load(); }, [load, version]);
+  // near a job's time, and while one is running, the list refreshes itself (ScheduleWatcher says when one has run)
+  const soon = dueSoon(items);
+  useEffect(() => {
+    if (!soon) return undefined;
+    const timer = setInterval(load, 10000);
+    return () => clearInterval(timer);
+  }, [soon, load]);
   const act = async (fn, text) => { try { await fn(); await load(); if (text) onMessage({ kind: 'ok', text }); } catch (e) { onMessage({ kind: 'error', text: e.message }); } };
   const edit = async (job) => {
-    try { setEditing({ job, report: report || await serverApi.details(job.reportId) }); } catch (e) { onMessage({ kind: 'error', text: e.message }); }
+    try { setEditing({ job, report: report || await serverApi.details(job.folder ? `${job.folder}/${job.reportId}` : job.reportId) }); } catch (e) { onMessage({ kind: 'error', text: e.message }); }
   };
 
   return (
@@ -186,12 +255,15 @@ export function SchedulesList({ report, info, onMessage, version = 0 }) {
           <div className="schedule-main">
             <strong>{job.label}</strong>
             <small className="muted">{!report && <>{job.title} · </>}{job.describe} ({job.timezone}) · {job.format.toUpperCase()}{job.email?.to?.length ? ` · ✉ ${job.email.to.length}` : ''}</small>
-            <small className="muted">Next: {job.enabled ? formatWhen(job.nextRunAt) : 'paused'} · Last: {job.lastRun ? <><StatusChip status={job.lastRun.status} /> {formatWhen(job.lastRun.at)}</> : 'never'}{info?.canSchedule && job.owner ? ` · by ${job.owner}` : ''}</small>
+            <small className="muted">Next: {job.enabled ? formatWhen(job.nextRunAt) : job.recurrence?.type === 'once' && job.lastRun ? 'none (one-time job, done)' : 'paused'} · Last: {job.lastRun ? <><StatusChip status={job.lastRun.status} /> {formatWhen(job.lastRun.at)}
+              {job.lastRun.status === 'success' && job.lastRun.rowCount !== undefined && <span className={job.lastRun.rowCount ? '' : 'warn-text'}> · {job.lastRun.rowCount} records{job.lastRun.rowCount ? '' : ' (empty — check the parameter values)'}</span>}</> : 'never'}{info?.canSchedule && job.owner ? ` · by ${job.owner}` : ''}</small>
+            {job.lastRun?.status === 'failed' && job.lastRun.error && <small className="err">{job.lastRun.error}</small>}
             {!job.published && <small className="err">The report is no longer published; the job will fail.</small>}
           </div>
           {info?.canSchedule && (
             <div className="row">
-              <button className="btn sm" onClick={() => act(() => serverApi.runScheduleNow(job.id), `“${job.label}” started — see Runs`)}>▶ Run now</button>
+              {job.lastRun?.status === 'success' && job.lastRun.file !== false && <button className="btn sm primary" onClick={() => serverApi.runFile(job.lastRun.runId)} title="Download the file of the last run">⤓ Last file</button>}
+              <button className="btn sm" onClick={() => act(() => serverApi.runScheduleNow(job.id), `“${job.label}” started — it shows here when it has run`)}>▶ Run now</button>
               <button className="btn sm" onClick={() => act(() => serverApi.enableSchedule(job.id, !job.enabled), job.enabled ? 'Paused' : 'Resumed')}>{job.enabled ? '⏸ Pause' : '▶ Resume'}</button>
               <button className="btn sm" onClick={() => edit(job)}>✎ Edit</button>
               <button className="btn sm danger" onClick={() => { if (window.confirm(`Delete the schedule “${job.label}”?`)) act(() => serverApi.deleteSchedule(job.id, window.confirm('Also delete its saved output files?')), 'Schedule deleted'); }}>✕</button>
@@ -200,7 +272,7 @@ export function SchedulesList({ report, info, onMessage, version = 0 }) {
         </div>
       ))}
       {editing && <ScheduleDialog report={editing.report} job={editing.job} info={info} onClose={() => setEditing(null)}
-        onSaved={(job) => { setEditing(null); load(); onMessage({ kind: 'ok', text: `Saved “${job.label}” — next run ${formatWhen(job.nextRunAt)}` }); }} />}
+        onSaved={(job) => { setEditing(null); load(); onMessage({ kind: 'ok', text: `Saved “${job.label}” — next run ${formatWhen(job.nextRunAt)}. It runs on the server: its file shows on the Schedules tab and under Runs (or by e-mail).` }); }} />}
     </div>
   );
 }
@@ -217,7 +289,7 @@ export function RunsList({ onMessage, version = 0 }) {
     return () => clearInterval(timer);
   }, [busy, load]);
   const download = async (run) => {
-    try { const { blob, name } = await serverApi.runFile(run.id); downloadBlob(blob, name); } catch (e) { onMessage({ kind: 'error', text: e.message }); }
+    serverApi.runFile(run.id);
   };
   const remove = async (run) => {
     try { await serverApi.deleteRun(run.id); await load(); } catch (e) { onMessage({ kind: 'error', text: e.message }); }
