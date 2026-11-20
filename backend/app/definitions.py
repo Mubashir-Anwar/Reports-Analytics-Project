@@ -436,7 +436,15 @@ def _dynamic_report(payload: dict[str, Any], source_path: Path | None = None) ->
                     break
             else:
                 raise ValueError(f"The pipeline has no $match on the dateRange field: {field}")
-        return _resolve_pipeline_parameters(resolved, params)
+        try:
+            return _resolve_pipeline_parameters(resolved, params)
+        except ValueError as exc:
+            # a parameter the report has, left empty, is not "undefined": say how to fill it or make it optional
+            name = str(exc).removeprefix("Pipeline parameter is not defined: ")
+            if name != str(exc) and name in parameter_names:
+                raise ValueError(f'Parameter {name} is empty: type a value for it, or use {{"$paramIn": "{name}"}} '
+                                 "in the query for an optional filter (empty = all records)") from None
+            raise
 
     normalized = {
         "id": report_id,

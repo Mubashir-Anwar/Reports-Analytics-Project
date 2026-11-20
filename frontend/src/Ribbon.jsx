@@ -639,8 +639,8 @@ export default function Ribbon({
           ))}
         </div>
         <div className="rb-quickbar">
-          <button type="button" className="rb-quick" title="Undo (Ctrl+Z)" aria-label="Undo" disabled={!past.length} onClick={() => dispatch({ type: 'UNDO' })}><RIcon name="undo" /></button>
-          <button type="button" className="rb-quick" title="Redo (Ctrl+Y)" aria-label="Redo" disabled={!future.length} onClick={() => dispatch({ type: 'REDO' })}><RIcon name="redo" /></button>
+          <button type="button" className="rb-quick rb-undo" title="Undo (Ctrl+Z)" aria-label="Undo" disabled={!past.length} onClick={() => dispatch({ type: 'UNDO' })}><RIcon name="undo" /></button>
+          <button type="button" className="rb-quick rb-undo" title="Redo (Ctrl+Y)" aria-label="Redo" disabled={!future.length} onClick={() => dispatch({ type: 'REDO' })}><RIcon name="redo" /></button>
           <span className={`pub-chip ${status.cls}`} title={status.text}>{status.text}</span>
           <button type="button" className="rb-quick" title="Save (Ctrl+S)" aria-label="Save" onClick={onSave}><RIcon name="save" /></button>
           <button type="button" className="btn primary rb-publish" title="Copy this report to a folder on the report server" onClick={onPublish}><RIcon name="publish" size={16} /><span className="lbl">Publish</span></button>
@@ -649,7 +649,7 @@ export default function Ribbon({
           <button type="button" className="rb-quick drawer-btn" aria-label="Palette and properties" aria-expanded={drawer === 'right'} onClick={() => setDrawer(drawer === 'right' ? null : 'right')}><RIcon name="panelR" /></button>
         </div>
       </div>
-      {!ui.collapsed && <div className="rb-body" role="tabpanel" aria-label={TABS.find(([id]) => id === ui.tab)?.[1]}>{body[ui.tab] || body.home}</div>}
+      {!ui.collapsed && <div key={ui.tab} className="rb-body" role="tabpanel" aria-label={TABS.find(([id]) => id === ui.tab)?.[1]}>{body[ui.tab] || body.home}</div>}
       {dialog && <HelpDialog which={dialog} report={report} design={design} onGo={onGo} onOpen={setDialog} onClose={() => setDialog(null)} />}
     </header>
   );

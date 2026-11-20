@@ -448,7 +448,15 @@ export default function App() {
     else if (id === 'adapters') { setLeftTab('adapters'); setDrawer('left'); }
     else if (id === 'parameters') setQueryTab('parameters');
     else if (id === 'design') { setQueryTab(null); setTab('design'); }
-    else if (id.startsWith('make-optional:')) {
+    else if (id.startsWith('add-param:')) {
+      const name = id.slice('add-param:'.length).trim();
+      const { parameters } = stateRef.current.report;
+      if (!parameters.some((p) => p.name === name)) {
+        dispatch({ type: 'REPORT', patch: { parameters: [...parameters, { name, type: 'string', label: name, required: false }] } });
+      }
+      setQueryTab(null); setTab('setup');
+      notify(`Parameter ${name} added (text, not required) — set its type in Setup → 3 Parameters if it is a date or number, then Run again.`, 'ok');
+    } else if (id.startsWith('make-optional:')) {
       const names = id.slice('make-optional:'.length).split(',').map((n) => n.trim());
       const { parameters } = stateRef.current.report;
       const hit = parameters.filter((p) => names.includes(p.name) || names.includes(p.label));

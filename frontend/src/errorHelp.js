@@ -146,8 +146,17 @@ const RULES = [
   [/(?:Define the (?:query |collection )?parameter|Pipeline parameter is not defined:?|parameter of this report|is not a parameter)\s*\$?P?\{?(\w+)/i, (m) => ({
     title: `Parameter ${m[1]} is used but not defined`,
     hint: `Every $P{Name} in the query or the design must exist under Parameters with the same name.`,
-    steps: [`In Setup → 3 Parameters press “+ Add parameter” and name it ${m[1]} (capital letters count).`, `Or remove $P{${m[1]}} from the query / design.`],
+    steps: [`Press “Add parameter ${m[1]}” below (or in Setup → 3 Parameters press “+ Add parameter” and name it ${m[1]} — capital letters count).`,
+      `Or remove $P{${m[1]}} from the query / design.`],
     focus: go('parameters', { name: m[1] }),
+    actions: [[`add-param:${m[1]}`, `Add parameter ${m[1]}`]],
+  })],
+  [/Parameter (\w+) is empty: /i, (m) => ({
+    title: `${m[1]} has no value`,
+    hint: `The query uses $P{${m[1]}}, so it needs a value to run.`,
+    steps: [`Type a value for ${m[1]} on the left of the preview, then Run again.`,
+      `If it is a filter that may stay empty (all records), write {"$paramIn": "${m[1]}"} in the query instead of $P{${m[1]}}, e.g. {"Occupation": {"$paramIn": "${m[1]}"}}.`],
+    focus: go('query'),
   })],
   [/^(?:design: )?(.+?): \$([FPV])\{(\w+)\} is not defined/i, (m) => {
     const kind = { F: 'field', P: 'parameter', V: 'variable' }[m[2].toUpperCase()];
