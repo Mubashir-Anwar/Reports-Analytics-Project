@@ -306,7 +306,7 @@ export function optionalFilters(report) {
 
 const PARAM = /\$P!?\{(\w+)\}|\$X\{\s*\w+\s*,\s*[^,}]+,\s*(\w+)\s*\}/g;
 
-/** Every problem the designer can see itself: [{ text, fix, focus, level: 'error' | 'warn' }]. */
+/** Every problem the designer can see itself: [{ text, fix, focus, level: 'error' | 'warn' | 'todo' }]. */
 export function checkSetup(report, design) {
   if (!report) return [];
   const out = [];
@@ -321,18 +321,32 @@ export function checkSetup(report, design) {
     }
   });
 
-  if (!String(report.title || '').trim()) add('warn', 'The report has no name', 'Type a Report name.', go('details'));
-  if (report.isNew && !/^[A-Za-z0-9][A-Za-z0-9_-]{0,79}$/.test(String(report.id || ''))) add('error', 'The report ID is empty or not valid', 'Type a name, or an ID with letters, numbers, _ and -.', go('details'));
-  if (!report.connectionId) add('error', 'No data adapter is chosen', 'Pick the database connection under Data adapter.', go('adapter'));
-  if (!query.trim()) add('error', 'The query is empty', isSql ? 'Write one SELECT statement.' : 'Write db.getCollection("X").aggregate([ … ]) or paste the pipeline [ … ].', go('query', { line: 1 }));
-  if (!isSql && !String(report.collection || '').trim() && !/getCollection\(|db\.\w+\.aggregate|aggregate["']?\s*:/.test(query)) {
-    add('error', 'The collection name is empty', 'Type the collection name (e.g. Orders).', go('collection'));
+  // A brand-new report that nobody has typed in yet shows "To do" (grey), not errors. A report with no
+  // collection and no query is a page of fixed text (letter, certificate, form): it needs no data at all.
+  const title = String(report.title || '').trim();
+  const untouched = report.isNew && !String(report.id || '').trim() && (!title || title === 'New report');
+  const noData = !query.trim() && !String(report.collection || '').trim();
+  if (!title) add(report.isNew ? 'todo' : 'warn', 'The report has no name', 'Type a Report name (or Preview asks for it).', go('details'));
+  if (report.isNew && !/^[A-Za-z0-9][A-Za-z0-9_-]{0,79}$/.test(String(report.id || ''))) {
+    if (untouched || !String(report.id || '').trim()) add('todo', 'The report has no name / ID yet', 'Type a Report name; Preview asks for it if you skip this.', go('details'));
+    else add('error', 'The report ID is not valid', 'Use letters, numbers, _ and - in the ID.', go('details'));
+  }
+  if (noData) {
+    add('todo', 'No data yet — it prints once as a page of fixed text', 'Fine for a letter, certificate or form. To fill it from a database, pick a Data adapter and write the query.', go('adapter'));
+    add('todo', 'No query (optional)', 'Without a query the report is one page of fixed text. Write one to print a page or row per record.', go('query', { line: 1 }));
+    add('todo', 'No fields (optional)', 'Fields come from the query. A page of fixed text needs none; parameters ($P{…}) still work.', go('fields'));
+  } else {
+    if (!report.connectionId) add('error', 'No data adapter is chosen', 'Pick the database connection under Data adapter.', go('adapter'));
+    if (!query.trim()) add('error', 'The query is empty', isSql ? 'Write one SELECT statement.' : 'Write db.getCollection("X").aggregate([ … ]) or paste the pipeline [ … ].', go('query', { line: 1 }));
+    if (!isSql && !String(report.collection || '').trim() && !/getCollection\(|db\.\w+\.aggregate|aggregate["']?\s*:/.test(query)) {
+      add('error', 'The collection name is empty', 'Type the collection name (e.g. Orders).', go('collection'));
+    }
   }
   if (isSql && /^\s*db\.|aggregate\s*\(/.test(query)) add('error', 'The query is MongoDB but Query language is SQL', 'Set Query language to Mongo Shell.', go('language'));
   if (!isSql && /^\s*(select|with)\b/i.test(query)) add('error', 'The query is SQL but Query language is MongoDB', 'Set Query language to SQL and pick a SQL data adapter.', go('language'));
 
   const columns = report.columns || [];
-  if (!columns.length) add('error', 'No fields yet', 'Press “Read fields” in 4 Fields, or type the field names.', go('fields'));
+  if (!columns.length && !noData) add('error', 'No fields yet', 'Press “Read fields” in 4 Fields, or type the field names.', go('fields'));
   const seen = new Map();
   columns.forEach((c) => {
     const key = c.toLowerCase();

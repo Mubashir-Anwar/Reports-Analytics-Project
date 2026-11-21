@@ -24,7 +24,7 @@ WORKSPACE_META = "_workspace"  # designer-only bookkeeping inside a workspace dr
 
 SERVICE_VERSION = "0.3.0"
 OUTPUT_FORMATS = {"csv", "xlsx", "pdf"}
-QUERY_LANGUAGES = {"aggregation-json", "mongosh", "javascript", "python", "sql"}
+QUERY_LANGUAGES = {"aggregation-json", "mongosh", "javascript", "python", "sql", "none"}  # none = no data (static page)
 # Data adapter kinds: MongoDB, and SQL databases through backend/app/connectors/sql.py
 ADAPTER_TYPES = {"mongodb", "postgresql", "mysql", "sqlserver", "oracle"}
 METADATA_KEYS = {"GeneratedBy", "GeneratedByCode", "Folder", "Generate"}

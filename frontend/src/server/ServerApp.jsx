@@ -1,10 +1,9 @@
 import { Suspense, lazy, useCallback, useEffect, useMemo, useState } from 'react';
 import ContextMenu from '../ContextMenu.jsx';
-import { confirmFolderDelete } from '../folderDelete.js';
 import { Notice, Topbar } from '../portal/Shell.jsx';
 import { BRAND } from '../shared/brand.js';
 import { Logo } from '../shared/NavBar.jsx';
-import { Breadcrumbs, FolderTree, NewFolderDialog, SubfolderTiles } from '../shared/folders.jsx';
+import { Breadcrumbs, FolderDeleteDialog, FolderTree, NewFolderDialog, SubfolderTiles } from '../shared/folders.jsx';
 import PermissionsDialog from './PermissionsDialog.jsx';
 import ResourcePanel from './ResourcePanel.jsx';
 import { RunsList, SchedulesList } from './Schedules.jsx';
@@ -135,18 +134,19 @@ function Repository({ user, onUser }) {
   const createFolder = (parent = folder) => setNewFolder(parent);
   const saveNewFolder = async (path) => { await serverApi.createFolder(path); setFolder(path); await done(`Folder /${path} created.`); };
   const countIn = (path) => reports.filter((r) => inFolder(r, path)).length + dashboards.filter((d) => inFolder(d, path)).length;
+  const [deleting, setDeleting] = useState(null); // { path, contents } while the Delete folder dialog is open
   const deleteFolder = async (path = folder) => {
-    try {
-      const answer = confirmFolderDelete(path, await serverApi.folderContents(path));
-      if (!answer) return;
-      if (answer.problem) { fail(new Error(answer.problem)); return; }
-      const result = await serverApi.deleteFolder(path, answer.recursive);
-      if (folder === path || folder.startsWith(`${path}/`)) setFolder('');
-      const [selFolder] = splitRef(selectedId);
-      if (selectedId && (selFolder === path || selFolder.startsWith(`${path}/`))) setSelectedId('');
-      const extra = [result.subfoldersDeleted ? `${result.subfoldersDeleted} subfolder(s)` : '', result.reportsDeleted?.length ? `${result.reportsDeleted.length} report(s)` : ''].filter(Boolean).join(' and ');
-      await done(`Folder /${path} deleted${extra ? ` with ${extra}` : ''}.`);
-    } catch (error) { fail(error); }
+    try { setDeleting({ path, contents: await serverApi.folderContents(path) }); } catch (error) { fail(error); }
+  };
+  const confirmDelete = async (answer) => {
+    const { path } = deleting;
+    const result = await serverApi.deleteFolder(path, answer);     // an error stays in the dialog
+    if (folder === path || folder.startsWith(`${path}/`)) setFolder(answer.moveTo || '');
+    const [selFolder] = splitRef(selectedId);
+    if (selectedId && (selFolder === path || selFolder.startsWith(`${path}/`))) setSelectedId('');
+    const extra = [result.subfoldersDeleted ? `${result.subfoldersDeleted} subfolder(s)` : '', result.reportsDeleted?.length ? `${result.reportsDeleted.length} report(s)` : ''].filter(Boolean).join(' and ');
+    await done(answer.moveTo !== undefined ? `Folder /${path} deleted; what was inside is now in ${answer.moveTo ? `/${answer.moveTo}` : 'the top level'}.`
+      : `Folder /${path} deleted${extra ? ` with ${extra}` : ''}.`);
   };
   const remove = async (r) => {
     if (!window.confirm(`Delete “${r.title}” (${r.id}) from /${r.folder}? The designer's workspace copy is kept and can be published again.`)) return;
@@ -224,7 +224,7 @@ function Repository({ user, onUser }) {
     { label: clipboard ? `Paste “${clipboard.title}”${clipboard.mode === 'cut' ? ' (move)' : ''}` : 'Paste', icon: '📋', disabled: !canManageFolder(path) || !clipboard, onClick: () => paste(path) },
     '-',
     { label: 'Permissions…', icon: '🔒', disabled: !admin, hint: admin ? 'Who may see, run or change this folder' : 'Needs an admin account', onClick: () => setPermFolder(path) },
-    { label: 'Delete folder…', icon: '✕', danger: true, disabled: !admin || !path || path === 'General', hint: !admin ? 'Deleting needs an admin account' : path === 'General' ? 'General cannot be deleted' : 'Also deletes its subfolders and reports (after you confirm)', onClick: () => deleteFolder(path) },
+    { label: 'Delete folder…', icon: '✕', danger: true, disabled: !admin || !path, hint: !admin ? 'Deleting needs an admin account' : 'Shows what is inside; move it or delete it', onClick: () => deleteFolder(path) },
   ];
   const showMenu = (items) => (event) => { event.preventDefault(); event.stopPropagation(); setMenu({ x: event.clientX, y: event.clientY, items }); };
 
@@ -282,7 +282,7 @@ function Repository({ user, onUser }) {
               {designer && canManageFolder(folder) && <button className="btn sm" onClick={() => createFolder(folder)} title={folder ? `New folder inside /${folder}` : 'New top-level folder'}>+ Folder</button>}
               {designer && clipboard && <button className="btn sm" onClick={() => paste(folder)} title="Paste here">📋 Paste</button>}
               {admin && <button className="btn sm" onClick={() => setPermFolder(folder)} title="Who may see, run or change this folder">🔒 Permissions</button>}
-              {admin && folder && folder !== 'General' && <button className="btn danger sm" onClick={() => deleteFolder()}>Delete folder</button>}
+              {admin && folder && <button className="btn danger sm" onClick={() => deleteFolder()}>Delete folder</button>}
             </div>
           </div>
           {!search.trim() && <SubfolderTiles folders={folders} parent={folder} count={countIn} itemWord="item" onOpen={setFolder} onMenu={(event, path) => showMenu(folderMenu(path))(event)} />}
@@ -331,6 +331,7 @@ function Repository({ user, onUser }) {
       </div>}
       <ContextMenu menu={menu} onClose={() => setMenu(null)} />
       {newFolder !== null && <NewFolderDialog folders={folders} parent={newFolder} onCreate={saveNewFolder} onClose={() => setNewFolder(null)} title="New folder on the server" />}
+      {deleting && <FolderDeleteDialog path={deleting.path} contents={deleting.contents} folders={folders} onConfirm={confirmDelete} onClose={() => setDeleting(null)} />}
       {permFolder !== null && <PermissionsDialog folder={permFolder} onClose={() => setPermFolder(null)} onSaved={load} />}
       {uploading && (
         <UploadDialog folders={folders} folder={folder} onClose={() => setUploading(false)}

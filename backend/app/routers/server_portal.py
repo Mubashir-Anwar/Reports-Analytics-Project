@@ -36,7 +36,7 @@ from backend.app.security.users import (
     set_user_password,
     user_rights,
 )
-from backend.app.storage.files import add_saved_folder, list_saved_folders, normalize_folder_path
+from backend.app.storage.files import add_saved_folder, list_saved_folders, move_target, normalize_folder_path
 
 
 def register(app: FastAPI, ctx: SimpleNamespace) -> None:
@@ -159,7 +159,7 @@ def register(app: FastAPI, ctx: SimpleNamespace) -> None:
                                        "tiles": len(item.get("tiles") or []), "owner": item.get("owner"), "updatedAt": item.get("updatedAt"),
                                        "access": permissions.NAMES[have]})
         seen_folders = {r["folder"] for r in reports} | {d["folder"] for d in dashboards}
-        folders = sorted(set(folders) | {d["folder"] for d in dashboards})
+        folders = sorted((set(folders) | {d["folder"] for d in dashboards}) - {"General"})   # General = the top level
         visible = [f for f in folders if permissions.level(session, f, rules) >= permissions.RUN
                    or any(s == f or s.startswith(f"{f}/") for s in seen_folders)]
         return {"folders": visible, "reports": sorted(reports, key=lambda item: item["title"].casefold()),
@@ -195,9 +195,12 @@ def register(app: FastAPI, ctx: SimpleNamespace) -> None:
         payload = await json_body(request)
         try:
             folder = normalize_folder_path(payload.get("path", ""))
+            move_to = move_target(payload)
         except ValueError as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from None
-        return delete_repository_folder(folder, payload.get("recursive") is True, session["username"])
+        if move_to:
+            ctx.require_folder(session, move_to, permissions.MANAGE)
+        return delete_repository_folder(folder, payload.get("recursive") is True, session["username"], move_to)
 
     @app.get("/api/server/folders/contents")
     def server_folder_contents(path: str, request: Request) -> dict[str, Any]:

@@ -40,7 +40,9 @@ export const api = {
     request(withQuery(`/api/admin/workspace/${encodeURIComponent(definition.id)}`, isNew ? 'create=true' : inFolder(fromFolder)), { method: 'PUT', body: definition }),
   deleteWorkspace: (id, folder) => request(withQuery(`/api/admin/workspace/${encodeURIComponent(id)}`, inFolder(folder)), { method: 'DELETE' }),
   createWorkspaceFolder: (path) => request('/api/admin/workspace-folders', { method: 'POST', body: { path } }),
-  deleteWorkspaceFolder: (path) => request('/api/admin/workspace-folders', { method: 'DELETE', body: { path } }),
+  /** answer: { recursive } or { moveTo } ('' = top level), from the Delete folder dialog */
+  deleteWorkspaceFolder: (path, answer = {}) => request('/api/admin/workspace-folders', { method: 'DELETE', body: { path, ...answer } }),
+  workspaceFolderContents: (path) => request(`/api/admin/workspace-folders/contents?path=${encodeURIComponent(path)}`),
   /** draftFolder = the workspace folder of the draft; folder = the server folder it goes to. */
   publish: (id, { folder, replace }, draftFolder) =>
     request(withQuery(`/api/admin/workspace/${encodeURIComponent(id)}/publish`, inFolder(draftFolder)), { method: 'POST', body: { folder, replace } }),
@@ -61,7 +63,7 @@ export const api = {
   report: (id, folder) => request(withQuery(`/api/admin/reports/${encodeURIComponent(id)}`, inFolder(folder))),
   folders: () => request('/api/admin/folders'),
   createFolder: (path) => request('/api/admin/folders', { method: 'POST', body: { path } }),
-  deleteFolder: (path, recursive = false) => request('/api/admin/folders', { method: 'DELETE', body: { path, recursive } }),
+  deleteFolder: (path, answer = {}) => request('/api/admin/folders', { method: 'DELETE', body: { path, ...answer } }),
   folderContents: (path) => request(`/api/admin/folders/contents?path=${encodeURIComponent(path)}`),
   moveConnection: (id, folder) => request(`/api/admin/connections/${encodeURIComponent(id)}/folder`, { method: 'PUT', body: { folder } }),
   reports: () => request('/api/admin/reports'),

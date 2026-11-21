@@ -80,7 +80,7 @@ def test_saving_in_the_designer_does_not_reach_the_server(client):
 
 def test_incomplete_draft_can_be_saved_but_says_why_it_cannot_be_published(client):
     response = client.put("/api/admin/workspace/D2?create=true", headers=token(),
-                          json={"id": "D2", "title": "Half done", "folder": "General"})
+                          json={"id": "D2", "title": "Half done", "folder": "General", "collection": "Orders"})
     assert response.status_code == 200
     assert response.json()["readyToPublish"] is False and response.json()["problem"]
 
@@ -201,3 +201,18 @@ def test_designer_server_and_admin_are_pages_of_the_react_build(client):
         page = client.get(path)
         assert page.status_code == 200, path
         assert '<div id="root"></div>' in page.text and "/assets/app/assets/" in page.text, path
+
+
+def test_workspace_folder_with_drafts_is_moved_or_deleted_after_asking(client):
+    client.put("/api/admin/workspace/D1?create=true", headers=token(), json=draft(folder="Letters/2026"))
+    client.post("/api/admin/workspace-folders", headers=token(), json={"path": "Archive"})
+    contents = client.get("/api/admin/workspace-folders/contents?path=Letters", headers=token()).json()
+    assert contents["reports"] == ["Draft"] and contents["subfolders"] == ["Letters/2026"]
+    assert client.request("DELETE", "/api/admin/workspace-folders", headers=token(), json={"path": "Letters"}).status_code == 409
+    moved = client.request("DELETE", "/api/admin/workspace-folders", headers=token(), json={"path": "Letters", "moveTo": "Archive"})
+    assert moved.status_code == 200, moved.text
+    listing = client.get("/api/admin/workspace", headers=token()).json()
+    assert {item["id"]: item["folder"] for item in listing["reports"]}["D1"] == "Archive/2026"
+    assert "General" not in listing["folders"] and not any(item.startswith("Letters") for item in listing["folders"])
+    gone = client.request("DELETE", "/api/admin/workspace-folders", headers=token(), json={"path": "Archive", "recursive": True})
+    assert gone.status_code == 200 and "D1" not in [item["id"] for item in client.get("/api/admin/workspace", headers=token()).json()["reports"]]

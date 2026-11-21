@@ -107,13 +107,14 @@ def workspace_summary(ctx: SimpleNamespace, data: dict[str, Any]) -> dict[str, A
 
 
 def workspace_folders(ctx: SimpleNamespace, entries: list[tuple[str, dict[str, Any]]]) -> list[str]:
-    found = {"General"}
+    found: set[str] = set()       # "General" = drafts without a folder, shown at the top level
     for directory in get_store().dirs("workspace"):
         parts = directory.split("/")
         found.update("/".join(parts[:index]) for index in range(1, len(parts) + 1))
     for _, data in entries:
         parts = str(data.get("folder", "General")).split("/")
         found.update("/".join(parts[:index]) for index in range(1, len(parts) + 1))
+    found.discard("General")
     return sorted(found, key=lambda item: (item.casefold(), item))
 
 

@@ -590,10 +590,11 @@ const SEGMENTS = [
 /** The segment a problem belongs to, from the place it points to. */
 const segmentOf = (focus) => ({ adapter: 'source', language: 'source', collection: 'source', query: 'query', fields: 'fields', parameters: 'parameters', design: 'layout' }[focus?.target] || 'details');
 
-/** ok | warn | error from the segment's problems and its last test. */
+/** ok | todo (not started / optional, grey) | warn | error from the segment's problems and its last test. */
 function statusOf(issues, tested) {
   if (issues.some((p) => p.level === 'error') || tested === 'error') return 'error';
   if (issues.some((p) => p.level === 'warn')) return 'warn';
+  if (issues.some((p) => p.level === 'todo')) return 'todo';
   return 'ok';
 }
 function badgeText(issues, tested) {
@@ -604,6 +605,7 @@ function badgeText(issues, tested) {
   if (warns) parts.push(`${warns} warning${warns > 1 ? 's' : ''}`);
   if (tested === 'error') parts.push('test failed');
   if (parts.length) return parts.join(' · ');
+  if (issues.some((p) => p.level === 'todo')) return issues.every((p) => /optional|No data yet/.test(p.text)) ? 'Optional' : 'To do';
   return tested === 'ok' ? 'Tested ✓' : 'Looks fine';
 }
 
@@ -660,6 +662,7 @@ function guidedTasks(report, all, elements, { set, onTemplates }) {
   const auto = report.isNew && !report.idManual;
   const missingParams = [...new Set(errorsIn('parameters', (p) => /no parameter/.test(p.text)).map((p) => p.focus?.name).filter(Boolean))];
   const unlabeled = asked.filter((p) => !String(p.label || '').trim());
+  const noData = !String(report.querySource || '').trim() && !String(report.collection || '').trim();
   const fillTitle = (title) => set({ title, ...(auto ? { id: reportIdFrom(title) } : {}) });
   return {
     details: [
@@ -675,22 +678,22 @@ function guidedTasks(report, all, elements, { set, onTemplates }) {
         apply: { label: 'Use this example', run: () => set({ description: 'Total sales of each branch for a date range, for the finance team.' }) } },
     ],
     source: [
-      { key: 'adapter', ask: 'Which database should it read?', why: 'A data adapter is a saved connection to a database. Pick one from the list below.',
+      { optional: noData, key: 'adapter', ask: 'Which database should it read?', why: 'A data adapter is a saved connection to a database. Pick one from the list below.',
         example: 'Sales DB · MongoDB  — or —  Finance · PostgreSQL', guide: 'adapter', done: Boolean(report.connectionId) && !errorsIn('source', (p) => p.focus?.target !== 'collection').length },
-      ...(isSql ? [] : [{ key: 'collection', ask: 'Which collection holds the data?', why: 'In MongoDB, a collection is like a table. Type only its name.',
+      ...(isSql ? [] : [{ optional: noData, key: 'collection', ask: 'Which collection holds the data?', why: 'In MongoDB, a collection is like a table. Type only its name.',
         example: 'Orders', guide: 'collection', done: !errorsIn('source', (p) => p.focus?.target === 'collection').length }]),
       { key: 'conn-test', ask: 'Test the connection', why: 'Optional, but quick. It only checks that the server can reach the database. Nothing is read or changed.', optional: true,
         example: '● Connected', guide: 'conn-test', done: all.source?.tested === 'ok' },
     ],
     query: [
-      { key: 'query', ask: 'Write the query', why: isSql ? 'One SELECT statement. A value the user types becomes $P{Name}.' : 'An aggregation pipeline. A value the user types becomes $P{Name}.',
+      { optional: noData, key: 'query', ask: 'Write the query', why: isSql ? 'One SELECT statement. A value the user types becomes $P{Name}.' : 'An aggregation pipeline. A value the user types becomes $P{Name}.',
         example: starterQuery(report), code: true, guide: 'query', done: Boolean(String(report.querySource || '').trim()),
         apply: !String(report.querySource || '').trim() ? { label: 'Start from this example', run: () => set({ querySource: starterQuery(report) }) } : null },
       { key: 'query-test', ask: 'Check it, then try it with data', why: '“Check query” finds typing mistakes. “Try with data” shows the first records with test values.', optional: true,
         example: '✓ It works: first 5 records shown below.', guide: 'query-test', done: all.query?.tested === 'ok' },
     ],
     fields: [
-      { key: 'fields', ask: 'Read the fields from the query', why: 'Fields are the columns the report can print. Press “Read fields”; you can remove the ones you don’t need.',
+      { optional: noData, key: 'fields', ask: 'Read the fields from the query', why: 'Fields are the columns the report can print. Press “Read fields”; you can remove the ones you don’t need.',
         example: 'Branch · Amount · Date', guide: 'fields', done: (report.columns || []).length > 0 && !(all.fields?.issues || []).length },
     ],
     parameters: [
@@ -801,7 +804,7 @@ export default function SetupForm({ state, dispatch, notify, onTemplates, refres
   const computed = report.parameters.filter((p) => p.prompt === false).length;
   const plural = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`;
   const summaries = {
-    details: `${report.title || 'No name'} · ${report.id || 'no ID'} · ${String(report.folder || 'General').split('/').join(' / ')}`,
+    details: `${report.title || 'No name'} · ${report.id || 'no ID'} · ${!report.folder || report.folder === 'General' ? 'top level' : report.folder.split('/').join(' / ')}`,
     parameters: report.parameters.length
       ? `${plural(report.parameters.length, 'parameter')}: ${report.parameters.slice(0, 4).map((p) => `${p.name}${p.required ? '*' : ''}`).join(', ')}${report.parameters.length > 4 ? '…' : ''}${computed ? ` · ${computed} computed` : ''}`
       : 'None: the report runs without asking anything',
@@ -881,7 +884,7 @@ export default function SetupForm({ state, dispatch, notify, onTemplates, refres
               set({ folder: clean });
             }}>
               {[...new Set(['General', ...folders, report.folder || 'General'])].sort((a, b) => (a === 'General' ? -1 : b === 'General' ? 1 : a.localeCompare(b))).map((f) => (
-                <option key={f} value={f}>{f.split('/').join(' / ')}</option>
+                <option key={f} value={f}>{f === 'General' ? 'Top level (no folder)' : f.split('/').join(' / ')}</option>
               ))}
               <option value="__new__">＋ New folder…</option>
             </select>
@@ -903,6 +906,7 @@ export default function SetupForm({ state, dispatch, notify, onTemplates, refres
 
   const errors = Object.values(all).reduce((n, m) => n + m.issues.filter((p) => p.level === 'error').length + (m.tested === 'error' ? 1 : 0), 0);
   const warns = Object.values(all).reduce((n, m) => n + m.issues.filter((p) => p.level === 'warn').length, 0);
+  const todos = Object.values(all).reduce((n, m) => n + m.issues.filter((p) => p.level === 'todo').length, 0);
   const allOpen = open.size === SEGMENTS.length;
 
   return (
@@ -916,7 +920,7 @@ export default function SetupForm({ state, dispatch, notify, onTemplates, refres
               <li key={id}>
                 <button type="button" className={`seg-chip ${status} ${guided && id === current ? 'current' : ''}`} onClick={() => (guided ? goStep(id) : reveal(id))} title={badgeText(m.issues, m.tested)}
                   aria-current={guided && id === current ? 'step' : undefined}>
-                  <span className={`step ${status}`}>{status === 'ok' ? '✓' : status === 'warn' ? '!' : '✕'}</span>
+                  <span className={`step ${status}`}>{status === 'ok' ? '✓' : status === 'todo' ? '○' : status === 'warn' ? '!' : '✕'}</span>
                   <span>{i + 1}. {title}</span>
                 </button>
               </li>
@@ -924,8 +928,9 @@ export default function SetupForm({ state, dispatch, notify, onTemplates, refres
           })}
         </ol>
         <div className="seg-overall">
-          <span className={errors ? 'err' : warns ? 'warn' : 'ok'}>
-            {errors ? `${plural(errors, 'thing')} to fix before the report can run` : warns ? `Ready to run · ${plural(warns, 'warning')} to look at` : 'All parts look fine: the report is ready to run'}
+          <span className={errors ? 'err' : warns ? 'warn' : todos ? 'todo' : 'ok'}>
+            {errors ? `${plural(errors, 'thing')} to fix before the report can run` : warns ? `Ready to run · ${plural(warns, 'warning')} to look at`
+              : todos ? 'Ready to preview · the grey parts are not filled in yet (without data it prints once, as fixed text)' : 'All parts look fine: the report is ready to run'}
           </span>
           <span className="seg-tools">
             {!guided && <button type="button" className="btn sm" onClick={() => setOpen(new Set(allOpen ? [] : SEGMENTS.map(([id]) => id)))}>{allOpen ? 'Collapse all' : 'Expand all'}</button>}

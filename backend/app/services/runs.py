@@ -38,6 +38,8 @@ def admin_parameters(ctx: SimpleNamespace, payload: dict[str, Any], definition: 
 
 
 def run_report_rows(ctx: SimpleNamespace, definition: ReportDefinition, parameters: dict[str, Any], connection_id: str, *, max_rows: int, limit_rows: bool) -> list[dict[str, Any]]:
+    if definition.query_language == "none":
+        return [{}]                                    # no data: the page prints once (fixed text, parameters)
     if definition.query_language == "sql":
         kind, url = ctx.sql_adapter(connection_id)
         rows = sql_connector.run_query(kind, url, definition.sql, parameters, max_rows=max_rows, timeout_ms=ctx.settings.max_time_ms)
@@ -72,6 +74,9 @@ def iter_report_rows(ctx: SimpleNamespace, definition: ReportDefinition, paramet
     """The report's records one by one, read from the database in batches (big exports: memory stays small).
     Stops with ValueError after `limit` records. Uses the longer REPORT_EXPORT_MAX_TIME_MS time limit (or timeout_ms)."""
     timeout = timeout_ms or ctx.settings.export_max_time_ms
+    if definition.query_language == "none":
+        yield {}
+        return
     if definition.query_language == "sql":
         kind, url = ctx.sql_adapter(connection_id)
         rows: Iterator[dict[str, Any]] = sql_connector.iter_query(kind, url, definition.sql, parameters, timeout_ms=timeout)

@@ -11,7 +11,7 @@ from fastapi.responses import Response
 
 from backend.app.definitions import _dynamic_report, clean_folder
 from backend.app.mrd import parse_report_definition_xml, render_report_definition_xml
-from backend.app.storage.files import add_saved_folder, list_saved_folders, normalize_folder_path
+from backend.app.storage.files import add_saved_folder, list_saved_folders, move_target, normalize_folder_path
 
 
 def register(app: FastAPI, ctx: SimpleNamespace) -> None:
@@ -60,11 +60,12 @@ def register(app: FastAPI, ctx: SimpleNamespace) -> None:
         try:
             payload = await request.json()
             folder = normalize_folder_path(payload.get("path", "")) if isinstance(payload, dict) else ""
+            move_to = move_target(payload)
         except (ValueError, TypeError) as exc:
             raise HTTPException(status_code=422, detail=str(exc) or "Invalid folder path") from None
         except Exception:
             raise HTTPException(status_code=400, detail="Send the folder path as JSON") from None
-        return delete_repository_folder(folder, payload.get("recursive") is True, request.state.actor)
+        return delete_repository_folder(folder, payload.get("recursive") is True, request.state.actor, move_to)
 
     @app.get("/api/admin/folders/contents")
     def admin_folder_contents(path: str, request: Request) -> dict[str, Any]:

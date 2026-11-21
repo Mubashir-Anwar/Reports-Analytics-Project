@@ -112,21 +112,68 @@ def register(app: FastAPI, ctx: SimpleNamespace) -> None:
         get_store().make_dir("/".join(["workspace", *folder.split("/")]))
         return {"folder": folder, "folders": workspace_folders(workspace_entries())}
 
-    @app.delete("/api/admin/workspace-folders")
-    async def workspace_delete_folder(request: Request) -> dict[str, Any]:
-        require_admin(request, "designer")
-        payload = await json_body(request)
+    def drafts_in(folder: str) -> list[tuple[str, dict[str, Any]]]:
+        return [(key, data) for key, data in workspace_entries()
+                if (clean_folder(data.get("folder")) or "General") == folder or str(data.get("folder", "")).startswith(f"{folder}/")]
+
+    def folder_path(raw: Any) -> str:
         try:
-            folder = normalize_folder_path(payload.get("path", ""))
+            folder = normalize_folder_path(raw or "")
         except ValueError as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from None
         if folder == "General":
-            raise HTTPException(status_code=400, detail="The General folder cannot be deleted")
-        if any(str(data.get("folder", "")) == folder or str(data.get("folder", "")).startswith(f"{folder}/") for _, data in workspace_entries()):
-            raise HTTPException(status_code=409, detail="Move or delete the reports in this folder first")
-        if not get_store().remove_dir("/".join(["workspace", *folder.split("/")])):
-            raise HTTPException(status_code=409, detail="The folder is not empty")
-        return {"deleted": folder, "folders": workspace_folders(workspace_entries())}
+            raise HTTPException(status_code=400, detail="General is the top level, not a folder")
+        return folder
+
+    @app.get("/api/admin/workspace-folders/contents")
+    def workspace_folder_contents(path: str, request: Request) -> dict[str, Any]:
+        """What deleting a workspace folder would touch: its subfolders and drafts (at any depth)."""
+        require_admin(request, "designer")
+        folder = folder_path(path)
+        entries = workspace_entries()
+        return {"folder": folder, "subfolders": [item for item in workspace_folders(entries) if item.startswith(f"{folder}/")],
+                "reports": sorted(str(data.get("title") or data["id"]) for _, data in drafts_in(folder)),
+                "published": sorted(str(data.get("title") or data["id"]) for _, data in drafts_in(folder) if workspace_summary(data)["onServer"]),
+                "dashboards": [], "adapters": []}
+
+    @app.delete("/api/admin/workspace-folders")
+    async def workspace_delete_folder(request: Request) -> dict[str, Any]:
+        """Delete a workspace folder. moveTo (a folder, '' = top level) first moves its drafts and subfolders there;
+        recursive=true deletes the drafts in it (their published copies stay on the server)."""
+        require_admin(request, "designer")
+        payload = await json_body(request)
+        folder = folder_path(payload.get("path", ""))
+        raw_target = payload.get("moveTo")
+        move_to = None if raw_target is None else (folder_path(raw_target) if str(raw_target).strip().strip("/") else "")
+        store = get_store()
+        drafts = drafts_in(folder)
+        subfolders = [item for item in workspace_folders(workspace_entries()) if item.startswith(f"{folder}/")]
+        if move_to is not None:
+            if move_to == folder or move_to.startswith(f"{folder}/"):
+                raise HTTPException(status_code=400, detail="Choose a folder outside the one you delete")
+
+            def moved(path: str) -> str:
+                return "/".join(part for part in (move_to, path[len(folder):].strip("/")) if part) or "General"
+            taken = {(clean_folder(data.get("folder")) or "General", data["id"]) for _, data in workspace_entries()}
+            clashes = [data["id"] for _, data in drafts if (moved(clean_folder(data.get("folder")) or "General"), data["id"]) in taken]
+            if clashes:
+                raise HTTPException(status_code=409, detail=f"The target folder already has: {', '.join(clashes[:5])}. Choose another folder")
+            for sub in subfolders:
+                store.make_dir("/".join(["workspace", *moved(sub).split("/")]))
+            for key, data in drafts:
+                data["folder"] = moved(clean_folder(data.get("folder")) or "General")
+                store.write_json(workspace_file(data["id"], data["folder"]), data)
+                store.delete(key)
+        elif drafts and payload.get("recursive") is not True:
+            raise HTTPException(status_code=409, detail=f"The folder has {len(drafts)} report(s); confirm to delete them, or move them to another folder")
+        else:
+            for key, _ in drafts:
+                store.delete(key)
+        if not store.remove_dir("/".join(["workspace", *folder.split("/")]), recursive=True):
+            raise HTTPException(status_code=409, detail="The folder could not be removed")
+        LOG.info("Workspace folder %s deleted (%d drafts %s)", folder, len(drafts), f"moved to /{move_to}" if move_to is not None else "deleted")
+        return {"deleted": folder, "folders": workspace_folders(workspace_entries()), "drafts": len(drafts),
+                "subfolders": len(subfolders), "movedTo": move_to}
 
     @app.post("/api/admin/workspace/{report_id}/publish")
     async def workspace_publish(report_id: str, request: Request) -> dict[str, Any]:

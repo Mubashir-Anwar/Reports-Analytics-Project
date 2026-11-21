@@ -11,7 +11,8 @@ function treeRows(folders, extra) {
     parts.forEach((_, i) => all.add(parts.slice(0, i + 1).join('/')));
   });
   return [...all].sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }))
-    .map((path) => ({ path, name: path.split('/').pop(), depth: path.split('/').length - 1 }));
+    .sort((a, b) => (a === 'General' ? -1 : b === 'General' ? 1 : 0))   // General = the top level, first
+    .map((path) => ({ path, name: path === 'General' ? 'Top level (no folder)' : path.split('/').pop(), depth: path === 'General' ? 0 : path.split('/').length - 1 }));
 }
 
 export default function PublishDialog({ publishing, setPublishing, report, design, onConfirm }) {
@@ -37,7 +38,7 @@ export default function PublishDialog({ publishing, setPublishing, report, desig
   const addFolder = () => {
     const name = newName.trim().replace(/\//g, '-');
     if (!name) return;
-    set({ folder: `${folder || 'General'}/${name}` });
+    set({ folder: folder && folder !== 'General' ? `${folder}/${name}` : name });
     setNewName('');
   };
 
@@ -58,7 +59,7 @@ export default function PublishDialog({ publishing, setPublishing, report, desig
               ))}
             </ul>
             <div className="inline new-folder">
-              <input value={newName} placeholder={`New folder in ${folder || 'General'}`} onChange={(e) => setNewName(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && addFolder()} />
+              <input value={newName} placeholder={folder && folder !== 'General' ? `New folder in ${folder}` : 'New folder at the top level'} onChange={(e) => setNewName(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && addFolder()} />
               <button type="button" className="btn sm" disabled={!newName.trim()} onClick={addFolder}>＋ Folder</button>
             </div>
             <label className="modal-field">Path<input value={publishing.folder} onChange={(e) => set({ folder: e.target.value })} /></label>
@@ -67,7 +68,7 @@ export default function PublishDialog({ publishing, setPublishing, report, desig
             <div className="prop-section">Summary</div>
             <dl className="publish-summary">
               <dt>Report</dt><dd><b>{report.title}</b> <code>{report.id}</code></dd>
-              <dt>Goes to</dt><dd>/{folder || '…'}{isNewFolder ? ' (new folder)' : ''}</dd>
+              <dt>Goes to</dt><dd>{folder === 'General' ? 'the top level' : `/${folder || '…'}`}{isNewFolder && folder !== 'General' ? ' (new folder)' : ''}</dd>
               <dt>Data adapter</dt><dd><code>{report.connectionId || '—'}</code>{report.collection ? <> · collection <code>{report.collection}</code></> : null}</dd>
               <dt>Questions</dt><dd>{report.parameters.length ? report.parameters.map((p) => p.label || p.name).join(', ') : 'none'}</dd>
               <dt>Fields</dt><dd>{report.columns.length}</dd>

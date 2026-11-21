@@ -43,7 +43,8 @@ export const serverApi = {
   logout: () => call('/api/server/logout', { method: 'POST', body: {} }),
   repository: () => call('/api/server/repository'),
   createFolder: (path) => call('/api/server/folders', { method: 'POST', body: { path } }),
-  deleteFolder: (path, recursive = false) => call('/api/server/folders', { method: 'DELETE', body: { path, recursive } }),
+  /** answer: { recursive } or { moveTo } ('' = top level), from the Delete folder dialog */
+  deleteFolder: (path, answer = {}) => call('/api/server/folders', { method: 'DELETE', body: { path, ...answer } }),
   folderContents: (path) => call(`/api/server/folders/contents?path=${encodeURIComponent(path)}`),
   deleteReport: (ref) => call(reportUrl(ref), { method: 'DELETE', body: {} }),
   details: (ref) => call(reportUrl(ref)),

@@ -1,9 +1,8 @@
-import { FolderIcon, NewFolderDialog } from './shared/folders.jsx';
+import { FolderDeleteDialog, FolderIcon, NewFolderDialog } from './shared/folders.jsx';
 import { useEffect, useMemo, useState } from 'react';
 import { api } from './api.js';
 import { AdapterOptions, AdapterWizard, DbLogo } from './shared/adapters.jsx';
 import { selectedIds, toggleInSelection } from './arrange.js';
-import { confirmFolderDelete } from './folderDelete.js';
 import { BUILTIN_VARIABLES, ELEMENT_LABELS, PALETTE_GROUPS, bandKeys, bandLabel, bandPresent, describeElement, getBand, groupOfBand } from './designModel.js';
 
 /** All folders including the parents of every folder, reports' folders and adapters' folders. */
@@ -11,7 +10,7 @@ function completeFolders(folders, reports, adapters) {
   const set = new Set();
   const add = (path) => { if (!path) return; const parts = path.split('/'); parts.forEach((_, i) => set.add(parts.slice(0, i + 1).join('/'))); };
   folders.forEach(add);
-  reports.forEach((r) => add(r.folder || 'General'));
+  reports.forEach((r) => { if (r.folder && r.folder !== 'General') add(r.folder); }); // General = the top level
   adapters.forEach((a) => add(a.folder));
   return [...set].sort((a, b) => a.localeCompare(b));
 }
@@ -69,17 +68,25 @@ export function ServerPanel({ report, onOpenFromServer, notify, refreshKey, onCh
     if (parent && collapsed[parent]) toggle(parent);
     await load(); notify(`Folder /${path} created on the server`, 'ok');
   };
+  const [deleting, setDeleting] = useState(null); // { path, contents } while the Delete folder dialog is open
   const deleteFolder = async (path) => {
+    try { setDeleting({ path, contents: await api.folderContents(path) }); }
+    catch (error) { notify(error.message, 'error'); }
+  };
+  const confirmDelete = async (answer) => {
+    const { path } = deleting;
     try {
-      const answer = confirmFolderDelete(path, await api.folderContents(path));
-      if (!answer) return;
-      if (answer.problem) { notify(answer.problem, 'error'); return; }
-      const result = await api.deleteFolder(path, answer.recursive);
+      const result = await api.deleteFolder(path, answer);
       await load();
       onChanged?.();
-      const extra = [result.subfoldersDeleted ? `${result.subfoldersDeleted} subfolder(s)` : '', result.reportsDeleted?.length ? `${result.reportsDeleted.length} report(s)` : ''].filter(Boolean).join(' and ');
-      notify(`Folder ${path} deleted${extra ? ` with ${extra}` : ''}`, 'ok');
-    } catch (error) { notify(error.status === 403 ? 'Deleting a server folder needs the admin token' : error.message, 'error'); }
+      notify(answer.moveTo !== undefined ? `Folder ${path} deleted; what was inside is now in ${answer.moveTo ? `/${answer.moveTo}` : 'the top level'}`
+        : `Folder ${path} deleted${result.reportsDeleted?.length ? ` with ${result.reportsDeleted.length} report(s)` : ''}`, 'ok');
+    } catch (error) { throw new Error(error.status === 403 ? 'Deleting a server folder needs the admin token' : error.message); }
+  };
+  const areaMenu = (event) => {
+    if (!openMenu) return;
+    event.preventDefault();
+    openMenu(event, [{ header: 'Server repository' }, { label: 'New folder…', icon: '📁', onClick: () => createFolder('') }, { label: 'Refresh', icon: '↻', onClick: () => { load(); onChanged?.(); } }]);
   };
   const folderMenu = (path) => (event) => {
     if (!openMenu) return;
@@ -90,7 +97,7 @@ export function ServerPanel({ report, onOpenFromServer, notify, refreshKey, onCh
       { label: 'New subfolder', icon: '📁', onClick: () => createFolder(path) },
       { label: 'Refresh', icon: '↻', onClick: () => { load(); onChanged?.(); } },
       '-',
-      { label: 'Delete folder…', icon: '✕', danger: true, disabled: path === 'General', hint: path === 'General' ? 'General cannot be deleted' : 'Also deletes its subfolders and reports (after you confirm)', onClick: () => deleteFolder(path) },
+      { label: 'Delete folder…', icon: '✕', danger: true, hint: 'Shows what is inside; move it or delete it', onClick: () => deleteFolder(path) },
     ]);
   };
   const reportMenu = (item) => (event) => {
@@ -127,7 +134,7 @@ export function ServerPanel({ report, onOpenFromServer, notify, refreshKey, onCh
   const folderNode = (path, depth) => {
     const subfolders = childrenOf(path);
     const folderAdapters = adapters.filter((a) => (a.folder || '') === path);
-    const folderReports = reports.filter((r) => (r.folder || 'General') === path);
+    const folderReports = reports.filter((r) => r.folder === path);
     const empty = !subfolders.length && !folderAdapters.length && !folderReports.length;
     const isOpen = !collapsed[path];
     return (
@@ -136,7 +143,7 @@ export function ServerPanel({ report, onOpenFromServer, notify, refreshKey, onCh
           <span className="node-label"><span className="caret">{empty ? '' : isOpen ? '▾' : '▸'}</span><FolderIcon open={isOpen && !empty} /> {path.split('/').pop()}</span>
           <span className="node-actions" onClick={(e) => e.stopPropagation()}>
             <button className="icon" title="New…" onClick={(e) => { e.stopPropagation(); setMenu(menu === path ? '' : path); }}>＋</button>
-            {path !== 'General' && <button className="icon" title="Delete folder" onClick={() => deleteFolder(path)}>✕</button>}
+            <button className="icon" title="Delete folder (asks first)" onClick={() => deleteFolder(path)}>✕</button>
           </span>
           {menu === path && (
             <div className="node-menu" onClick={(e) => e.stopPropagation()}>
@@ -161,9 +168,10 @@ export function ServerPanel({ report, onOpenFromServer, notify, refreshKey, onCh
     );
   };
   const topAdapters = adapters.filter((a) => !a.folder);
+  const topReports = reports.filter((r) => !r.folder || r.folder === 'General');
 
   return (
-    <div className="panel-body">
+    <div className="panel-body" onContextMenu={areaMenu}>
       <div className="panel-actions">
         <button className="btn sm" onClick={() => createFolder('')}>+ Server folder</button>
         <button className="btn sm" onClick={() => { load(); onChanged?.(); }} title="Refresh">↻</button>
@@ -188,12 +196,19 @@ export function ServerPanel({ report, onOpenFromServer, notify, refreshKey, onCh
           {!collapsed['::repo'] && (
             <ul className="tree nested flat">
               {childrenOf('').map((path) => folderNode(path, 1))}
-              {!allFolders.length && <li className="muted pad">No folders yet. Use “+ Folder”.</li>}
+              {topReports.map((item) => (
+                <li key={item.id} className={`tree-row report ${report.id === item.id && report.folder === item.folder && !report.isNew ? 'active' : ''}`} style={{ paddingLeft: 20 }} onClick={() => onOpenFromServer(item)} onContextMenu={reportMenu(item)} title={`Published: ${item.title} — /generate/${item.id}.pdf. Click to open it in your workspace.`}>
+                  <span className="node-label">🌐 {item.title}</span>
+                  <button className="icon" title="Remove from the server (admin)" onClick={(e) => { e.stopPropagation(); removeReport(item); }}>✕</button>
+                </li>
+              ))}
+              {!allFolders.length && !topReports.length && <li className="muted pad">No folders yet. Use “+ Server folder” or right-click here.</li>}
             </ul>
           )}
         </li>
       </ul>
       {newFolder !== null && <NewFolderDialog folders={allFolders} parent={newFolder} onCreate={saveNewFolder} onClose={() => setNewFolder(null)} title="New folder on the server" />}
+      {deleting && <FolderDeleteDialog path={deleting.path} contents={deleting.contents} folders={allFolders} onConfirm={confirmDelete} onClose={() => setDeleting(null)} />}
       <p className="hint">This is the report server: only published reports are here. Click a 🌐 report to open it in your workspace; publish changes with “Publish to server”. Click a data adapter to test it.</p>
     </div>
   );
@@ -208,8 +223,8 @@ export function publishState(item) {
   return { icon: '✓', label: item.publishedAt ? `Published ${new Date(item.publishedAt).toLocaleString()}` : 'On the server', cls: 'published' };
 }
 
-export function WorkspacePanel({ report, onOpen, onNew, notify, refreshKey, onChanged }) {
-  const [folders, setFolders] = useState(['General']);
+export function WorkspacePanel({ report, onOpen, onNew, notify, refreshKey, onChanged, openMenu }) {
+  const [folders, setFolders] = useState([]);
   const [reports, setReports] = useState([]);
   const [collapsed, setCollapsed] = useState(() => readCollapsed().workspace || {});
 
@@ -236,9 +251,42 @@ export function WorkspacePanel({ report, onOpen, onNew, notify, refreshKey, onCh
   const [find, setFind] = useState('');
   const createFolder = (parent) => setNewFolder(parent || '');
   const saveNewFolder = async (path) => { await api.createWorkspaceFolder(path); await load(); notify(`Folder /${path} created in your workspace`, 'ok'); };
+  const [deleting, setDeleting] = useState(null); // { path, contents } while the Delete folder dialog is open
   const deleteFolder = async (path) => {
-    if (!window.confirm(`Delete the empty workspace folder '${path}'?`)) return;
-    try { await api.deleteWorkspaceFolder(path); await load(); notify('Folder deleted', 'ok'); } catch (error) { notify(error.message, 'error'); }
+    try { setDeleting({ path, contents: await api.workspaceFolderContents(path) }); } catch (error) { notify(error.message, 'error'); }
+  };
+  const confirmDelete = async (answer) => {
+    const { path } = deleting;
+    await api.deleteWorkspaceFolder(path, answer);
+    await load();
+    onChanged?.();
+    notify(answer.moveTo !== undefined ? `Folder ${path} deleted; its reports are now in ${answer.moveTo ? `/${answer.moveTo}` : 'the top level'}` : `Folder ${path} deleted`, 'ok');
+  };
+  const folderMenu = (path) => (event) => {
+    if (!openMenu) return;
+    event.preventDefault();
+    event.stopPropagation();
+    openMenu(event, [
+      { header: `/${path}` },
+      { label: 'New report here', icon: '＋', onClick: () => onNew(path) },
+      { label: 'New subfolder…', icon: '📁', onClick: () => createFolder(path) },
+      '-',
+      { label: 'Delete folder…', icon: '✕', danger: true, hint: 'Shows what is inside; move it or delete it', onClick: () => deleteFolder(path) },
+    ]);
+  };
+  const areaMenu = (event) => {
+    if (!openMenu) return;
+    event.preventDefault();
+    openMenu(event, [{ header: 'My workspace' }, { label: 'New report', icon: '＋', onClick: () => onNew() }, { label: 'New folder…', icon: '📁', onClick: () => createFolder('') }, { label: 'Refresh', icon: '↻', onClick: load }]);
+  };
+  const reportRow = (item, depth) => {
+    const s = publishState(item);
+    return (
+      <li key={`${item.folder}/${item.id}`} className={`tree-row report ${report.id === item.id && report.folder === item.folder && !report.isNew ? 'active' : ''}`} style={{ paddingLeft: 6 + depth * 14 }} onClick={() => onOpen(item)} title={`${item.title} (${item.id}) — ${s.label}`}>
+        <span className="node-label"><span className={`pub ${s.cls}`}>{s.icon}</span> {item.title}</span>
+        <button className="icon" title="Delete from workspace" onClick={(e) => { e.stopPropagation(); removeReport(item); }}>✕</button>
+      </li>
+    );
   };
   const removeReport = async (item) => {
     const note = item.onServer ? ' The published copy stays on the server.' : ' It was never published, so this removes it completely.';
@@ -249,31 +297,23 @@ export function WorkspacePanel({ report, onOpen, onNew, notify, refreshKey, onCh
   const folderNode = (path, depth) => {
     const subfolders = childrenOf(path);
     const needle = find.trim().toLowerCase();
-    const items = reports.filter((r) => (r.folder || 'General') === path && (!needle || `${r.title} ${r.id}`.toLowerCase().includes(needle)));
+    const items = reports.filter((r) => r.folder === path && (!needle || `${r.title} ${r.id}`.toLowerCase().includes(needle)));
     const empty = !subfolders.length && !items.length;
     const isOpen = !collapsed[path];
     return (
       <li key={path}>
-        <div className="tree-row folder" style={{ paddingLeft: 6 + depth * 14 }} onClick={() => toggle(path)} title={path}>
+        <div className="tree-row folder" style={{ paddingLeft: 6 + depth * 14 }} onClick={() => toggle(path)} onContextMenu={folderMenu(path)} title={`${path} — right-click for actions`}>
           <span className="node-label"><span className="caret">{empty ? '' : isOpen ? '▾' : '▸'}</span><FolderIcon open={isOpen && !empty} /> {path.split('/').pop()}</span>
           <span className="node-actions" onClick={(e) => e.stopPropagation()}>
             <button className="icon" title="New report in this folder" onClick={() => onNew(path)}>＋</button>
             <button className="icon" title="New subfolder" onClick={() => createFolder(path)}>📁</button>
-            {path !== 'General' && <button className="icon" title="Delete folder" onClick={() => deleteFolder(path)}>✕</button>}
+            <button className="icon" title="Delete folder (asks first)" onClick={() => deleteFolder(path)}>✕</button>
           </span>
         </div>
         {isOpen && !empty && (
           <ul className="tree nested flat">
             {subfolders.map((child) => folderNode(child, depth + 1))}
-            {items.map((item) => {
-              const s = publishState(item);
-              return (
-                <li key={item.id} className={`tree-row report ${report.id === item.id && report.folder === item.folder && !report.isNew ? 'active' : ''}`} style={{ paddingLeft: 6 + (depth + 1) * 14 }} onClick={() => onOpen(item)} title={`${item.title} (${item.id}) — ${s.label}`}>
-                  <span className="node-label"><span className={`pub ${s.cls}`}>{s.icon}</span> {item.title}</span>
-                  <button className="icon" title="Delete from workspace" onClick={(e) => { e.stopPropagation(); removeReport(item); }}>✕</button>
-                </li>
-              );
-            })}
+            {items.map((item) => reportRow(item, depth + 1))}
           </ul>
         )}
       </li>
@@ -281,15 +321,20 @@ export function WorkspacePanel({ report, onOpen, onNew, notify, refreshKey, onCh
   };
 
   return (
-    <div className="panel-body">
+    <div className="panel-body" onContextMenu={areaMenu}>
       <div className="panel-actions">
         <button className="btn primary sm" onClick={() => onNew()}>+ New report</button>
         <button className="btn sm" onClick={() => createFolder('')}>+ Folder</button>
         <button className="btn sm" onClick={load} title="Refresh">↻</button>
       </div>
       <input type="search" className="panel-find" placeholder="⌕  Find a report" value={find} onChange={(e) => setFind(e.target.value)} />
-      <ul className="tree repo">{childrenOf('').map((path) => folderNode(path, 0))}</ul>
+      <ul className="tree repo">
+        {childrenOf('').map((path) => folderNode(path, 0))}
+        {reports.filter((r) => (!r.folder || r.folder === 'General') && (!find.trim() || `${r.title} ${r.id}`.toLowerCase().includes(find.trim().toLowerCase()))).map((item) => reportRow(item, 0))}
+        {!allFolders.length && !reports.length && <li className="muted pad">Nothing here yet. “+ New report”, or right-click for a folder.</li>}
+      </ul>
       {newFolder !== null && <NewFolderDialog folders={allFolders} parent={newFolder} onCreate={saveNewFolder} onClose={() => setNewFolder(null)} title="New folder in my workspace" />}
+      {deleting && <FolderDeleteDialog place="workspace" path={deleting.path} contents={deleting.contents} folders={allFolders} onConfirm={confirmDelete} onClose={() => setDeleting(null)} />}
       <p className="hint"><b>My workspace:</b> Save (Ctrl+S) keeps reports here only. <span className="pub draft">●</span> draft · <span className="pub published">✓</span> published · <span className="pub changed">✎</span> changed since publish. Use “Publish to server” to put a report on the server.</p>
     </div>
   );

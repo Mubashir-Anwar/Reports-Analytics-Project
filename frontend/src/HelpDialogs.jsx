@@ -216,7 +216,7 @@ function CheckReport({ report, design, onGo, onClose }) {
           <ul className="help-problems">
             {problems.map((p) => (
               <li key={`${p.text}${p.place}`} className={p.level}>
-                <b>{p.level === 'error' ? 'Error' : 'Warning'}:</b> {p.text}
+                <b>{p.level === 'error' ? 'Error' : p.level === 'todo' ? 'To do' : 'Warning'}:</b> {p.text}
                 {p.fix && <div className="muted">{p.fix}</div>}
                 {p.place && <div className="help-place"><code>{p.place}</code>{onGo && p.focus && <button type="button" className="btn sm" onClick={() => { onGo(p.focus); onClose(); }}>Go there</button>}</div>}
               </li>

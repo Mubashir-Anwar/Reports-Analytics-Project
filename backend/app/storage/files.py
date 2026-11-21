@@ -55,6 +55,14 @@ def normalize_folder_path(value: Any) -> str:
     return "/".join(parts)
 
 
+def move_target(payload: dict) -> str | None:
+    """The folder a deleted folder's contents go to: None = not moved, '' = the top level."""
+    if not isinstance(payload, dict) or "moveTo" not in payload or payload["moveTo"] is None:
+        return None
+    raw = str(payload["moveTo"]).strip().strip("/")
+    return normalize_folder_path(raw) if raw else ""
+
+
 def report_definition_path(report_id: str, folder: str) -> Path:
     return report_definitions_directory().joinpath(*folder.split("/"), f"{report_id}.json")
 
@@ -76,7 +84,7 @@ def _with_parents(folder: str) -> set[str]:
 def list_saved_folders() -> list[str]:
     from backend.app.storage.store import get_store
     store = get_store()
-    found = {"General"}
+    found: set[str] = set()       # "General" holds the reports without a folder: shown at the top level, not as a folder
     raw = store.read_json("folders.json")
     if raw is not None:
         items = raw.get("folders", []) if isinstance(raw, dict) else []
@@ -89,6 +97,7 @@ def list_saved_folders() -> list[str]:
             found.update(_with_parents(normalize_folder_path(folder)))
         except ValueError:
             continue
+    found.discard("General")
     return sorted(found, key=lambda item: (item.casefold(), item))
 
 

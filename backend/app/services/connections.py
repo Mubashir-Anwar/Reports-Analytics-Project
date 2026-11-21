@@ -97,7 +97,7 @@ def test_mongo_connection(ctx: SimpleNamespace, uri: str, database: str, connect
     for definition in ctx.reports_by_id.values():
         if definition.connection_id != connection_id:
             continue
-        if "$P{" not in definition.collection:
+        if definition.collection and "$P{" not in definition.collection:
             collections.add(definition.collection)
         collect_references((definition.editor_config or {}).get("pipeline", []))
 

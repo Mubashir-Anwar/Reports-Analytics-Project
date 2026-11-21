@@ -3,6 +3,9 @@ import { api } from './api.js';
 import { AdapterOptions } from './panels.jsx';
 import { reportPayload } from './store.js';
 import { startValue } from './relativeDates.js';
+import { reportIdFrom } from './SetupForm.jsx';
+
+const ID_OK = /^[A-Za-z0-9][A-Za-z0-9_-]{0,79}$/;
 
 const EXPORTS = [['pdf', 'PDF', '📄'], ['xlsx', 'Excel', '📊'], ['csv', 'CSV', '🧾']];
 const LIMITS = [['20', 'First 20 records'], ['all', 'All records']];
@@ -12,7 +15,7 @@ const LIMITS = [['20', 'First 20 records'], ['all', 'All records']];
  * Input Parameters panel on the left, the filled report in the viewer, and export buttons (PDF / Excel / CSV).
  * The draft on screen is used as it is — nothing has to be saved or published to preview it.
  */
-export default function Preview({ state, notify }) {
+export default function Preview({ state, notify, dispatch }) {
   const { report, design } = state;
   const [values, setValues] = useState({});
   const [adapter, setAdapter] = useState(''); // the report's own Data Adapter once the list is loaded
@@ -22,6 +25,7 @@ export default function Preview({ state, notify }) {
   const [view, setView] = useState(null); // { url, info, run }
   const [showParams, setShowParams] = useState(true);
   const started = useRef(false);
+  const [askName, setAskName] = useState(null); // the name typed when the report has none yet
 
   useEffect(() => () => { if (view?.url) URL.revokeObjectURL(view.url); }, [view]);
   useEffect(() => {
@@ -37,12 +41,16 @@ export default function Preview({ state, notify }) {
   const computed = report.parameters.filter((p) => p.prompt === false);
   const valueOf = (p) => values[p.name] ?? startValue(p);
   const parameterValues = () => Object.fromEntries(asked.map((p) => [p.name, valueOf(p)]));
-  const live = Boolean(adapter);
-  const adapterName = adapters.find((a) => a.id === adapter)?.name || adapter;
+  // a letter / certificate / form of fixed text: no collection and no query, so it needs no Data Adapter
+  const noData = !String(report.querySource || '').trim() && !String(report.collection || '').trim();
+  const live = Boolean(adapter) || noData;
+  const adapterName = noData ? 'No data (fixed text)' : adapters.find((a) => a.id === adapter)?.name || adapter;
   const missing = asked.filter((p) => p.required && !String(valueOf(p)).trim());
 
   /** Fill the report and show it as PDF. Remembers how it was filled so the exports give the same data. */
-  const run = async () => {
+  const run = async (given) => {
+    const current = given ? { ...state, report: { ...report, ...given } } : state;
+    if (!ID_OK.test(String(current.report.id || ''))) { setAskName(String(current.report.title || '').trim() === 'New report' ? '' : String(current.report.title || '')); return; }
     if (!live) { notify('Choose a Data Adapter first (add one on the Data Adapters tab)', 'error'); return; }
     if (missing.length) { notify(`Fill in: ${missing.map((p) => p.label || p.name).join(', ')}`, 'error'); setShowParams(true); return; }
     setBusy('run');
@@ -52,11 +60,11 @@ export default function Preview({ state, notify }) {
       let runInfo;
       let blob;
       if (limit === '20') {
-        const data = await api.draftPreview(reportPayload(state), parameters, adapter);
-        runInfo = { mode: 'render', body: { design, columns: data.columns, rows: data.rows, parameters, title: report.title, reportId: report.id, folder: report.folder, connectionId: adapter }, text: `${adapterName} · first ${data.rows.length} of ${data.rowCount} records` };
+        const data = await api.draftPreview(reportPayload(current), parameters, noData ? '' : adapter);
+        runInfo = { mode: 'render', body: { design, columns: data.columns, rows: data.rows, parameters, title: current.report.title, reportId: current.report.id, folder: report.folder, connectionId: data.connectionId }, text: `${adapterName} · first ${data.rows.length} of ${data.rowCount} records` };
         blob = await api.renderFile({ ...runInfo.body, format: 'pdf' });
       } else {
-        runInfo = { mode: 'run', definition: reportPayload(state), parameters, connectionId: adapter, text: `${adapterName} · all records` };
+        runInfo = { mode: 'run', definition: reportPayload(current), parameters, connectionId: noData ? '' : adapter, text: `${adapterName} · all records` };
         blob = await api.draftRun(runInfo.definition, { parameters, connectionId: adapter, format: 'pdf' });
       }
       const seconds = ((performance.now() - startedAt) / 1000).toFixed(1);
@@ -69,10 +77,22 @@ export default function Preview({ state, notify }) {
 
   // Like Studio, switching to Preview fills the report straight away with its Data Adapter (first 20 records).
   useEffect(() => {
-    if (started.current || !adapter) return;
+    if (started.current || !live) return;
     started.current = true;
-    if (!missing.length) run();
-  }, [adapter]); // eslint-disable-line react-hooks/exhaustive-deps
+    if (!missing.length) run(); // asks for the name first when the report has none
+  }, [adapter, live]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  /** "What should the report be called?" — the name gives the ID; then the preview runs. */
+  const applyName = (event) => {
+    event.preventDefault();
+    const title = String(askName || '').trim();
+    const id = reportIdFrom(title);
+    if (!id) { notify('Type a name with at least one letter or number', 'error'); return; }
+    const patch = { title, ...(report.isNew && !(report.idManual && ID_OK.test(String(report.id || ''))) ? { id, idManual: false } : {}) };
+    dispatch?.({ type: 'REPORT', patch });
+    setAskName(null);
+    run(patch);
+  };
 
   const exportAs = async (format) => {
     if (!view) return;
@@ -96,18 +116,18 @@ export default function Preview({ state, notify }) {
         <button className={`btn sm quiet ${showParams ? 'on' : ''}`} onClick={() => setShowParams(!showParams)} title="Show or hide the Input Parameters">☰ Parameters</button>
         <label className="tb-field" title="The Data Adapter used to fill the report">
           <span>Data Adapter</span>
-          <select value={adapter} onChange={(e) => setAdapter(e.target.value)}>
-            {!adapter && <option value="">{adapters.length ? 'Choose a Data Adapter…' : 'No Data Adapter yet'}</option>}
+          <select value={noData ? '' : adapter} disabled={noData} onChange={(e) => setAdapter(e.target.value)}>
+            {(!adapter || noData) && <option value="">{noData ? 'None needed (fixed text)' : adapters.length ? 'Choose a Data Adapter…' : 'No Data Adapter yet'}</option>}
             <AdapterOptions adapters={adapters} disableUnconfigured describe={(a) => `${a.name}${a.database ? ` · ${a.database}` : ''}${a.configured ? '' : ' — not configured'}`} />
           </select>
         </label>
         <label className="tb-field" title="How many records to read from the data adapter">
           <span>Records</span>
-          <select value={limit} disabled={!live} onChange={(e) => setLimit(e.target.value)}>
+          <select value={limit} disabled={!live || noData} onChange={(e) => setLimit(e.target.value)}>
             {LIMITS.map(([id, label]) => <option key={id} value={id}>{label}</option>)}
           </select>
         </label>
-        <button className="run-btn" onClick={run} disabled={Boolean(busy) || !live} title="Run the report (fill it with data)">{busy === 'run' ? '…' : '▶'}</button>
+        <button className="run-btn" onClick={() => run()} disabled={Boolean(busy) || !live} title="Run the report (fill it with data)">{busy === 'run' ? '…' : '▶'}</button>
         <span className="tb-sep" />
         <span className="tb-label">Export</span>
         {EXPORTS.map(([format, label, icon]) => (
@@ -139,7 +159,7 @@ export default function Preview({ state, notify }) {
               </label>
             ))}
             {computed.length > 0 && <p className="hint">Computed (not asked): {computed.map((p) => p.name).join(', ')}</p>}
-            <button className="btn primary pp-run" onClick={run} disabled={Boolean(busy)}>▶ Run Report</button>
+            <button className="btn primary pp-run" onClick={() => run()} disabled={Boolean(busy)}>▶ Run Report</button>
           </aside>
         )}
         <section className="viewer">
@@ -149,6 +169,20 @@ export default function Preview({ state, notify }) {
             : !busy && <div className="empty">{!live ? 'Choose a Data Adapter in the toolbar, then press ▶ Run.' : missing.length ? 'Fill in the Input Parameters, then press ▶ Run.' : 'Press ▶ Run to fill the report.'}</div>}
         </section>
       </div>
+      {askName !== null && (
+        <div className="modal-back" onMouseDown={(e) => e.target === e.currentTarget && setAskName(null)}>
+          <form className="modal ask-name" role="dialog" aria-label="Name the report" onSubmit={applyName}>
+            <h3>What should the report be called?</h3>
+            <p className="muted">It has no name yet. The name also gives its ID (the address apps use to run it).</p>
+            <input autoFocus value={askName} onChange={(e) => setAskName(e.target.value)} placeholder="e.g. Course certificate" aria-label="Report name" />
+            {askName.trim() && <small className="muted">ID: <code>{reportIdFrom(askName) || '—'}</code></small>}
+            <div className="row">
+              <button type="submit" className="btn primary" disabled={!reportIdFrom(askName)}>▶ Name it and preview</button>
+              <button type="button" className="btn" onClick={() => setAskName(null)}>Cancel</button>
+            </div>
+          </form>
+        </div>
+      )}
       <div className="preview-statusbar">{view ? view.info : 'Not run yet'}{live ? '' : ' — choose a Data Adapter (add one on the Data Adapters tab)'}</div>
     </div>
   );

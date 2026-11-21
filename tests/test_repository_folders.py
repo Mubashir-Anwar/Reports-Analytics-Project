@@ -78,3 +78,31 @@ def test_bad_adapter_folder_in_file_falls_back_to_top_level(make_client, tmp_pat
     data["connections"][1]["folder"] = "../../outside"
     (tmp_path / "connections.json").write_text(json.dumps(data), encoding="utf-8")
     assert adapters(client)["broken"]["folder"] == ""
+
+
+def test_deleting_a_folder_can_move_everything_to_another_folder(make_client):
+    client = make_client()
+    client.post("/api/admin/connections", headers=admin(), json={"id": "kmbl", "name": "KMBL", "uri": "mongodb://main/k", "folder": "Old/Data"})
+    client.post("/api/admin/folders", headers=admin(), json={"path": "Old/Empty"})
+    client.post("/api/admin/folders", headers=admin(), json={"path": "Keep"})
+    done = client.request("DELETE", "/api/admin/folders", headers=admin(), json={"path": "Old", "moveTo": "Keep"})
+    assert done.status_code == 200, done.text
+    assert adapters(client)["kmbl"]["folder"] == "Keep/Data"
+    folders = client.get("/api/admin/folders", headers=admin()).json()["folders"]
+    assert "Keep/Empty" in folders and not any(item.startswith("Old") for item in folders)
+    # into a folder inside the one being deleted: refused
+    client.post("/api/admin/folders", headers=admin(), json={"path": "Keep/In"})
+    inside = client.request("DELETE", "/api/admin/folders", headers=admin(), json={"path": "Keep", "moveTo": "Keep/In"})
+    assert inside.status_code == 400
+
+
+def test_deleting_everything_keeps_the_adapters_at_the_top_level(make_client):
+    client = make_client()
+    client.post("/api/admin/connections", headers=admin(), json={"id": "kmbl", "name": "KMBL", "uri": "mongodb://main/k", "folder": "Gone"})
+    assert client.request("DELETE", "/api/admin/folders", headers=admin(), json={"path": "Gone", "recursive": True}).status_code == 200
+    assert "kmbl" in adapters(client) and not adapters(client)["kmbl"].get("folder")
+
+
+def test_general_is_the_top_level_not_a_folder(make_client):
+    client = make_client()
+    assert "General" not in client.get("/api/admin/folders", headers=admin()).json()["folders"]

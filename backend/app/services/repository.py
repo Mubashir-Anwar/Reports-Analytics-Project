@@ -26,7 +26,7 @@ from backend.app.storage.files import (
 )
 from backend.app.storage.store import get_store
 
-__all__ = ['report_for_request', 'admin_report_payload', 'save_report_payload', 'folder_contents', 'delete_repository_folder', 'delete_published_report', 'published_or_404', 'design_summary', 'resource_details', 'free_report_id', 'published_report_summaries']
+__all__ = ['report_for_request', 'admin_report_payload', 'save_report_payload', 'folder_contents', 'delete_repository_folder', 'move_folder_contents', 'delete_published_report', 'published_or_404', 'design_summary', 'resource_details', 'free_report_id', 'published_report_summaries']
 
 
 def report_for_request(ctx: SimpleNamespace, request: Any, report_id: str, visible: Any = None) -> ReportDefinition | None:
@@ -114,18 +114,75 @@ def folder_contents(ctx: SimpleNamespace, folder: str) -> dict[str, list[str]]:
     }
 
 
-def delete_repository_folder(ctx: SimpleNamespace, folder: str, recursive: bool = False, user: str = "") -> dict[str, Any]:
-    """Delete a folder. recursive=True (after the user confirmed it) also deletes its subfolders and the
-    published reports in them, like JasperReports Server; data adapters must still be moved first."""
+def _moved_path(path: str, folder: str, move_to: str, root: str) -> str:
+    """Where `path` (the folder itself or inside it) goes when `folder` is emptied into `move_to` ('' = top level)."""
+    rest = path[len(folder):].strip("/")
+    joined = "/".join(part for part in (move_to, rest) if part)
+    return joined or root
+
+
+def move_folder_contents(ctx: SimpleNamespace, folder: str, move_to: str, user: str = "") -> dict[str, int]:
+    """Move everything in `folder` into `move_to` ('' = the top level), keeping its subfolders. Checks every report
+    first, so nothing moves when one report ID is already in the target."""
+    from backend.app.analytics import store as analytics_store  # noqa: PLC0415 - analytics is optional
+    from backend.app.storage.files import add_saved_folder  # noqa: PLC0415
+
+    if move_to == folder or move_to.startswith(f"{folder}/"):
+        raise HTTPException(status_code=400, detail="Choose a folder outside the one you delete")
+    reports = [item for item in ctx.reports_by_id.values() if item.editor_config and (item.folder == folder or item.folder.startswith(f"{folder}/"))]
+    targets = {item.ref: _moved_path(item.folder, folder, move_to, "General") for item in reports}
+    clashes = [f"{item.report_id} (already in /{targets[item.ref]})" for item in reports if f"{targets[item.ref]}/{item.report_id}" in ctx.reports_by_id]
+    if clashes:
+        raise HTTPException(status_code=409, detail=f"These reports are already in the target folder: {', '.join(clashes[:5])}. "
+                                                    "Choose another folder or rename them first")
+    for sub in [item for item in list_saved_folders() if item.startswith(f"{folder}/")]:
+        add_saved_folder(_moved_path(sub, folder, move_to, "General"))
+    if move_to:
+        add_saved_folder(move_to)
+    for item in reports:
+        target = targets[item.ref]
+        payload = {**copy.deepcopy(item.editor_config), "folder": target}
+        saved = ctx.save_report_payload(payload, expected_id=item.report_id, previous=item, action="moved", user=user or "admin")
+        ctx.record_history(item.report_id, "moved", user or "admin", f"{item.folder} → {target} (folder {folder} deleted)", folder=saved.folder)
+    profiles = load_connection_profiles()
+    adapters = 0
+    for profile in profiles:
+        where = str(profile.get("folder") or "")
+        if where and (where == folder or where.startswith(f"{folder}/")):
+            target = _moved_path(where, folder, move_to, "")
+            if target:
+                profile["folder"] = target
+            else:
+                profile.pop("folder", None)
+            adapters += 1
+    if adapters:
+        get_store().write_json("connections.json", {"connections": profiles})
+    dashboards = 0
+    for item in analytics_store.dashboards():
+        where = str(item.get("folder") or "Analytics")
+        if where == folder or where.startswith(f"{folder}/"):
+            analytics_store.save_dashboard({**item, "folder": _moved_path(where, folder, move_to, "General")})
+            dashboards += 1
+    return {"reports": len(reports), "adapters": adapters, "dashboards": dashboards}
+
+
+def delete_repository_folder(ctx: SimpleNamespace, folder: str, recursive: bool = False, user: str = "",
+                             move_to: str | None = None) -> dict[str, Any]:
+    """Delete a folder. move_to (a folder, '' = top level) first moves everything inside there, subfolders included.
+    recursive=True (after the user confirmed it) deletes its subfolders, published reports and dashboards, like
+    JasperReports Server; data adapters are never deleted with a folder: they go to the top level."""
     if folder == "General":
         raise HTTPException(status_code=400, detail="The default General folder cannot be deleted")
     saved_folders = list_saved_folders()
     if folder not in saved_folders:
         raise HTTPException(status_code=404, detail="Folder not found")
+    moved: dict[str, int] = {}
+    if move_to is not None:
+        moved = move_folder_contents(ctx, folder, move_to, user)
+        recursive = True                                  # only empty folders are left
+        saved_folders = list_saved_folders()
     contents = ctx.folder_contents(folder)
-    if contents["adapters"]:
-        raise HTTPException(status_code=409, detail=f"Move or delete the data adapters in this folder first: {', '.join(contents['adapters'])}")
-    if not recursive and (contents["subfolders"] or contents["reports"] or contents["dashboards"]):
+    if not recursive and any(contents[key] for key in ("subfolders", "reports", "dashboards", "adapters")):
         parts = []
         if contents["subfolders"]:
             parts.append(f"{len(contents['subfolders'])} subfolder(s)")
@@ -133,7 +190,17 @@ def delete_repository_folder(ctx: SimpleNamespace, folder: str, recursive: bool 
             parts.append(f"{len(contents['reports'])} report(s): {', '.join(contents['reports'][:5])}")
         if contents["dashboards"]:
             parts.append(f"{len(contents['dashboards'])} dashboard(s)")
-        raise HTTPException(status_code=409, detail=f"The folder is not empty ({' and '.join(parts)}); confirm to delete it with everything inside")
+        if contents["adapters"]:
+            parts.append(f"{len(contents['adapters'])} data adapter(s): {', '.join(contents['adapters'][:5])}")
+        raise HTTPException(status_code=409, detail=f"The folder is not empty ({' and '.join(parts)}); confirm to delete it with "
+                                                    "everything inside, or move it to another folder")
+    if contents["adapters"]:                              # never deleted with a folder: to the top level
+        profiles = load_connection_profiles()
+        for profile in profiles:
+            where = str(profile.get("folder") or "")
+            if where == folder or where.startswith(f"{folder}/"):
+                profile.pop("folder", None)
+        get_store().write_json("connections.json", {"connections": profiles})
     store = get_store()
     for definition in [item for item in ctx.reports_by_id.values() if item.editor_config and
                        (item.folder == folder or item.folder.startswith(f"{folder}/"))]:
@@ -151,13 +218,14 @@ def delete_repository_folder(ctx: SimpleNamespace, folder: str, recursive: bool 
     save_folder_list([item for item in saved_folders if item not in removed])
     remove_rules_under(folder)
     ctx.bump_revision()
-    if contents["reports"]:
+    if contents["reports"] or moved.get("reports"):
         refreshed = discover_reports()
         ctx.reports_by_id.clear()
         ctx.reports_by_id.update(refreshed)
-    LOG.info("Repository folder %s deleted (%d subfolders, %d reports) by %s", folder, len(contents["subfolders"]), len(contents["reports"]), user or "admin")
+    LOG.info("Repository folder %s deleted (%d subfolders, %d reports, moved %s) by %s", folder, len(contents["subfolders"]),
+             len(contents["reports"]), moved or "nothing", user or "admin")
     return {"deleted": folder, "folders": list_saved_folders(), "subfoldersDeleted": len(contents["subfolders"]),
-            "reportsDeleted": contents["reports"]}
+            "reportsDeleted": contents["reports"], "adaptersToTop": contents["adapters"], "moved": moved, "movedTo": move_to}
 
 
 def delete_published_report(ctx: SimpleNamespace, report_id: str, folder: str | None = None) -> dict[str, str]:

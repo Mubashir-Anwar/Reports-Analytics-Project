@@ -1104,3 +1104,13 @@ kbd { font: 11.5px ui-monospace, monospace; background: var(--bg); border: 1px s
 .own-banner:hover { background: color-mix(in srgb, var(--accent) 14%, transparent); }
 @media (max-width: 640px) { .own-choices { grid-template-columns: 1fr; } }
 .row-buttons { display: flex; flex-wrap: wrap; gap: 6px; }
+/* "To do": a part not filled in yet, or optional (a page of fixed text needs no data) — grey, not red */
+.seg-chip.todo { border-style: dashed; }
+.step.todo { background: color-mix(in srgb, var(--muted) 55%, var(--panel)); }
+.seg.todo { border-left-color: color-mix(in srgb, var(--muted) 45%, var(--line)); }
+.seg-badge.todo { background: color-mix(in srgb, var(--muted) 14%, transparent); color: var(--muted); }
+.seg-issues li.todo { background: color-mix(in srgb, var(--muted) 8%, transparent); }
+.seg-issues li.todo span::before { content: '○ '; color: var(--muted); }
+.seg-overall .todo { color: var(--muted); }
+.ask-name { display: grid; gap: 10px; max-width: 420px; }
+.ask-name input { font-size: 15px; padding: 8px 10px; }

@@ -200,9 +200,15 @@ def _dynamic_report(payload: dict[str, Any], source_path: Path | None = None) ->
     elif not collection and str(payload.get("queryLanguage", "")).lower() != "python":
         jasper = split_jasper_query(payload.get("querySource"))  # a Jasper runCommand names its collection
         collection = jasper[0].strip() if jasper else ""
-    if not collection and not is_sql:
+    # No data (a letter / certificate / form of fixed text): it has a design but no collection or query; it prints once.
+    # A file with neither a design nor a query is a broken report, not a page of fixed text.
+    no_data = str(payload.get("queryLanguage", "")).lower() == "none" or (
+        isinstance(payload.get("design"), dict) and not collection and not str(payload.get("querySource") or "").strip() and not payload.get("pipeline"))
+    if no_data:
+        collection, connection_id, is_sql = "", connection_id or "default", False
+    if not collection and not is_sql and not no_data:
         raise ValueError("The MongoDB collection name is required")
-    if not is_sql and (not COLLECTION_TEMPLATE.fullmatch(collection) or collection.lower().startswith("system.")):
+    if not is_sql and not no_data and (not COLLECTION_TEMPLATE.fullmatch(collection) or collection.lower().startswith("system.")):
         raise ValueError("A collection name may contain only letters, numbers, _ - . and $P{parameter}")
     if not CONNECTION_ID_PATTERN.fullmatch(connection_id):
         raise ValueError("Invalid connection ID format")
@@ -287,7 +293,7 @@ def _dynamic_report(payload: dict[str, Any], source_path: Path | None = None) ->
                 f"The allowedValues of {collection_parameter} may contain only letters, numbers, _ and -: {bad_values[:3]}"
             )
 
-    query_language = str(payload.get("queryLanguage", "aggregation-json")).lower()
+    query_language = "none" if no_data else str(payload.get("queryLanguage", "aggregation-json")).lower()
     query_source = payload.get("querySource")
     if query_language not in QUERY_LANGUAGES:
         raise ValueError("queryLanguage must be aggregation-json, mongosh, javascript, python or sql")
@@ -300,6 +306,8 @@ def _dynamic_report(payload: dict[str, Any], source_path: Path | None = None) ->
         if unknown:
             raise ValueError(f"Define the parameter(s) used in the SQL query: {', '.join(unknown)}")
         pipeline: list[dict[str, Any]] = []
+    elif no_data:
+        pipeline = []
     else:
         pipeline = parse_query_source(query_language, query_source) if isinstance(query_source, str) else payload.get("pipeline")
         if not isinstance(pipeline, list) or not pipeline or not all(isinstance(stage, dict) for stage in pipeline):
@@ -321,10 +329,10 @@ def _dynamic_report(payload: dict[str, Any], source_path: Path | None = None) ->
         if names.get(date_range["endParameter"], ParameterSpec("_missing")).kind != "date":
             raise ValueError("The endParameter of dateRange must be of type date")
 
-    columns = payload.get("columns") or ([] if is_sql else _infer_pipeline_columns(pipeline))
+    columns = payload.get("columns") or ([] if is_sql or no_data else _infer_pipeline_columns(pipeline))
     if is_sql and not columns:
         raise ValueError("Read the fields of the SQL query first (Setup → Read fields), or type the column names")
-    if not isinstance(columns, list) or not columns or not all(isinstance(column, str) for column in columns):
+    if not isinstance(columns, list) or (not columns and not no_data) or not all(isinstance(column, str) for column in columns):
         raise ValueError("No output columns found in a $project, $group or $count stage; list the fields under Output columns")
     columns = list(dict.fromkeys(column.strip() for column in columns if column.strip()))  # the same field twice is one column
     formats =payload.get("formats", sorted(OUTPUT_FORMATS))

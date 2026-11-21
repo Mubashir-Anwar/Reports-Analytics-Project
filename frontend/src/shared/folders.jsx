@@ -1,6 +1,7 @@
 // Folders for every page: a collapsible tree, breadcrumbs, subfolder tiles and the "New folder" dialog.
 // Paths look like "cascade/CAR/Letters" ('' = the root).
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import './folders.css';
 
 const NAME = /^[A-Za-z0-9 _.()&-]+$/;
@@ -14,6 +15,7 @@ export function folderNameProblem(name, siblings = []) {
   if (value.length > 60) return 'At most 60 characters';
   if (value === '.' || value === '..') return 'Not a valid name';
   if (siblings.some((item) => item.toLowerCase() === value.toLowerCase())) return 'A folder with this name is already there';
+  if (value.toLowerCase() === 'general') return 'General is the top level (reports without a folder); choose another name';
   return '';
 }
 
@@ -161,7 +163,7 @@ export function NewFolderDialog({ folders, parent = '', onCreate, onClose, title
     setBusy(true);
     try { await onCreate(full); onClose(); } catch (failure) { setError(failure.message); } finally { setBusy(false); }
   };
-  return (
+  return createPortal(   // on <body>: a panel that is moved or hidden must not move or hide the dialog
     <div className="fd-modal-back" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}>
       <form className="fd-modal" role="dialog" aria-modal="true" aria-labelledby="fd-title" onSubmit={submit}>
         <div className="fd-modal-head"><FolderIcon size={22} tone="tile" /><h2 id="fd-title">{title}</h2><button type="button" className="fd-x" aria-label="Close" onClick={onClose}>✕</button></div>
@@ -181,6 +183,86 @@ export function NewFolderDialog({ folders, parent = '', onCreate, onClose, title
           <button type="submit" className="btn primary" disabled={busy || !name.trim() || Boolean(problem)}>{busy ? 'Creating…' : 'Create folder'}</button>
         </div>
       </form>
-    </div>
+    </div>,
+    document.body,
+  );
+}
+
+/**
+ * "Delete this folder?" — shows what is inside (subfolders, reports, dashboards, data adapters) and asks what to do
+ * with it: move everything to another folder (the default) or delete it. Data adapters are never deleted with a
+ * folder. onConfirm({ moveTo }) or onConfirm({ recursive: true }) may throw: the message is shown in the dialog.
+ * place: 'server' | 'workspace' changes the words.
+ */
+export function FolderDeleteDialog({ path, contents, folders, onConfirm, onClose, place = 'server', rootLabel = 'Top level (no folder)' }) {
+  const subfolders = contents?.subfolders || [];
+  const reports = contents?.reports || [];
+  const dashboards = contents?.dashboards || [];
+  const adapters = contents?.adapters || [];
+  const empty = !subfolders.length && !reports.length && !dashboards.length && !adapters.length;
+  const targets = useMemo(() => withParents(folders).filter((f) => f !== path && !f.startsWith(`${path}/`))
+    .sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base', numeric: true })), [folders, path]);
+  const parent = path.split('/').slice(0, -1).join('/');
+  const [choice, setChoice] = useState('move');
+  const [moveTo, setMoveTo] = useState(parent);
+  const [error, setError] = useState('');
+  const [busy, setBusy] = useState(false);
+  useEffect(() => {
+    const escape = (event) => { if (event.key === 'Escape' && !busy) onClose(); };
+    document.addEventListener('keydown', escape);
+    return () => document.removeEventListener('keydown', escape);
+  }, [onClose, busy]);
+  const list = (items) => `${items.slice(0, 6).join(', ')}${items.length > 6 ? `, … (+${items.length - 6})` : ''}`;
+  const reportWord = place === 'workspace' ? 'report draft' : 'published report';
+  const go = async (answer) => {
+    setBusy(true); setError('');
+    try { await onConfirm(answer); onClose(); } catch (failure) { setError(failure.message); setBusy(false); }
+  };
+  return createPortal(
+    <div className="fd-modal-back" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget && !busy) onClose(); }}>
+      <div className="fd-modal fd-delete" role="dialog" aria-modal="true" aria-labelledby="fd-del-title">
+        <div className="fd-modal-head"><FolderIcon size={22} tone="tile" /><h2 id="fd-del-title">Delete the folder “{path.split('/').pop()}”?</h2><button type="button" className="fd-x" aria-label="Close" onClick={onClose}>✕</button></div>
+        <div className="fd-preview"><FolderIcon size={14} /> <code>/{path}</code></div>
+        {empty ? <p className="fd-note">It is empty, so nothing else changes.</p> : (
+          <>
+            <p className="fd-note">Inside it:</p>
+            <ul className="fd-inside">
+              {subfolders.length > 0 && <li><b>{subfolders.length}</b> subfolder{subfolders.length === 1 ? '' : 's'} <small>{list(subfolders.map((f) => f.slice(path.length + 1)))}</small></li>}
+              {reports.length > 0 && <li><b>{reports.length}</b> {reportWord}{reports.length === 1 ? '' : 's'} <small>{list(reports)}</small></li>}
+              {dashboards.length > 0 && <li><b>{dashboards.length}</b> dashboard{dashboards.length === 1 ? '' : 's'} <small>{list(dashboards)}</small></li>}
+              {adapters.length > 0 && <li><b>{adapters.length}</b> data adapter{adapters.length === 1 ? '' : 's'} <small>{list(adapters)}</small></li>}
+            </ul>
+            <div className="fd-choices" role="radiogroup" aria-label="What happens to what is inside">
+              <label className={choice === 'move' ? 'on' : ''}>
+                <input type="radio" name="fd-choice" checked={choice === 'move'} onChange={() => setChoice('move')} />
+                <span><b>Move everything to another folder</b> (recommended)
+                  <select value={moveTo} disabled={choice !== 'move'} onChange={(event) => setMoveTo(event.target.value)} aria-label="Move to">
+                    <option value="">{rootLabel}</option>
+                    {targets.map((f) => <option key={f} value={f}>{'  '.repeat(f.split('/').length - 1)}{f.split('/').pop()}</option>)}
+                  </select>
+                  <small>Subfolders keep their names inside the new place.</small>
+                </span>
+              </label>
+              <label className={`danger ${choice === 'delete' ? 'on' : ''}`}>
+                <input type="radio" name="fd-choice" checked={choice === 'delete'} onChange={() => setChoice('delete')} />
+                <span><b>Delete everything inside</b>
+                  <small>{place === 'workspace'
+                    ? 'The drafts are deleted. Copies already published stay on the server.'
+                    : `The ${reports.length || dashboards.length ? 'reports and dashboards are' : 'folder is'} deleted for everyone and cannot be brought back.${adapters.length ? ' Data adapters are never deleted with a folder: they go to the top level.' : ''}`}</small>
+                </span>
+              </label>
+            </div>
+          </>
+        )}
+        {error && <p className="fd-error" role="alert">{error}</p>}
+        <div className="fd-modal-actions">
+          <button type="button" className="btn" disabled={busy} onClick={onClose}>No, keep it</button>
+          {empty || choice === 'move'
+            ? <button type="button" className="btn primary" disabled={busy} onClick={() => go(empty ? { recursive: false } : { moveTo })}>{busy ? 'Working…' : empty ? 'Yes, delete it' : `Yes, move to ${moveTo ? `/${moveTo}` : 'the top level'} and delete`}</button>
+            : <button type="button" className="btn danger" disabled={busy} onClick={() => go({ recursive: true })}>{busy ? 'Deleting…' : 'Yes, delete it all'}</button>}
+        </div>
+      </div>
+    </div>,
+    document.body,
   );
 }
