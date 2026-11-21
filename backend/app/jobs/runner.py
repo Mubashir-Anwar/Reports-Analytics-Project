@@ -20,7 +20,7 @@ from fastapi import HTTPException
 from backend.app.connectors.errors import MongoReadAccessError
 from backend.app.connectors.mongo_fallback import _row_value
 from backend.app.definitions import AmbiguousReport, validate_parameters
-from backend.app.jobs import mailer, schedule, store
+from backend.app.jobs import delivery, mailer, schedule, store
 from backend.app.logs import LOG
 from backend.app.rendering import spool
 from backend.app.rendering.outputs import render_report_output
@@ -212,6 +212,11 @@ class JobRunner:
             if run.get("spooled") and run.get("size", 0) <= MAIL_ATTACH_MAX:
                 body = spool.export_path(run["file"]).read_bytes()
             run["email"] = self._mail(job, run, body)
+        if job and job.get("deliver"):                      # SFTP / an API / a network folder
+            source: Any = None
+            if run["status"] == "success":
+                source = spool.export_path(run["file"]) if run.get("spooled") else (body or store.read_output(run))
+            run["delivered"] = delivery.deliver_run(job, run, source)
         store.save_run(run, keep_for_job=job.get("keep", 10) if job else None)
         if job:
             self._record_last_run(job["id"], run)

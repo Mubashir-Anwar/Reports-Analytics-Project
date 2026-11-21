@@ -78,6 +78,8 @@ export const serverApi = {
   updateSchedule: (id, body) => call(`/api/server/schedules/${encodeURIComponent(id)}`, { method: 'PUT', body }),
   enableSchedule: (id, enabled) => call(`/api/server/schedules/${encodeURIComponent(id)}/enabled`, { method: 'POST', body: { enabled } }),
   deleteSchedule: (id, outputs) => call(`/api/server/schedules/${encodeURIComponent(id)}${outputs ? '?outputs=true' : ''}`, { method: 'DELETE', body: {} }),
+  /** Try one delivery target (SFTP login, URL, folder) before saving; jobId = use that schedule's saved password */
+  testDelivery: (target, jobId) => call('/api/server/schedules/delivery/test', { method: 'POST', body: { target, jobId: jobId || '' } }),
   runScheduleNow: (id) => call(`/api/server/schedules/${encodeURIComponent(id)}/run`, { method: 'POST', body: {} }),
   runInBackground: (ref, parameters, format) => call(reportUrl(ref, '/background'), { method: 'POST', body: { parameters, format } }),
   /** Report Server → Logs (admins): requests | runs | service | audit | downloads */

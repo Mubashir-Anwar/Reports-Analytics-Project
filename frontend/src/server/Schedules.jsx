@@ -5,6 +5,7 @@ import { Notice, formatWhen } from '../portal/Shell.jsx';
 import { FORMAT_LABELS } from './RunPanel.jsx';
 import { serverApi } from './serverApi.js';
 import { optionalFilters } from '../errorHelp.js';
+import DeliveryEditor from './DeliveryEditor.jsx';
 
 const DAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 const RELATIVE = [
@@ -27,7 +28,7 @@ function emptySchedule(report, info) {
     recurrence: { type: 'daily', time: '08:00', weekdays: [0], day: 1, every: 60, at: '' },
     timezone: info?.timezone && info.timezone !== 'UTC' ? info.timezone : browserZone(),
     parameters: Object.fromEntries((report?.parameters || []).filter((p) => !p.computed).map((p) => [p.name, p.type === 'date' ? '{yesterday}' : (p.default ?? '')])),
-    keep: 10, enabled: true, email: { to: '', subject: '', message: '', attach: true },
+    keep: 10, enabled: true, email: { to: '', subject: '', message: '', attach: true }, deliver: [],
   };
 }
 
@@ -56,7 +57,7 @@ function DateChoice({ value, onChange }) {
 /** Create or edit one schedule. `report` = the report's details (parameters, formats). */
 export function ScheduleDialog({ report, job, info, onClose, onSaved }) {
   const [form, setForm] = useState(() => (job ? {
-    ...job, recurrence: { weekdays: [0], day: 1, every: 60, time: '08:00', at: '', ...job.recurrence }, email: { ...job.email, to: job.email.to.join(', ') },
+    ...job, recurrence: { weekdays: [0], day: 1, every: 60, time: '08:00', at: '', ...job.recurrence }, email: { ...job.email, to: job.email.to.join(', ') }, deliver: job.deliver || [],
   } : emptySchedule(report, info)));
   const [step, setStep] = useState('when');
   const [error, setError] = useState(null);
@@ -92,7 +93,7 @@ export function ScheduleDialog({ report, job, info, onClose, onSaved }) {
           <button className="btn quiet sm" onClick={onClose} aria-label="Close">✕</button>
         </div>
         <div className="tabs">
-          {[['when', '1 · When'], ['values', '2 · Parameters'], ['output', '3 · Output'], ['email', '4 · E-mail']].map(([id, label]) => (
+          {[['when', '1 · When'], ['values', '2 · Parameters'], ['output', '3 · Output'], ['email', '4 · E-mail'], ['deliver', `5 · Send file${form.deliver?.length ? ` (${form.deliver.length})` : ''}`]].map(([id, label]) => (
             <button key={id} className={step === id ? 'on' : ''} onClick={() => setStep(id)}>{label}</button>
           ))}
         </div>
@@ -180,6 +181,12 @@ export function ScheduleDialog({ report, job, info, onClose, onSaved }) {
           ) : <p className="muted">Only designers and administrators can send reports by e-mail.</p>
         )}
 
+        {step === 'deliver' && (
+          info?.canSchedule
+            ? <DeliveryEditor value={form.deliver || []} onChange={(deliver) => set({ deliver })} info={info} report={report} format={form.format} jobId={job?.id} />
+            : <p className="muted">Only designers and administrators can send report files to other systems.</p>
+        )}
+
         <Notice message={error} />
         <div className="row" style={{ justifyContent: 'flex-end' }}>
           <button className="btn" onClick={onClose}>Cancel</button>
@@ -254,7 +261,7 @@ export function SchedulesList({ report, info, onMessage, version = 0 }) {
         <div key={job.id} className={`item schedule-item ${job.enabled ? '' : 'off'}`}>
           <div className="schedule-main">
             <strong>{job.label}</strong>
-            <small className="muted">{!report && <>{job.title} · </>}{job.describe} ({job.timezone}) · {job.format.toUpperCase()}{job.email?.to?.length ? ` · ✉ ${job.email.to.length}` : ''}</small>
+            <small className="muted">{!report && <>{job.title} · </>}{job.describe} ({job.timezone}) · {job.format.toUpperCase()}{job.email?.to?.length ? ` · ✉ ${job.email.to.length}` : ''}{job.deliver?.length ? ` · ⇪ ${job.deliver.map((d) => d.label || d.type.toUpperCase()).join(', ')}` : ''}</small>
             <small className="muted">Next: {job.enabled ? formatWhen(job.nextRunAt) : job.recurrence?.type === 'once' && job.lastRun ? 'none (one-time job, done)' : 'paused'} · Last: {job.lastRun ? <><StatusChip status={job.lastRun.status} /> {formatWhen(job.lastRun.at)}
               {job.lastRun.status === 'success' && job.lastRun.rowCount !== undefined && <span className={job.lastRun.rowCount ? '' : 'warn-text'}> · {job.lastRun.rowCount} records{job.lastRun.rowCount ? '' : ' (empty — check the parameter values)'}</span>}</> : 'never'}{info?.canSchedule && job.owner ? ` · by ${job.owner}` : ''}</small>
             {job.lastRun?.status === 'failed' && job.lastRun.error && <small className="err">{job.lastRun.error}</small>}
@@ -307,7 +314,7 @@ export function RunsList({ onMessage, version = 0 }) {
               {runs.map((run) => (
                 <tr key={run.id}>
                   <td data-label="Report"><b>{run.title}</b><br /><small className="muted">{run.format.toUpperCase()}{run.size ? ` · ${(run.size / 1024).toFixed(0)} KB` : ''}</small></td>
-                  <td data-label="Status"><StatusChip status={run.status} />{run.error && <div className="err small">{run.error}</div>}{run.email && <div className="muted small">✉ {run.email}</div>}</td>
+                  <td data-label="Status"><StatusChip status={run.status} />{run.error && <div className="err small">{run.error}</div>}{run.email && <div className="muted small">✉ {run.email}</div>}{(run.delivered || []).map((d) => <div key={d.id} className={`small ${d.ok ? 'muted' : d.skipped ? 'muted' : 'err'}`} title={d.result}>{d.type === 'sftp' ? '🔐' : d.type === 'http' ? '🔗' : '📂'} {d.label}: {d.ok ? '✓ ' : d.skipped ? '' : '✕ '}{d.result}</div>)}</td>
                   <td data-label="Started">{formatWhen(run.startedAt || run.queuedAt)}</td>
                   <td data-label="Records">{run.status === 'success' ? run.rowCount : '—'}</td>
                   <td data-label="From">{run.jobLabel || (run.kind === 'background' ? 'Background run' : run.kind)}<br /><small className="muted">{run.owner}</small></td>

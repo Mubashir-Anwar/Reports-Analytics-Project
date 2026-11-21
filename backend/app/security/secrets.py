@@ -53,9 +53,11 @@ def _load_private_secrets() -> dict[str, Any]:
     connections = raw.get("mongo_connections", {})
     if not isinstance(connections, dict):
         raise ValueError("mongo_connections in private_secrets.json must be a JSON object")
+    delivery = raw.get("delivery_secrets") or {}
     return {
         "admin_token": str(raw.get("admin_token", "")).strip(),
         "mongo_connections": connections,
+        **({"delivery_secrets": delivery} if isinstance(delivery, dict) and delivery else {}),   # schedule SFTP / API passwords
     }
 
 

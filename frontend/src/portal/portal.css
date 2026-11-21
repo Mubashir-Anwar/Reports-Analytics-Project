@@ -395,3 +395,19 @@ table.data tr.failed td { color: var(--danger); }
 @media (max-width: 760px) { .side-resizer { display: none; } }
 .notice.warn .btn { background: #fff; color: #92400e; border: 1px solid #f59e0b; }
 @media (max-width: 760px) { .card code, .notice code, .muted code { overflow-wrap: anywhere; } }
+
+/* Schedule → Send file: SFTP, API and network folder targets */
+.delivery-card { border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; display: grid; gap: 4px; }
+.delivery-card.off { opacity: .6; }
+.delivery-card .params { margin: 6px 0; }
+.delivery-card .field.wide, .delivery-card .check.wide { grid-column: 1 / -1; }
+.delivery-card textarea { font-family: ui-monospace, Consolas, monospace; font-size: 12px; }
+.delivery-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.delivery-test { align-items: center; gap: 10px; flex-wrap: wrap; }
+.delivery-add { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 10px; }
+.delivery-kind { display: grid; gap: 4px; text-align: left; padding: 12px; border: 1px dashed var(--line-strong, var(--line)); border-radius: 12px; background: var(--panel); color: var(--text); cursor: pointer; font: inherit; }
+.delivery-kind:hover { border-color: var(--accent); background: var(--accent-soft); }
+.delivery-kind > span { font-size: 20px; }
+.delivery-kind small { color: var(--muted); font-size: 12px; }
+.header-row { gap: 6px; margin-bottom: 6px; }
+.header-row input { flex: 1; min-width: 0; }

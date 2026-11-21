@@ -16,3 +16,4 @@ duckdb>=1.4,<2.0  # analytics: datasets as Parquet files, queried in-process
 pdfplumber>=0.11,<1.0  # File → Import design: text, lines and pictures of a PDF / Illustrator page (+ pypdfium2)
 rapidocr>=3.4,<4.0  # Import design from a PNG/JPEG scan: reads its text (OCR, Apache-2.0)
 onnxruntime>=1.20,<2.0  # runs the OCR models of rapidocr
+paramiko>=3.4,<6.0  # schedules: send the report file to an SFTP server
