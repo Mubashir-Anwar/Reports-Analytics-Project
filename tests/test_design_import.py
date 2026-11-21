@@ -126,3 +126,20 @@ def test_imported_design_is_accepted_and_prints_the_field(mode):
     pdf = engine.render_design_pdf(cleaned, "Letter", ["CustomerName"], [{"CustomerName": "Ali Khan"}], {})
     text = "".join(p.extract_text() or "" for p in pdfplumber.open(io.BytesIO(pdf)).pages)
     assert "Dear Ali Khan," in text and "Acme Traders" in text
+
+
+def test_ocr_reads_the_text_of_a_picture():
+    pytest.importorskip("rapidocr")
+    from PIL import Image, ImageDraw, ImageFont
+    try:
+        font = ImageFont.truetype("arial.ttf", 60)
+    except OSError:
+        pytest.skip("no Arial font to draw the test picture")
+    image = Image.new("RGB", (1200, 600), "#fdf6e3")
+    ImageDraw.Draw(image).text((200, 250), "Muhammad Ali", font=font, fill="#000000")
+    buffer = io.BytesIO()
+    image.save(buffer, "PNG")
+    result = import_design(_data_url(buffer.getvalue(), "image/png"), "certificate.png")
+    text = next(e for e in result["elements"] if "Muhammad" in e["text"])
+    assert text["backColor"] == "#fdf6e3" and text["color"] in ("#000000", "#010101", "#020202")
+    assert abs(text["x"] - 200 * 842 / 1200) < 10 and 30 < text["fontSize"] < 52

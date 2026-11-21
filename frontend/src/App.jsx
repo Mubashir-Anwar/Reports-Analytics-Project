@@ -580,8 +580,8 @@ export default function App() {
       )}
       {tableId && <TableEditor state={state} dispatch={dispatch} elementId={tableId} onClose={() => setTableId(null)} onOpenDatasets={() => { setTableId(null); setQueryTab('datasets'); }} />}
       {queryTab && <DatasetQueryDialog state={state} dispatch={dispatch} notify={notify} refreshKey={refreshKey} initialTab={queryTab} onClose={() => setQueryTab(null)} />}
-      {importing && <ImportDesignDialog design={design} onApply={applyImport} onClose={() => setImporting(false)} />}
-      {templates && <TemplateGallery report={report} design={design} onApply={applyLayout} onClose={() => setTemplates(false)} />}
+      {importing && <ImportDesignDialog design={design} purpose={typeof importing === 'string' ? importing : ''} onApply={applyImport} onClose={() => setImporting(false)} />}
+      {templates && <TemplateGallery report={report} design={design} onApply={applyLayout} onClose={() => setTemplates(false)} onImportDesign={(what) => { setTemplates(false); setImporting(what || true); }} />}
       {wizard && <ComponentWizard wizard={wizard} report={report} design={design} bandWidth={bandWidth(design)} onCancel={() => setWizard(null)} onDone={finishWizard} />}
       {exprId && findElement(design, exprId) && (
         <ExpressionEditor element={findElement(design, exprId).element} report={report} design={design} onSave={saveExpression} onClose={() => setExprId(null)} onAddField={addField} />

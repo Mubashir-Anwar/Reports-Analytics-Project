@@ -45,7 +45,7 @@ export function designFromImport(result, previous) {
   };
 }
 
-export default function ImportDesignDialog({ design, onApply, onClose }) {
+export default function ImportDesignDialog({ design, purpose = '', onApply, onClose }) {
   const [file, setFile] = useState(null);
   const [mode, setMode] = useState('elements');
   const [textOnTop, setTextOnTop] = useState(true);
@@ -94,8 +94,8 @@ export default function ImportDesignDialog({ design, onApply, onClose }) {
   return (
     <div className="modal-back" onMouseDown={(e) => e.target === e.currentTarget && !busy && onClose()}>
       <div className="modal imp-dialog" role="dialog" aria-label="Import design">
-        <h3>Import design</h3>
-        <p className="muted">Give an existing letter, certificate or form. It is rebuilt on the page as it looks; then click any text and choose <b>Make it a field</b> to fill it from the data. Write <code>{'{{Name}}'}</code> in the file and it becomes the field <code>Name</code> by itself.</p>
+        <h3>{purpose ? `Import your ${purpose} design` : 'Import design'}</h3>
+        <p className="muted">Give {purpose ? `your existing ${purpose}` : 'an existing letter, certificate or form'}. It is rebuilt on the page as it looks; then click any text and choose <b>Make it a field</b> to fill it from the data. Write <code>{'{{Name}}'}</code> in the file and it becomes the field <code>Name</code> by itself.</p>
 
         <label className={`imp-drop ${file ? 'has-file' : ''}`}
           onDragOver={(e) => e.preventDefault()} onDrop={(e) => { e.preventDefault(); choose(e.dataTransfer.files?.[0]); }}>

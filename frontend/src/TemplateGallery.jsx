@@ -6,6 +6,8 @@ import { TEMPLATES, applyTemplate } from './templates.js';
 import { TABLE_OPTIONS } from './designModel.js';
 
 const REMEMBER = 'designer.tableOptions';
+/** Layouts people usually already have on paper: ask for their own design before the ready-made one. */
+const OWN_DESIGN = { letter: 'letter', certificate: 'certificate', form: 'form' };
 
 function rememberedOptions() {
   try { return { ...TABLE_OPTIONS, ...JSON.parse(window.localStorage.getItem(REMEMBER) || '{}') }; } catch { return { ...TABLE_OPTIONS }; }
@@ -75,9 +77,9 @@ function TablePreview({ o, columns, title, reportId }) {
   );
 }
 
-export default function TemplateGallery({ report, design, onApply, onClose }) {
+export default function TemplateGallery({ report, design, onApply, onClose, onImportDesign }) {
   const [chosen, setChosen] = useState('letter');
-  const [step, setStep] = useState('pick');            // 'pick' → (Table report) 'options'
+  const [step, setStep] = useState('pick');            // 'pick' → (Table report) 'options' | (Letter…) 'own'
   const [options, setOptions] = useState(rememberedOptions);
   const template = TEMPLATES.find((t) => t.id === chosen);
   const hasContent = Object.values(design.bands).some((band) => band?.elements?.length)
@@ -89,12 +91,40 @@ export default function TemplateGallery({ report, design, onApply, onClose }) {
     const picked = TEMPLATES.find((t) => t.id === id);
     if (picked.needsFields && !report.columns.length) return;
     if (picked.hasOptions && !fromOptions) { setChosen(id); setStep('options'); return; }  // ask how it should look first
+    if (OWN_DESIGN[id] && onImportDesign && !fromOptions) { setChosen(id); setStep('own'); return; }  // their own design first?
     if (hasContent && !window.confirm('Replace the current design with this template? (Ctrl+Z undoes it)')) return;
     if (picked.hasOptions) {
       try { window.localStorage.setItem(REMEMBER, JSON.stringify(options)); } catch { /* not kept: fine */ }
     }
     onApply(applyTemplate(id, report.columns, report.title, design, { ...options, reportId: report.id }), picked.name);
   };
+
+  if (step === 'own') {
+    const what = OWN_DESIGN[chosen];
+    return (
+      <div className="modal-back" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
+        <div className="modal template-modal own-design" role="dialog" aria-label={`Your own ${what} design`}>
+          <h3>Do you already have a design for this {what}?</h3>
+          <p className="muted">If your {what} already exists — as a PDF, Word file, Illustrator file, or even a scan or photo — it can be rebuilt here exactly as it looks. Then you choose which texts are filled from the data (name, date, amount…).</p>
+          <div className="own-choices">
+            <button type="button" className="own-card primary" onClick={() => onImportDesign(what)}>
+              <b>Yes — use my own design</b>
+              <span>PDF · Word .docx · Illustrator .ai · PNG / JPEG scan. The text of a scan or photo is read with OCR.</span>
+            </button>
+            <button type="button" className="own-card" onClick={() => apply(chosen, true)}>
+              <Thumb id={chosen} />
+              <b>No — start from the ready-made {template.name}</b>
+              <span>{template.text}</span>
+            </button>
+          </div>
+          <div className="row">
+            <button className="btn" onClick={() => setStep('pick')}>← Other layouts</button>
+            <button className="btn" onClick={onClose}>Cancel</button>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   if (step === 'options') {
     return (
@@ -162,10 +192,15 @@ export default function TemplateGallery({ report, design, onApply, onClose }) {
             </li>
           ))}
         </ul>
+        {onImportDesign && (
+          <button type="button" className="own-banner" onClick={() => onImportDesign('')}>
+            <b>Have your own design?</b> Import a PDF, Word, Illustrator file or a scan and it is rebuilt here, ready for fields →
+          </button>
+        )}
         {missingFields && <p className="err">The table template needs the fields: Setup → Read fields first.</p>}
         <div className="row">
           <button className="btn" onClick={onClose}>Cancel</button>
-          <button className="btn primary" disabled={missingFields} onClick={() => apply()}>{template.hasOptions ? `Next: options for “${template.name}” →` : `Use “${template.name}”`}</button>
+          <button className="btn primary" disabled={missingFields} onClick={() => apply()}>{template.hasOptions ? `Next: options for “${template.name}” →` : OWN_DESIGN[chosen] && onImportDesign ? `Next: “${template.name}” →` : `Use “${template.name}”`}</button>
         </div>
       </div>
     </div>

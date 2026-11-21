@@ -434,7 +434,10 @@ _OCR: Any = None
 def _ocr_engine() -> Any:
     global _OCR
     if _OCR is None:
+        import logging
+
         from rapidocr import RapidOCR  # import inside: heavy, and optional
+        logging.getLogger("RapidOCR").setLevel(logging.WARNING)   # no INFO lines in the service log
         _OCR = RapidOCR()
     return _OCR
 
@@ -455,7 +458,7 @@ def _from_image(raw: bytes, text_on_top: bool, notes: list[str]) -> dict[str, An
         lines = _ocr_lines(image, notes)
         scale = width / px_w
         for text, (x0, top, x1, bottom) in lines:
-            size = max(5.0, (bottom - top) * scale / 1.25)
+            size = max(5.0, (bottom - top) * scale / 1.2)    # an OCR box is about 1.1–1.3 × the font size
             block = {"text": text, "x0": x0 * scale, "x1": x1 * scale, "top": top * scale, "bottom": bottom * scale,
                      "size": size, "style": (None, round(size, 1), None), "gaps": [], "ocr": True}
             element = _text_element(block, image, width)
