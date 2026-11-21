@@ -667,6 +667,13 @@ const PALETTE_HELP = {
   currentDate: 'Today’s date',
   currentTime: 'The time the report was run',
   percentage: 'A field as a percentage of its report total',
+  labelValue: 'A label and a field in one line, e.g. “Name: Ali Khan” — change Name to your field',
+  boxedValue: 'A field in a box, like a filled-in form box',
+  fillLine: 'An empty line to write on by hand',
+  tickBox: 'A small empty square to tick by hand',
+  yesNo: 'Prints [X] Yes or [ ] No from a true/false field — change Name to your field',
+  signature: 'A line with “Signature” under it',
+  sectionHeading: 'A dark bar with a heading, e.g. PERSONAL DETAILS',
 };
 const PALETTE_KEY = 'reporting-designer-palette';
 

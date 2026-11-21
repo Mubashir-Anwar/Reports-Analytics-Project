@@ -1156,3 +1156,10 @@ kbd { font: 11.5px ui-monospace, monospace; background: var(--bg); border: 1px s
 .expr-examples button { border: 1px solid var(--line); background: var(--panel); color: var(--text); border-radius: 999px; padding: 1px 8px; cursor: pointer; font-size: 11px; }
 .expr-examples button:hover { border-color: var(--accent); color: var(--accent); }
 .expr-examples > span { font-size: 11px; color: var(--muted); width: 100%; }
+
+/* Layout gallery: which field is which (Invoice, Statement) */
+.role-grid { display: grid; gap: 8px; margin: 10px 0; }
+.role-row { display: grid; grid-template-columns: minmax(0, 1fr) 220px; gap: 10px; align-items: center; padding: 8px 10px; border: 1px solid var(--line); border-radius: 10px; }
+.role-row > span { display: grid; gap: 2px; }
+.role-row small { color: var(--muted); font-size: 11.5px; }
+@media (max-width: 560px) { .role-row { grid-template-columns: 1fr; } }

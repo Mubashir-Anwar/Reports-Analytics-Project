@@ -2,12 +2,12 @@
 // The Table report asks how it should look first (title place, headings, borders, column widths, Excel), with a
 // small live preview; the answers are remembered for the next table.
 import { useState } from 'react';
-import { TEMPLATES, applyTemplate } from './templates.js';
+import { ROLES, TEMPLATES, applyTemplate, guessRoles } from './templates.js';
 import { TABLE_OPTIONS } from './designModel.js';
 
 const REMEMBER = 'designer.tableOptions';
 /** Layouts people usually already have on paper: ask for their own design before the ready-made one. */
-const OWN_DESIGN = { letter: 'letter', certificate: 'certificate', form: 'form' };
+const OWN_DESIGN = { letter: 'letter', certificate: 'certificate', form: 'form', invoice: 'invoice', challan: 'challan' };
 
 function rememberedOptions() {
   try { return { ...TABLE_OPTIONS, ...JSON.parse(window.localStorage.getItem(REMEMBER) || '{}') }; } catch { return { ...TABLE_OPTIONS }; }
@@ -16,7 +16,7 @@ function rememberedOptions() {
 /** Small drawings of each template. */
 function Thumb({ id }) {
   const line = (x, y, w, c = '#94a3b8', h = 3) => <rect x={x} y={y} width={w} height={h} rx="1" fill={c} />;
-  const portrait = id !== 'blank-landscape' && id !== 'certificate';
+  const portrait = !['blank-landscape', 'certificate', 'challan'].includes(id);
   return (
     <svg viewBox={portrait ? '0 0 60 80' : '0 0 80 60'} className="tpl-thumb" aria-hidden="true">
       <rect x="0.5" y="0.5" width={portrait ? 59 : 79} height={portrait ? 79 : 59} rx="2" fill="#fff" stroke="#cbd5e1" />
@@ -25,6 +25,9 @@ function Thumb({ id }) {
       {id === 'letter' && <><rect x="6" y="6" width="14" height="7" fill="#bfdbfe" />{line(30, 7, 24, '#334155')}{line(6, 16, 48, '#e2e8f0', 1)}{line(38, 20, 16)}{line(6, 24, 20, '#334155')}{line(6, 28, 16)}{[34, 38, 42, 46, 50].map((y) => <g key={y}>{line(6, y, 48, '#cbd5e1', 2)}</g>)}{line(6, 66, 16, '#334155', 1)}</>}
       {id === 'table' && <>{line(6, 6, 34, '#334155', 4)}{line(6, 16, 48, '#93c5fd', 5)}{[24, 29, 34, 39, 44, 49, 54].map((y) => <g key={y}>{line(6, y, 48, '#e2e8f0', 3)}</g>)}</>}
       {id === 'form' && <>{line(6, 6, 30, '#334155', 4)}{[16, 22, 28, 34, 46, 52, 58, 64].map((y) => <g key={y}>{line(6, y, 14, '#cbd5e1')}{line(23, y, 31)}</g>)}{line(6, 41, 48, '#e2e8f0', 1)}</>}
+      {id === 'invoice' && <><rect x="6" y="5" width="12" height="6" fill="#bfdbfe" />{line(34, 6, 20, '#334155')}{line(6, 15, 18, '#1e3a8a', 4)}{line(38, 15, 16)}{line(6, 22, 22, '#334155')}{line(6, 29, 48, '#cbd5e1', 4)}{[35, 40, 45, 50].map((y) => <g key={y}>{line(6, y, 30, '#e2e8f0', 2)}{line(44, y, 10, '#e2e8f0', 2)}</g>)}{line(36, 57, 18, '#334155', 4)}{line(38, 70, 16, '#334155', 1)}</>}
+      {id === 'challan' && <>{[3, 29, 55].map((x) => <g key={x}><rect x={x} y="4" width="22" height="52" fill="none" stroke="#334155" strokeWidth="0.6" />{line(x + 3, 8, 16, '#334155', 2)}{line(x + 3, 13, 16, '#334155', 3)}{[20, 25, 30, 35].map((y) => <g key={y}>{line(x + 3, y, 6, '#cbd5e1', 2)}{line(x + 10, y, 9, '#94a3b8', 2)}</g>)}{line(x + 3, 42, 16, '#e2e8f0', 4)}</g>)}</>}
+      {id === 'statement' && <>{line(6, 6, 30, '#334155', 4)}<rect x="6" y="14" width="48" height="9" fill="#f8fafc" stroke="#cbd5e1" strokeWidth="0.5" />{line(9, 17, 20, '#334155', 3)}{line(6, 27, 48, '#e2e8f0', 4)}{[34, 39, 44, 49, 54].map((y) => <g key={y}>{line(6, y, 8, '#e2e8f0', 2)}{line(16, y, 20, '#e2e8f0', 2)}{line(44, y, 10, '#94a3b8', 2)}</g>)}{line(36, 62, 18, '#334155', 4)}</>}
       {id === 'certificate' && <><rect x="3" y="3" width="74" height="54" fill="none" stroke="#1e3a8a" strokeWidth="1.5" />{line(18, 11, 44, '#1e3a8a', 4)}{line(28, 21, 24, '#94a3b8', 2)}{line(20, 27, 40, '#334155', 5)}{line(22, 36, 36, '#cbd5e1', 2)}{line(10, 48, 18, '#334155', 1)}{line(52, 48, 18, '#334155', 1)}</>}
     </svg>
   );
@@ -81,6 +84,7 @@ export default function TemplateGallery({ report, design, onApply, onClose, onIm
   const [chosen, setChosen] = useState('letter');
   const [step, setStep] = useState('pick');            // 'pick' → (Table report) 'options' | (Letter…) 'own'
   const [options, setOptions] = useState(rememberedOptions);
+  const [roles, setRoles] = useState({});             // Invoice / Statement: which field is the invoice number, amount…
   const template = TEMPLATES.find((t) => t.id === chosen);
   const hasContent = Object.values(design.bands).some((band) => band?.elements?.length)
     || Object.values(design.bands.groupHeaders || {}).some((b) => b.elements.length);
@@ -91,13 +95,44 @@ export default function TemplateGallery({ report, design, onApply, onClose, onIm
     const picked = TEMPLATES.find((t) => t.id === id);
     if (picked.needsFields && !report.columns.length) return;
     if (picked.hasOptions && !fromOptions) { setChosen(id); setStep('options'); return; }  // ask how it should look first
+    if (picked.hasRoles && report.columns.length && !fromOptions) { setChosen(id); setRoles(guessRoles(id, report.columns)); setStep('roles'); return; }
     if (OWN_DESIGN[id] && onImportDesign && !fromOptions) { setChosen(id); setStep('own'); return; }  // their own design first?
     if (hasContent && !window.confirm('Replace the current design with this template? (Ctrl+Z undoes it)')) return;
     if (picked.hasOptions) {
       try { window.localStorage.setItem(REMEMBER, JSON.stringify(options)); } catch { /* not kept: fine */ }
     }
-    onApply(applyTemplate(id, report.columns, report.title, design, { ...options, reportId: report.id }), picked.name);
+    onApply(applyTemplate(id, report.columns, report.title, design, { ...options, reportId: report.id, ...(picked.hasRoles ? { roles } : {}) }), picked.name);
   };
+
+  if (step === 'roles') {
+    const list = ROLES[chosen];
+    const missing = list.filter(([key]) => !roles[key]);
+    return (
+      <div className="modal-back" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
+        <div className="modal template-modal" role="dialog" aria-label={`${template.name}: which field is which`}>
+          <h3>{template.name} — which field is which?</h3>
+          <p className="muted">Guessed from the field names; change any that are wrong. Leave one empty and a placeholder is put there for you to change later.</p>
+          <div className="role-grid">
+            {list.map(([key, label, , hint]) => (
+              <label key={key} className="role-row">
+                <span><b>{label}</b>{hint && <small>{hint}</small>}</span>
+                <select value={roles[key] || ''} onChange={(e) => setRoles((r) => ({ ...r, [key]: e.target.value }))}>
+                  <option value="">— none (placeholder) —</option>
+                  {report.columns.map((c) => <option key={c} value={c}>{c}</option>)}
+                </select>
+              </label>
+            ))}
+          </div>
+          {missing.length > 0 && <p className="muted small">Not chosen: {missing.map(([, label]) => label).join(', ')}.</p>}
+          <div className="row">
+            <button className="btn" onClick={() => setStep('pick')}>← Other layouts</button>
+            <button className="btn" onClick={onClose}>Cancel</button>
+            <button className="btn primary" onClick={() => apply(chosen, true)}>Create the {template.name.toLowerCase()}</button>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   if (step === 'own') {
     const what = OWN_DESIGN[chosen];
@@ -200,7 +235,7 @@ export default function TemplateGallery({ report, design, onApply, onClose, onIm
         {missingFields && <p className="err">The table template needs the fields: Setup → Read fields first.</p>}
         <div className="row">
           <button className="btn" onClick={onClose}>Cancel</button>
-          <button className="btn primary" disabled={missingFields} onClick={() => apply()}>{template.hasOptions ? `Next: options for “${template.name}” →` : OWN_DESIGN[chosen] && onImportDesign ? `Next: “${template.name}” →` : `Use “${template.name}”`}</button>
+          <button className="btn primary" disabled={missingFields} onClick={() => apply()}>{template.hasOptions ? `Next: options for “${template.name}” →` : template.hasRoles && report.columns.length ? `Next: choose the fields →` : OWN_DESIGN[chosen] && onImportDesign ? `Next: “${template.name}” →` : `Use “${template.name}”`}</button>
         </div>
       </div>
     </div>

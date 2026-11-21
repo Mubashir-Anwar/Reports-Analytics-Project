@@ -77,6 +77,13 @@ export const PALETTE_GROUPS = [
       ['currentDate', '📅', 'Current Date'], ['currentTime', '🕒', 'Time'], ['percentage', '%', 'Percentage'],
     ],
   },
+  {
+    title: 'Form Elements',
+    items: [
+      ['labelValue', '≔', 'Label : value'], ['boxedValue', '▢', 'Boxed value'], ['fillLine', '＿', 'Fill-in line'],
+      ['tickBox', '☐', 'Tick box'], ['yesNo', '☑', 'Yes / No'], ['signature', '✍', 'Signature line'], ['sectionHeading', '▬', 'Section heading'],
+    ],
+  },
 ];
 export const PALETTE_LABELS = Object.fromEntries(PALETTE_GROUPS.flatMap((g) => g.items.map(([type, , label]) => [type, label])));
 
@@ -462,6 +469,14 @@ export function defaultElement(type, x = 0, y = 0) {
     case 'currentDate': return { ...base, type: 'textField', width: 100, expression: '$V{CURRENT_DATE}', pattern: 'dd/MM/yyyy', blankWhenNull: true };
     case 'currentTime': return { ...base, type: 'textField', width: 80, expression: '=new java.util.Date()', pattern: 'HH:mm', blankWhenNull: true };
     case 'percentage': return { ...base, type: 'percentage', width: 80 }; // replaced by a Text Field once a field is chosen
+    // form elements: ready-made pieces for forms, challans and applications (change the field name after placing)
+    case 'labelValue': return { ...base, type: 'textField', width: 240, height: 16, expression: 'Name: $F{Name}', pattern: '', blankWhenNull: true };
+    case 'boxedValue': return { ...base, type: 'textField', width: 160, height: 20, expression: '$F{Name}', pattern: '', blankWhenNull: true, vAlign: 'middle', borderWidth: 1, borderColor: '#334155' };
+    case 'fillLine': return { ...base, type: 'staticText', width: 200, height: 18, text: '', borders: { top: 0, right: 0, bottom: 1, left: 0 } };
+    case 'tickBox': return { ...base, type: 'rectangle', width: 10, height: 10, backColor: '#ffffff', borderColor: '#334155', borderWidth: 1 };
+    case 'yesNo': return { ...base, type: 'textField', width: 90, height: 16, expression: '=$F{Name} ? "[X] Yes" : "[ ] No"', pattern: '', blankWhenNull: true };
+    case 'signature': return { ...base, type: 'staticText', width: 160, height: 16, text: 'Signature', align: 'center', fontSize: 9, borders: { top: 1, right: 0, bottom: 0, left: 0 } };
+    case 'sectionHeading': return { ...base, type: 'staticText', width: 300, height: 20, text: 'SECTION', bold: true, color: '#ffffff', backColor: '#334155', vAlign: 'middle', fontSize: 10 };
     default: return base;
   }
 }

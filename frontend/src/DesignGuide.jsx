@@ -28,7 +28,7 @@ export function DesignStart({ report, dispatch, onTemplates, onImportDesign, onS
       : { icon: '▤', title: 'A list of records', text: 'First choose the data in Setup; then this makes the columns for you.', example: 'Opens Setup → choose a data adapter and a query', run: onSetup },
     { icon: '✉', title: 'A letter or form', text: 'Letterhead, date, address, body and signature — one per record.', example: 'e.g. offer letter, fee challan, profile sheet', run: () => apply('letter', 'Letter') },
     { icon: '⤓', title: 'Use my own design', text: 'Upload a PDF, Word or image of your page; it is rebuilt here and you mark the fields.', example: 'e.g. the bank’s statement format', run: onImportDesign },
-    { icon: '▦', title: 'More layouts…', text: 'Form, certificate, landscape and other ready pages.', example: 'All layouts with a picture of each', run: onTemplates },
+    { icon: '▦', title: 'Invoice, challan, statement…', text: 'Invoice, fee challan (3 copies), account statement, form, certificate and more.', example: 'All layouts with a picture of each', run: onTemplates },
     { icon: '▭', title: 'Blank page', text: 'Title, Detail and Page Footer only. Design everything yourself.', example: 'Drag elements from the Palette', run: () => apply('blank', 'Blank A4') },
   ];
   return (
