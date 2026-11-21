@@ -78,6 +78,8 @@ export const api = {
   deleteConnection: (id) => request(`/api/admin/connections/${encodeURIComponent(id)}`, { method: 'DELETE' }),
   /** A .jrxml and the pictures it uses ({ 'logo.png': dataURL }): image elements get the matching file. */
   importJrxml: (xml, resources = {}) => request('/api/admin/jrxml/import', { method: 'POST', body: { xml, resources } }),
+  /** An existing design (PDF, .ai, Word, PNG/JPEG as a data URL) → { page, background, elements, fields, notes, pageCount }. */
+  importDesign: (file, name, mode, page, textOnTop) => request('/api/admin/designer/import-design', { method: 'POST', body: { file, name, mode, page, textOnTop } }),
   /** SQL "Read fields": the result columns from the database (LIMIT 0, no rows read). */
   queryFields: (connectionId, querySource) => request('/api/admin/query/fields', { method: 'POST', body: { connectionId, querySource } }),
   parseQuery: (language, source, parameters) =>

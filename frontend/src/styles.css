@@ -1069,3 +1069,24 @@ kbd { font: 11.5px ui-monospace, monospace; background: var(--bg); border: 1px s
   .fe-details table.grid tr { display: grid; grid-template-columns: 1fr 1fr; gap: 4px; padding: 6px 0; border-bottom: 1px solid var(--line); }
   .fe-sample { max-width: none; }
 }
+
+/* File → Import design */
+.imp-dialog { width: min(620px, calc(100vw - 32px)); display: grid; gap: 10px; }
+.imp-dialog h3 { margin: 0; }
+.imp-dialog p { margin: 0; font-size: 13px; }
+.imp-drop { display: grid; gap: 4px; place-items: center; text-align: center; padding: 22px 12px; border: 2px dashed var(--line); border-radius: 10px; cursor: pointer; background: var(--panel); }
+.imp-drop:hover, .imp-drop.has-file { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 6%, var(--panel)); }
+.imp-drop span { font-size: 12px; color: var(--muted); }
+.imp-modes { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.imp-modes label { display: grid; grid-template-columns: auto 1fr; gap: 2px 8px; padding: 10px; border: 1px solid var(--line); border-radius: 8px; cursor: pointer; }
+.imp-modes label.on { border-color: var(--accent); background: var(--accent-soft); }
+.imp-modes input { grid-row: span 2; margin-top: 3px; }
+.imp-modes span { font-size: 12px; color: var(--muted); }
+.imp-info { font-size: 12px; color: var(--muted); }
+.imp-check, .imp-page { display: flex; align-items: center; gap: 8px; font-size: 13px; }
+.imp-page input { width: 70px; }
+.imp-error { border: 1px solid #ef4444; background: color-mix(in srgb, #ef4444 10%, transparent); border-radius: 8px; padding: 8px 10px; font-size: 13px; }
+.imp-result { display: grid; gap: 4px; border: 1px solid color-mix(in srgb, var(--ok, #16a34a) 50%, var(--line)); background: color-mix(in srgb, var(--ok, #16a34a) 8%, transparent); border-radius: 8px; padding: 10px; font-size: 13px; }
+.imp-result code { margin-right: 4px; }
+.imp-result ul { margin: 2px 0 0; padding-left: 18px; font-size: 12px; }
+@media (max-width: 640px) { .imp-modes { grid-template-columns: 1fr; } }

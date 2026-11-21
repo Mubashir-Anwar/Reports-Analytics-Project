@@ -309,6 +309,30 @@ export function makeActions({ get, dispatch, notify, ui = { current: {} } }) {
   /* ---------- placing things in bands ---------- */
   const presentBands = () => bandKeys(get().design).filter((key) => bandPresent(getBand(get().design, key)));
   /** Run an operation that returns { design, id } on the current design, then select the new element. */
+  /** Imported design: a Static Text (e.g. "Muhammad Ali") becomes a Text Field of a field, same place and style. */
+  const makeField = (id) => {
+    const { report, design } = get();
+    const found = findElement(design, id);
+    if (!found || found.element.type !== 'staticText') return;
+    const known = fieldNames();
+    const sample = String(found.element.text || '').trim().slice(0, 40);
+    const typed = window.prompt(`Which field fills “${sample}”?${known.length ? `\nFields: ${known.slice(0, 30).join(', ')}` : ''}\nA new name is added to Setup → Fields.`, known[0] || 'Name');
+    const name = String(typed || '').trim().replace(/^\$F\{(.*)\}$/, '$1');
+    if (!name) return;
+    if (!/^[A-Za-z_][\w.]{0,79}$/.test(name)) { notify(`“${name}” is not a field name: letters, numbers, _ and . only`, 'error'); return; }
+    design$((d) => mapElements(d, (el) => {
+      if (el.id !== id) return el;
+      const { text, ...rest } = el;
+      void text;
+      return { ...rest, type: 'textField', expression: `$F{${name}}`, pattern: '', blankWhenNull: true, stretch: false };
+    }));
+    if (!report.columns.includes(name) && !design.calculatedFields.some((c) => c.name === name)) {
+      dispatch({ type: 'REPORT', patch: { columns: [...report.columns, name] } });
+    }
+    select({ kind: 'element', id });
+    notify(`“${sample}” now shows $F{${name}}`, 'ok');
+  };
+
   const withNewElement = (operation) => {
     const result = operation(get().design);
     if (!result.id) return;
@@ -435,6 +459,7 @@ export function makeActions({ get, dispatch, notify, ui = { current: {} } }) {
     return [
       { header: `${found.element.type} in ${bandLabel(bandKey)}` },
       { label: 'Properties', icon: '⚙', onClick: () => select({ kind: 'element', id }) },
+      ...(found.element.type === 'staticText' ? [{ label: 'Make it a field…', icon: '$F', onClick: () => makeField(id) }] : []),
       ...clipboardItems,
       '-',
       ...selectItems,
@@ -504,7 +529,7 @@ export function makeActions({ get, dispatch, notify, ui = { current: {} } }) {
   ];
 
   return {
-    rename, deleteSelection, createBandAt, createGroup, createParameter, createVariable, createCalc,
+    makeField, rename, deleteSelection, createBandAt, createGroup, createParameter, createVariable, createCalc,
     align, distribute, matchSize, nudge, order, toggleLock, patchSelected, copy, cut, paste, duplicateSelected, selectAll, removeSelected,
     selectColumn, selectSimilar, setBorders, toggleHidden, toggleStretch, matchFormat,
     reportMenu, bandMenu, elementMenu, parametersMenu, parameterMenu, fieldsMenu, fieldMenu,

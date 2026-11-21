@@ -19,6 +19,7 @@ const P = {
   publish: 'M7 18a5 5 0 0 1-.6-9.96A6 6 0 0 1 18 8a4.5 4.5 0 0 1 0 9M12 12v9M9 15l3-3 3 3',
   demo: 'M12 3l1.8 4.7L18.5 9.5 13.8 11.3 12 16l-1.8-4.7L5.5 9.5l4.7-1.8zM19 15l.8 2.2L22 18l-2.2.8L19 21l-.8-2.2L16 18l2.2-.8z',
   layouts: 'M4 4h16v6H4zM4 14h7v6H4zM15 14h5v6h-5z',
+  importDesign: 'M4 3h10l4 4v5M14 3v4h4M4 3v18h7M8 9h5M8 13h3M16 15v7M13 19l3 3 3-3',
   paste: 'M9 4h6v3H9zM8 5H6a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2h-2M9 13h6M9 17h4',
   cut: 'M6 7a3 3 0 1 0 0 .01M6 17a3 3 0 1 0 0 .01M8.5 8.5 20 20M8.5 15.5 20 4',
   copy: 'M9 9h11v11H9zM5 15H4V4h11v1',
@@ -158,7 +159,7 @@ function readPrefs() {
  */
 export default function Ribbon({
   state, dispatch, actions, zoom, setZoom, prefs, setPrefs, view, setView, drawer, setDrawer, panels, setPanels, hasClipboard,
-  onNew, onOpenFile, onSave, onSaveFile, onPublish, onDemo, onTemplates, onQuery, onAdapters, onResetLayout, panelSide, onEditExpression, onGo,
+  onNew, onOpenFile, onImportDesign, onSave, onSaveFile, onPublish, onDemo, onTemplates, onQuery, onAdapters, onResetLayout, panelSide, onEditExpression, onGo,
 }) {
   const [ui, setUi] = useState(readPrefs);
   const [dialog, setDialog] = useState(null);
@@ -245,6 +246,7 @@ export default function Ribbon({
         </Group>
         <Group label="Start from">
           <Big icon="layouts" label="Layouts" title="Apply a layout template (blank page, letter, table, form, certificate)" onClick={onTemplates} />
+          <Big icon="importDesign" label="Import design" title="Rebuild an existing design — PDF, Illustrator .ai, Word, or a PNG/JPEG scan — as this report's layout, then turn its text into fields" onClick={onImportDesign} />
           <Big icon="demo" label="Demo design" title="A demo design with sample fields" onClick={onDemo} />
         </Group>
       </>

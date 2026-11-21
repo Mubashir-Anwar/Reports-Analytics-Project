@@ -107,6 +107,22 @@ def register(app: FastAPI, ctx: SimpleNamespace) -> None:
         except ValueError as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from None
 
+    @app.post("/api/admin/designer/import-design")
+    async def admin_import_design(request: Request) -> dict[str, Any]:
+        """An existing design (PDF, Illustrator .ai, Word, PNG/JPEG) → page size, background picture and elements.
+        Body: {file: data URL, name, mode: "elements" | "picture", page: 1, textOnTop: true}. Nothing is saved."""
+        require_admin(request, "designer")
+        payload = await json_body(request)
+        from starlette.concurrency import run_in_threadpool
+
+        from backend.app.importers import design_import
+        try:
+            return await run_in_threadpool(
+                design_import.import_design, payload.get("file"), str(payload.get("name") or "")[:200],
+                str(payload.get("mode") or ""), int(payload.get("page") or 1), payload.get("textOnTop", True) is not False)
+        except (ValueError, TypeError) as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from None
+
     @app.post("/api/admin/designer/validate")
     async def admin_designer_validate(request: Request) -> dict[str, Any]:
         """Check a report definition (Source tab → Apply) like the server will when it saves or runs it.

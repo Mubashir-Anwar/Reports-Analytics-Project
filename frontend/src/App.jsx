@@ -19,6 +19,7 @@ import NavBar from './shared/NavBar.jsx';
 import Ribbon from './Ribbon.jsx';
 import './ribbon.css';
 import TemplateGallery from './TemplateGallery.jsx';
+import ImportDesignDialog from './ImportDesignDialog.jsx';
 import { AdaptersPanel, Outline, Palette, ServerPanel, WorkspacePanel } from './panels.jsx';
 import { DockSide, FloatingPanel, floatDropProps, useDockLayout, useNarrow } from './DockLayout.jsx';
 import { ZOOM_LIMITS, bandWidth, clampZoom, emptyDesign, findElement, getBand, setBand } from './designModel.js';
@@ -97,6 +98,7 @@ export default function App() {
   const actions = useMemo(() => makeActions({ get: () => stateRef.current, dispatch, notify, ui: uiRef }), [notify]);
   const [queryTab, setQueryTab] = useState(null); // Dataset and Query dialog: null = closed, else its tab
   const [templates, setTemplates] = useState(false);
+  const [importing, setImporting] = useState(false);
   const [menu, setMenu] = useState(null);
   const openMenu = useCallback((event, items) => setMenu({ x: event.clientX, y: event.clientY, items }), []);
   const closeMenu = useCallback(() => setMenu(null), []);
@@ -156,6 +158,16 @@ export default function App() {
     setTemplates(false);
     setTab('design');
     notify(`Layout “${name}” applied — change anything on the canvas (Ctrl+Z undoes it)`, 'ok');
+  };
+  /** Import design: the rebuilt page replaces the layout; the fields found in it ({{Name}}…) join the report's fields. */
+  const applyImport = (next, fields, name) => {
+    dispatch({ type: 'DESIGN', update: () => next });
+    const missing = fields.filter((f) => !state.report.columns.includes(f));
+    if (missing.length) dispatch({ type: 'REPORT', patch: { columns: [...state.report.columns, ...missing] } });
+    dispatch({ type: 'SELECT', selection: { kind: 'report' } });
+    setImporting(false);
+    setTab('design');
+    notify(`Imported ${name} — click a text and choose “Make it a field” to fill it from the data (Ctrl+Z undoes the import)`, 'ok');
   };
   const editExpression = useCallback((id) => { dispatch({ type: 'SELECT', selection: { kind: 'element', id } }); setExprId(id); }, []);
   const saveExpression = (values) => {
@@ -518,7 +530,7 @@ export default function App() {
         view={tab} setView={setTab} drawer={drawer} setDrawer={setDrawer} panels={panels} setPanels={setPanels}
         hasClipboard={Boolean(readClipboard()?.items?.length)}
         onNew={() => newReport(state.report.folder)} onOpenFile={openFile} onSave={save} onSaveFile={saveFile} onPublish={startPublish}
-        onDemo={loadDemo} onTemplates={() => setTemplates(true)} onQuery={(which) => setQueryTab(which || 'query')}
+        onDemo={loadDemo} onTemplates={() => setTemplates(true)} onImportDesign={() => setImporting(true)} onQuery={(which) => setQueryTab(which || 'query')}
         onAdapters={() => { setLeftTab('adapters'); setPanels((p) => ({ ...p, explorer: true })); setDrawer('left'); }}
         onResetLayout={() => { dock.reset(); setPanels({ explorer: true, outline: true, palette: true, properties: true }); }}
         panelSide={dock.sideOf} onEditExpression={editExpression} onGo={goToProblem}
@@ -568,6 +580,7 @@ export default function App() {
       )}
       {tableId && <TableEditor state={state} dispatch={dispatch} elementId={tableId} onClose={() => setTableId(null)} onOpenDatasets={() => { setTableId(null); setQueryTab('datasets'); }} />}
       {queryTab && <DatasetQueryDialog state={state} dispatch={dispatch} notify={notify} refreshKey={refreshKey} initialTab={queryTab} onClose={() => setQueryTab(null)} />}
+      {importing && <ImportDesignDialog design={design} onApply={applyImport} onClose={() => setImporting(false)} />}
       {templates && <TemplateGallery report={report} design={design} onApply={applyLayout} onClose={() => setTemplates(false)} />}
       {wizard && <ComponentWizard wizard={wizard} report={report} design={design} bandWidth={bandWidth(design)} onCancel={() => setWizard(null)} onDone={finishWizard} />}
       {exprId && findElement(design, exprId) && (

@@ -322,6 +322,7 @@ export default function Properties({ state, dispatch, notify, actions, onEditExp
         {tab === 'specific' && element.type === 'staticText' && (
           <>
             <Row label="Text"><span className="expr-row"><textarea rows={4} value={element.text} onChange={(e) => patch({ text: e.target.value })} /><button type="button" className="btn sm" title="Open the editor (or double-click the element)" onClick={() => onEditExpression(element.id)}>…</button></span></Row>
+            {actions?.makeField && <Row label=""><button type="button" className="btn sm" title="This text is filled from the data instead: it becomes a Text Field of a field, same place and style" onClick={() => actions.makeField(element.id)}>$F Make it a field…</button></Row>}
             <TextFormat element={element} patch={patch} />
           </>
         )}
