@@ -25,6 +25,7 @@ from backend.app.constants import (
     SIGNED_LINK_KEYS,
 )
 from backend.app.expressions import jexpr
+from backend.app.jobs.schedule import RELATIVE_RE, resolve_relative
 from backend.app.logs import LOG
 from backend.app.queries.mongo_query import (
     _date_boundary,
@@ -55,6 +56,12 @@ class ParameterSpec:
     expression: str = ""
     # CNIC, account number…: the run log stores the value masked (12****89).
     sensitive: bool = False
+    # Checks on the value: smallest / largest (numbers and dates; a date may be relative like {today}),
+    # and for text a regular expression the whole value must match, with the message the user sees.
+    min_value: Any = None
+    max_value: Any = None
+    pattern: str = ""
+    pattern_message: str = ""
 
 
 @dataclass(frozen=True)
@@ -233,6 +240,7 @@ def _dynamic_report(payload: dict[str, Any], source_path: Path | None = None) ->
             for token_kind, _ref in designer_render.tokens_in(expression):
                 if token_kind != "P":
                     raise ValueError(f"The expression of {name} may use only $P{{...}} parameters")
+        rules = _parameter_rules(name, kind, raw)
         parameters.append(ParameterSpec(
             name=name,
             kind=kind,
@@ -245,7 +253,13 @@ def _dynamic_report(payload: dict[str, Any], source_path: Path | None = None) ->
             prompt=prompt,
             expression=expression[:2000] if not prompt else "",
             sensitive=raw.get("sensitive") is True,
+            **rules,
         ))
+        if prompt and raw.get("default") not in (None, ""):
+            try:
+                parse_scalar(parameters[-1], str(resolve_default(parameters[-1])))
+            except ValueError as exc:
+                raise ValueError(f"The default value of {name} is not valid: {exc}") from None
 
     parameters = _order_computed(parameters)
 
@@ -465,6 +479,7 @@ def _dynamic_report(payload: dict[str, Any], source_path: Path | None = None) ->
                 "maxLength": item.max_length,
                 **({"prompt": False, "expression": item.expression} if not item.prompt else {}),
                 **({"sensitive": True} if item.sensitive else {}),
+                **parameter_rules_payload(item),
             }
             for item in parameters
         ],
@@ -527,12 +542,84 @@ def discover_reports() -> ReportRegistry:
     return registry
 
 
+def _bound(name: str, kind: str, which: str, value: Any) -> Any:
+    """A min / max as stored: a number for integer/number, an ISO date or a relative date ({today-7}) for dates."""
+    if value in (None, ""):
+        return None
+    if kind in ("integer", "number"):
+        try:
+            number = float(value)
+        except (TypeError, ValueError):
+            raise ValueError(f"The {which} of {name} must be a number") from None
+        if not math.isfinite(number):
+            raise ValueError(f"The {which} of {name} must be a finite number")
+        return int(number) if kind == "integer" and number.is_integer() else number
+    if kind == "date":
+        text = str(value).strip()
+        if RELATIVE_RE.fullmatch(text):
+            return text
+        try:
+            return date.fromisoformat(text).isoformat()
+        except ValueError:
+            raise ValueError(f"The {which} of {name} must be a date (YYYY-MM-DD) or like {{today}}, {{monthStart}}, {{today-30}}") from None
+    raise ValueError(f"{name}: a {which} can only be set for numbers and dates")
+
+
+def _parameter_rules(name: str, kind: str, raw: dict[str, Any]) -> dict[str, Any]:
+    """min / max / pattern / patternMessage of one parameter, checked."""
+    min_value = _bound(name, kind, "minimum", raw.get("min"))
+    max_value = _bound(name, kind, "maximum", raw.get("max"))
+    if kind in ("integer", "number") and min_value is not None and max_value is not None and min_value > max_value:
+        raise ValueError(f"The minimum of {name} is larger than its maximum")
+    pattern = str(raw.get("pattern", "") or "").strip()
+    if pattern:
+        if kind != "string":
+            raise ValueError(f"{name}: a pattern can only be set for text parameters")
+        if len(pattern) > 200:
+            raise ValueError(f"The pattern of {name} is too long")
+        try:
+            re.compile(pattern)
+        except re.error as exc:
+            raise ValueError(f"The pattern of {name} is not a valid regular expression: {exc}") from None
+    message = str(raw.get("patternMessage", "") or "").strip()[:200]
+    return {"min_value": min_value, "max_value": max_value, "pattern": pattern, "pattern_message": message if pattern else ""}
+
+
+def parameter_rules_payload(spec: ParameterSpec) -> dict[str, Any]:
+    """The checks of a parameter for JSON (only the ones that are set)."""
+    return {
+        **({"min": spec.min_value} if spec.min_value is not None else {}),
+        **({"max": spec.max_value} if spec.max_value is not None else {}),
+        **({"pattern": spec.pattern} if spec.pattern else {}),
+        **({"patternMessage": spec.pattern_message} if spec.pattern_message else {}),
+    }
+
+
+def resolve_default(spec: ParameterSpec, today: date | None = None) -> Any:
+    """The default value to use now: a relative date ({today}, {monthStart}, {today-7}…) becomes a real date."""
+    if spec.kind == "date" and isinstance(spec.default, str):
+        return resolve_relative(spec.default, today or date.today())
+    return spec.default
+
+
+def run_form_rules(spec: ParameterSpec, today: date | None = None) -> dict[str, Any]:
+    """The checks for a run form, with relative date limits turned into real dates."""
+    rules = parameter_rules_payload(spec)
+    if spec.kind == "date":
+        for key in ("min", "max"):
+            if key in rules:
+                rules[key] = resolve_relative(rules[key], today or date.today())
+    return rules
+
+
 def parse_scalar(spec: ParameterSpec, raw: str) -> Any:
     if spec.kind == "date":
         try:
-            return date.fromisoformat(raw)
+            day = date.fromisoformat(raw)
         except ValueError:
             raise ValueError(f"{spec.name} must be in YYYY-MM-DD format") from None
+        _check_rules(spec, day)
+        return day
     if spec.kind == "integer":
         try:
             value: Any = int(raw)
@@ -557,7 +644,24 @@ def parse_scalar(spec: ParameterSpec, raw: str) -> Any:
             raise ValueError(f"{spec.name} is too long")
     if spec.allowed_values and value not in spec.allowed_values:
         raise ValueError(f"The value of {spec.name} is not in the allowed list")
+    _check_rules(spec, value)
     return value
+
+
+def _check_rules(spec: ParameterSpec, value: Any) -> None:
+    label = spec.label or spec.name
+    if spec.kind in ("integer", "number", "date"):
+        def bound(raw: Any) -> Any:
+            if raw is None:
+                return None
+            return date.fromisoformat(str(resolve_relative(raw, date.today()))) if spec.kind == "date" else raw
+        low, high = bound(spec.min_value), bound(spec.max_value)
+        if low is not None and value < low:
+            raise ValueError(f"{label} must be {low.isoformat()} or later" if spec.kind == "date" else f"{label} must be at least {low}")
+        if high is not None and value > high:
+            raise ValueError(f"{label} must be {high.isoformat()} or earlier" if spec.kind == "date" else f"{label} must be at most {high}")
+    if spec.pattern and isinstance(value, str) and value and not re.fullmatch(spec.pattern, value):
+        raise ValueError(spec.pattern_message or f"{label} is not in the right format")
 
 
 def validate_parameters(definition: ReportDefinition, query_pairs: list[tuple[str, str]]) -> tuple[dict[str, Any], dict[str, str]]:
@@ -581,7 +685,7 @@ def validate_parameters(definition: ReportDefinition, query_pairs: list[tuple[st
             if spec.required and spec.default is None:
                 raise ValueError(f"{key} is a required parameter")
             if spec.default is not None:
-                values[key] = parse_scalar(spec, str(spec.default))
+                values[key] = parse_scalar(spec, str(resolve_default(spec)))
             continue
         values[key] = parse_scalar(spec, raw[key])
     date_values = [

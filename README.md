@@ -21,8 +21,12 @@ logo in **Admin → Branding**.
 python -m venv .venv && . .venv/bin/activate        # Windows: .venv\Scripts\Activate.ps1
 pip install -r requirements-dev.txt
 cp .env.example .env                                  # every setting is documented in this file
-python -m uvicorn backend.app.main:app --reload --host 127.0.0.1 --port 8000
+python -m uvicorn backend.app.main:app --reload --reload-dir backend --host 127.0.0.1 --port 8000
 ```
+
+`--reload-dir backend` restarts the service only when its own code changes. Without it, `--reload` watches every
+`.py` file under the folder, including other copies of the project (git worktrees in `.claude/worktrees`), and a
+restart cuts off a Preview or Run that is in progress ("The reporting server is not answering").
 
 Open `http://127.0.0.1:8000/login`. The first time, sign in as `admin` with the admin token (from
 `REPORTING_ADMIN_TOKEN` or `data/private_secrets.json`), then create a super admin in **Admin → Users & rights**.

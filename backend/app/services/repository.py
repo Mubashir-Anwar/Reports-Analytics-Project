@@ -14,7 +14,7 @@ from fastapi import HTTPException
 
 from backend.app.connectors.profiles import load_connection_profiles
 from backend.app.constants import OUTPUT_FORMATS, REPORT_ID_PATTERN
-from backend.app.definitions import AmbiguousReport, ReportDefinition, _dynamic_report, clean_folder, discover_reports
+from backend.app.definitions import AmbiguousReport, ReportDefinition, _dynamic_report, clean_folder, discover_reports, resolve_default, run_form_rules
 from backend.app.logs import LOG
 from backend.app.security.permissions import MANAGE, RUN, load_rules, remove_rules_under
 from backend.app.security.users import role_at_least
@@ -289,7 +289,8 @@ def published_report_summaries(ctx: SimpleNamespace) -> list[dict[str, Any]]:
             "description": p.description,
             "type": p.kind,
             "required": p.required,
-            "default": p.default,
+            "default": resolve_default(p),
             "allowedValues": list(p.allowed_values),
+            **run_form_rules(p),
         } for p in item.parameters if p.prompt],  # computed parameters are never asked
     } for item in ctx.reports_by_id.values()]

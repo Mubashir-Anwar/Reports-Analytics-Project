@@ -2,18 +2,12 @@ import { useEffect, useState } from 'react';
 import { Notice, downloadBlob } from '../portal/Shell.jsx';
 import { serverApi } from './serverApi.js';
 import { optionalFilters } from '../errorHelp.js';
+import { startValue, valueProblem } from '../relativeDates.js';
 
-const today = () => new Date().toISOString().slice(0, 10);
 const FORMAT_LABELS = { pdf: 'PDF', xlsx: 'Excel (.xlsx)', csv: 'CSV' };
 const NUMBER_TYPES = ['int', 'integer', 'number', 'float', 'decimal', 'double', 'long'];
 
-function initialValue(parameter) {
-  if (parameter.default !== null && parameter.default !== undefined && parameter.default !== '') return String(parameter.default);
-  if (parameter.allowedValues?.length && parameter.required) return String(parameter.allowedValues[0]);
-  if (parameter.type === 'date') return today();
-  if (parameter.type === 'boolean') return 'true';
-  return '';
-}
+const initialValue = startValue;
 
 function ParameterInput({ parameter, value, onChange }) {
   if (parameter.allowedValues?.length) {
@@ -28,7 +22,9 @@ function ParameterInput({ parameter, value, onChange }) {
     return <select value={value} onChange={(e) => onChange(e.target.value)}><option value="true">Yes</option><option value="false">No</option></select>;
   }
   const type = parameter.type === 'date' ? 'date' : NUMBER_TYPES.includes(parameter.type) ? 'number' : 'text';
-  return <input type={type} value={value} onChange={(e) => onChange(e.target.value)} required={parameter.required} />;
+  return <input type={type} value={value} onChange={(e) => onChange(e.target.value)} required={parameter.required}
+    min={parameter.min ?? undefined} max={parameter.max ?? undefined} maxLength={type === 'text' ? parameter.maxLength : undefined}
+    placeholder={parameter.patternMessage ? parameter.patternMessage.replace(/^Type (the |a )?/i, '') : undefined} />;
 }
 
 /** Input controls + format + Run (JasperReports Server's "Run" view). */
@@ -85,6 +81,7 @@ export default function RunPanel({ report, onBackground }) {
               <span>{p.label || p.name}{p.required ? '' : ' (optional)'}</span>
               <ParameterInput parameter={p} value={values[p.name] ?? ''} onChange={(value) => setValues((v) => ({ ...v, [p.name]: value }))} />
               {p.description && <span className="hint">{p.description}</span>}
+              {values[p.name] && valueProblem(p, values[p.name]) && <span className="hint warn-text">{valueProblem(p, values[p.name])}</span>}
               {p.required && filters[p.name] && <span className="hint warn-text">Empty gives all records in this report, but it is marked Required — untick Required on the report's Parameters tab to leave it empty.</span>}
             </label>
           ))}

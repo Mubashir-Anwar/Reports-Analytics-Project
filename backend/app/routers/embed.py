@@ -25,7 +25,7 @@ from pymongo.errors import PyMongoError
 from backend.app.connectors.errors import ConnectorQueryError, MongoReadAccessError
 from backend.app.connectors.mongo_fallback import _row_value
 from backend.app.constants import OUTPUT_FORMATS
-from backend.app.definitions import _safe_value, clean_folder, validate_parameters
+from backend.app.definitions import _safe_value, clean_folder, resolve_default, run_form_rules, validate_parameters
 from backend.app.security import api_keys, embed_tokens
 from backend.app.security.headers import CSP
 
@@ -157,10 +157,11 @@ def register(app: FastAPI, ctx: SimpleNamespace) -> None:
         for spec in definition.parameters:
             if not spec.prompt:
                 continue
-            default = spec.default.isoformat() if isinstance(spec.default, date) else spec.default
+            default = resolve_default(spec)
+            default = default.isoformat() if isinstance(default, date) else default
             parameters.append({"name": spec.name, "type": spec.kind, "label": spec.label or spec.name, "description": spec.description,
                                "required": spec.required, "allowedValues": list(spec.allowed_values) or None,
-                               "locked": spec.name in fixed, "value": fixed.get(spec.name, default)})
+                               "locked": spec.name in fixed, "value": fixed.get(spec.name, default), **run_form_rules(spec)})
         return {"id": definition.report_id, "title": definition.title, "description": editor.get("description", ""),
                 "formats": editor.get("formats", sorted(OUTPUT_FORMATS)), "parameters": parameters,
                 "expiresAt": datetime.fromtimestamp(int(body["x"]), timezone.utc).isoformat(timespec="seconds")}

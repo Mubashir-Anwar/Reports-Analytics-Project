@@ -259,7 +259,7 @@ export function placeField(design, field) {
   const right = (key) => getBand(design, key).elements.reduce((r, el) => Math.max(r, el.x + el.width), 0);
   const x = Math.min(Math.max(right('detail'), right('columnHeader')), Math.max(0, bandWidth(design) - 100));
   const detail = addElementToBand(design, 'detail', 'textField', { expression: `$F{${field}}`, x, y: 1, width: 100, height: 16, fontSize: 9 });
-  const header = addElementToBand(detail.design, 'columnHeader', 'staticText', { text: field, x, y: 2, width: 100, height: 18, fontSize: 9, bold: true });
+  const header = addElementToBand(detail.design, 'columnHeader', 'staticText', { text: design.fieldFormats?.[field]?.label || field, x, y: 2, width: 100, height: 18, fontSize: 9, bold: true });
   return { design: header.design, id: detail.id };
 }
 
@@ -559,6 +559,7 @@ export function autoLayout(columns, labels = {}, title = 'Report', previous = em
   design.variables = previous.variables.filter((v) => !v.field || columns.includes(v.field));
   design.calculatedFields = previous.calculatedFields;
   design.functions = previous.functions || [];
+  if (previous.fieldFormats) design.fieldFormats = previous.fieldFormats;
   design.datasets = previous.datasets || [];
   return design;
 }

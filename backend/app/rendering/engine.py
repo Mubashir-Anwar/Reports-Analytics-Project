@@ -302,6 +302,9 @@ def _color(value: Any, name: str) -> str | None:
     return value
 
 
+FIELD_ONLY_RE = re.compile(r"\s*\$F\{([^{}]+)\}\s*")
+
+
 def tokens_in(expression: str) -> list[tuple[str, str]]:
     return TOKEN_RE.findall(expression or "")
 
@@ -351,6 +354,20 @@ def validate_design(design: Any, columns: list[str], parameter_names: set[str]) 
     except jexpr.JExprError as error:
         raise ValueError(str(error)) from None
     function_names = {f["name"] for f in functions}
+
+    # Setup → Fields: a label and a display format per field, used wherever the field is printed on its own ($F{X})
+    # and its text field has no Pattern of its own. {"Amount": {"label": "Amount (PKR)", "pattern": "#,##0.00"}}
+    raw_formats = design.get("fieldFormats") or {}
+    if not isinstance(raw_formats, dict):
+        raise ValueError("fieldFormats must be an object")
+    field_formats: dict[str, dict[str, str]] = {}
+    for name, info in list(raw_formats.items())[:2000]:
+        if not isinstance(info, dict):
+            continue
+        label = str(info.get("label", "") or "").strip()[:120]
+        pattern = str(info.get("pattern", "") or "").strip()[:60]
+        if label or pattern:
+            field_formats[str(name)[:200]] = {**({"label": label} if label else {}), **({"pattern": pattern} if pattern else {})}
 
     field_names = set(columns)
     calculated: list[dict[str, str]] = []
@@ -669,7 +686,7 @@ def validate_design(design: Any, columns: list[str], parameter_names: set[str]) 
 
     return {"version": 1, "page": page, "calculatedFields": calculated, "groups": groups,
             "variables": variables, "sort": sort_spec, "filterExpression": filter_expression, "datasets": datasets,
-            "bands": bands, "functions": functions}
+            "bands": bands, "functions": functions, "fieldFormats": field_formats}
 
 
 def _clean_datasets(raw: Any) -> list[dict[str, Any]]:
@@ -1090,6 +1107,11 @@ class _Render:
     def pattern_for(self, element: dict[str, Any], resolve) -> str:
         """The Pattern, or what the Pattern Expression gives for this record."""
         pattern = element.get("pattern", "")
+        if not pattern:
+            # A field printed on its own uses the format chosen for it in Setup → Fields.
+            only = FIELD_ONLY_RE.fullmatch(str(element.get("expression", "") or "").strip().lstrip("="))
+            if only:
+                pattern = (self.design.get("fieldFormats") or {}).get(only.group(1).strip(), {}).get("pattern", "")
         if element.get("patternExpression"):
             try:
                 dynamic = jexpr.evaluate(element["patternExpression"], resolve)

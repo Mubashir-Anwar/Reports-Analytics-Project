@@ -111,7 +111,7 @@ export const TEMPLATES = [
   { id: 'blank', name: 'Blank A4', text: 'An empty portrait page with Title, Detail and Page Footer. Design everything yourself.', needsFields: false, build: () => blank(A4) },
   { id: 'blank-landscape', name: 'Blank A4 landscape', text: 'An empty landscape page.', needsFields: false, build: () => blank(A4_LANDSCAPE) },
   { id: 'letter', name: 'Letter', text: 'Letterhead with logo, date, address, body text and signature. One letter per record (e.g. acceptance letters).', needsFields: false, build: letter },
-  { id: 'table', name: 'Table report', text: 'Column headings and one row per record, from the fields (the old “Auto layout”).', needsFields: true, build: (columns, title, previous, options) => autoLayout(columns, {}, title, previous, options), hasOptions: true },
+  { id: 'table', name: 'Table report', text: 'Column headings and one row per record, from the fields (the old “Auto layout”).', needsFields: true, build: (columns, title, previous, options) => autoLayout(columns, Object.fromEntries(Object.entries(previous?.fieldFormats || {}).filter(([, f]) => f.label).map(([k, f]) => [k, f.label])), title, previous, options), hasOptions: true },
   { id: 'form', name: 'Form (label : value)', text: 'Every field as “label : value”, one block per record — for detail sheets and profiles.', needsFields: false, build: form },
   { id: 'certificate', name: 'Certificate / image page', text: 'Landscape page with a border in the Background band and big centered text. One per record.', needsFields: false, build: certificate },
 ];
@@ -124,6 +124,7 @@ export function applyTemplate(id, columns, title, previous, options) {
     ...design,
     calculatedFields: previous.calculatedFields || [],
     functions: previous.functions || [],
+    ...(previous.fieldFormats ? { fieldFormats: previous.fieldFormats } : {}),
     variables: (previous.variables || []).filter((v) => !v.field || columns.includes(v.field)),
     sort: previous.sort || [],
     filterExpression: previous.filterExpression || '',

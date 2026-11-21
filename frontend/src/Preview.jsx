@@ -2,8 +2,8 @@ import { useEffect, useRef, useState } from 'react';
 import { api } from './api.js';
 import { AdapterOptions } from './panels.jsx';
 import { reportPayload } from './store.js';
+import { startValue } from './relativeDates.js';
 
-const today = () => new Date().toISOString().slice(0, 10);
 const EXPORTS = [['pdf', 'PDF', '📄'], ['xlsx', 'Excel', '📊'], ['csv', 'CSV', '🧾']];
 const LIMITS = [['20', 'First 20 records'], ['all', 'All records']];
 
@@ -35,7 +35,7 @@ export default function Preview({ state, notify }) {
 
   const asked = report.parameters.filter((p) => p.prompt !== false);
   const computed = report.parameters.filter((p) => p.prompt === false);
-  const valueOf = (p) => values[p.name] ?? (p.type === 'date' ? today() : p.type === 'boolean' ? 'true' : '');
+  const valueOf = (p) => values[p.name] ?? startValue(p);
   const parameterValues = () => Object.fromEntries(asked.map((p) => [p.name, valueOf(p)]));
   const live = Boolean(adapter);
   const adapterName = adapters.find((a) => a.id === adapter)?.name || adapter;

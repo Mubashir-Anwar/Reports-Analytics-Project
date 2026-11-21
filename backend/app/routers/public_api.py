@@ -18,7 +18,7 @@ from __future__ import annotations
 
 import re
 import time
-from datetime import date, datetime, timezone
+from datetime import datetime, timezone
 from types import SimpleNamespace
 from typing import Any
 
@@ -29,7 +29,7 @@ from pymongo.errors import PyMongoError
 from backend.app.connectors.errors import ConnectorQueryError, MongoReadAccessError
 from backend.app.connectors.mongo_fallback import _row_value
 from backend.app.constants import OUTPUT_FORMATS, SIGNED_LINK_KEYS
-from backend.app.definitions import _safe_value, clean_folder, validate_parameters
+from backend.app.definitions import _safe_value, clean_folder, resolve_default, run_form_rules, validate_parameters
 from backend.app.jobs import store as job_store
 
 MEDIA = {"pdf": "application/pdf", "csv": "text/csv; charset=utf-8",
@@ -55,7 +55,8 @@ def register(app: FastAPI, ctx: SimpleNamespace) -> None:
                 "name": spec.name, "type": spec.kind, "label": spec.label or spec.name, "description": spec.description,
                 "required": spec.required, "maxLength": spec.max_length,
                 **({"allowedValues": list(spec.allowed_values)} if spec.allowed_values else {}),
-                **({"default": spec.default.isoformat() if isinstance(spec.default, date) else spec.default} if spec.default is not None else {}),
+                **({"default": resolve_default(spec)} if spec.default is not None else {}),
+                **run_form_rules(spec),
             } for spec in definition.parameters if spec.prompt],
         }
 

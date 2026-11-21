@@ -6,6 +6,7 @@ import { checkSetup, explainError, optionalFilters, placeOf } from './errorHelp.
 import { reportPayload } from './store.js';
 import CodeArea, { selectLine } from './CodeArea.jsx';
 import FieldsEditor from './FieldsEditor.jsx';
+import { PATTERN_PRESETS, RELATIVE_DATES, isRelativeDate, resolveRelative, startValue, valueProblem } from './relativeDates.js';
 
 /** Report ID from the report name: letters/digits/_ in capitals, starting with a letter or digit. */
 export function reportIdFrom(title) {
@@ -119,7 +120,7 @@ export function QueryEditor({ state, dispatch, notify, refreshKey, markLine, mar
   useEffect(() => { setConnTest(null); }, [report.connectionId]);
   useEffect(() => { setQueryTest(null); }, [report.querySource, report.queryLanguage, report.collection, report.connectionId]);
   const asked = (report.parameters || []).filter((p) => p.prompt !== false && p.name);
-  const testValueOf = (p) => testValues[p.name] ?? (p.type === 'date' ? new Date().toISOString().slice(0, 10) : p.type === 'boolean' ? 'true' : '');
+  const testValueOf = (p) => testValues[p.name] ?? startValue(p);
 
   const testConnection = async () => {
     setConnTest({ state: 'busy', text: 'Connecting…' });
@@ -267,7 +268,9 @@ export function QueryEditor({ state, dispatch, notify, refreshKey, markLine, mar
     <>
       {tests && readFieldsRow}
       <FieldsEditor columns={report.columns} design={state.design} calculated={(state.design?.calculatedFields || []).map((c) => c.name)}
-        onChange={(columns) => set({ columns })} />
+        onChange={(columns) => set({ columns })} sample={queryTest?.rows?.[0]}
+        formats={tests ? state.design?.fieldFormats || {} : undefined}
+        onFormats={tests ? (fieldFormats) => dispatch({ type: 'DESIGN', key: 'field-formats', update: (d) => ({ ...d, fieldFormats }) }) : undefined} />
     </>
   );
 
@@ -331,50 +334,216 @@ function AllowedValuesInput({ values, onChange, needed }) {
   );
 }
 
-/** Report parameters (input controls). */
+/** A date that may be relative: Today, Start of this month… or a fixed day. '' = none. */
+function DateValue({ value, onChange, none = 'None' }) {
+  const relative = isRelativeDate(value);
+  const mode = !value ? '' : relative ? String(value).replace(/\s+/g, '') : 'fixed';
+  const known = RELATIVE_DATES.some(([v]) => v === mode);
+  return (
+    <span className="pe-date">
+      <select value={mode === 'fixed' || known || !mode ? mode : 'fixed'} onChange={(e) => {
+        const next = e.target.value;
+        if (next === 'fixed') onChange(resolveRelative('{today}'));
+        else onChange(next || undefined);
+      }}>
+        <option value="">{none}</option>
+        {RELATIVE_DATES.map(([v, text]) => <option key={v} value={v}>{text}</option>)}
+        <option value="fixed">A fixed date…</option>
+      </select>
+      {mode === 'fixed' && <input type="date" value={value} onChange={(e) => onChange(e.target.value || undefined)} />}
+      {relative && <small className="muted">= {resolveRelative(value)} today</small>}
+    </span>
+  );
+}
+
+/** How many extra options a parameter has (for the "More" button). */
+const optionCount = (p) => ['description', 'default', 'min', 'max', 'pattern', 'allowedValues', 'sensitive']
+  .filter((k) => (Array.isArray(p[k]) ? p[k].length : p[k] !== undefined && p[k] !== '' && p[k] !== false && p[k] !== null)).length;
+
+/** The extra options of one parameter: help text, default, limits, a text check, the list of values, sensitive. */
+function ParameterOptions({ p, patch, needed }) {
+  const isNumber = p.type === 'integer' || p.type === 'number';
+  const preset = PATTERN_PRESETS.find(([re]) => re === (p.pattern || ''));
+  const [custom, setCustom] = useState(Boolean(p.pattern) && !preset);
+  if (p.prompt === false) {
+    return <div className="pe-more"><p className="muted">Calculated from other parameters, never asked: <code>{p.expression}</code></p></div>;
+  }
+  return (
+    <div className="pe-more">
+      <label className="wide">Help text <small>(shown under the field when the user runs the report)</small>
+        <input value={p.description || ''} onChange={(e) => patch({ description: e.target.value || undefined })} placeholder="e.g. The first day of the period" />
+      </label>
+      <label>Default value <small>(filled in for the user)</small>
+        {p.type === 'date' ? <DateValue value={p.default} onChange={(v) => patch({ default: v })} />
+          : p.type === 'boolean' ? (
+            <select value={p.default === undefined || p.default === null ? '' : String(p.default)} onChange={(e) => patch({ default: e.target.value === '' ? undefined : e.target.value === 'true' })}>
+              <option value="">None</option><option value="true">Yes</option><option value="false">No</option>
+            </select>
+          ) : p.allowedValues?.length ? (
+            <select value={p.default ?? ''} onChange={(e) => patch({ default: e.target.value || undefined })}>
+              <option value="">None</option>{p.allowedValues.map((v) => <option key={v}>{v}</option>)}
+            </select>
+          ) : (
+            <input type={isNumber ? 'number' : 'text'} value={p.default ?? ''} placeholder="None"
+              onChange={(e) => patch({ default: e.target.value === '' ? undefined : isNumber ? Number(e.target.value) : e.target.value })} />
+          )}
+      </label>
+      {isNumber && (
+        <span className="pe-pair">
+          <label>Smallest<input type="number" value={p.min ?? ''} placeholder="any" onChange={(e) => patch({ min: e.target.value === '' ? undefined : Number(e.target.value) })} /></label>
+          <label>Largest<input type="number" value={p.max ?? ''} placeholder="any" onChange={(e) => patch({ max: e.target.value === '' ? undefined : Number(e.target.value) })} /></label>
+        </span>
+      )}
+      {p.type === 'date' && (
+        <>
+          <label>Earliest date allowed<DateValue value={p.min} none="Any" onChange={(v) => patch({ min: v })} /></label>
+          <label>Latest date allowed<DateValue value={p.max} none="Any" onChange={(v) => patch({ max: v })} /></label>
+        </>
+      )}
+      {p.type === 'string' && (
+        <>
+          <label>Check the text <small>(the value must look like this)</small>
+            <select value={custom ? '__custom' : p.pattern || ''} onChange={(e) => {
+              if (e.target.value === '__custom') { setCustom(true); return; }
+              setCustom(false);
+              const chosen = PATTERN_PRESETS.find(([re]) => re === e.target.value);
+              patch({ pattern: e.target.value || undefined, patternMessage: chosen?.[2] || undefined });
+            }}>
+              {PATTERN_PRESETS.map(([re, text]) => <option key={text} value={re}>{text}</option>)}
+              <option value="__custom">Custom (regular expression)…</option>
+            </select>
+            {custom && <input className="code" value={p.pattern || ''} placeholder="e.g. PK\d{4}" onChange={(e) => patch({ pattern: e.target.value || undefined })} />}
+          </label>
+          {p.pattern && (
+            <label>Message when it does not match
+              <input value={p.patternMessage || ''} placeholder={`${p.label || p.name} is not in the right format`} onChange={(e) => patch({ patternMessage: e.target.value || undefined })} />
+            </label>
+          )}
+        </>
+      )}
+      {p.type !== 'boolean' && p.type !== 'date' && (
+        <label className="wide">List of values <small>(comma-separated: the user picks one instead of typing)</small>
+          <AllowedValuesInput values={p.allowedValues} needed={needed}
+            onChange={(list) => patch(list.length ? { allowedValues: list } : { allowedValues: undefined })} />
+        </label>
+      )}
+      <label className="pe-check"><input type="checkbox" checked={p.sensitive === true} onChange={(e) => patch({ sensitive: e.target.checked ? true : undefined })} />
+        Sensitive <small>(CNIC, account number…: kept masked like 42*****71 in the run log)</small>
+      </label>
+    </div>
+  );
+}
+
+/** What the user sees on the run screen, filled with the defaults; typing shows the same checks as the server. */
+function RunFormPreview({ parameters }) {
+  const asked = parameters.filter((p) => p.prompt !== false && p.name);
+  const [values, setValues] = useState({});
+  if (!asked.length) return null;
+  const valueOf = (p) => values[p.name] ?? startValue(p);
+  return (
+    <div className="pe-preview">
+      <b>What the user sees when running the report</b>
+      <div className="pe-preview-form">
+        {asked.map((p) => {
+          const problem = valueProblem(p, valueOf(p));
+          const set = (v) => setValues((s) => ({ ...s, [p.name]: v }));
+          return (
+            <label key={p.name} className={problem ? 'bad' : ''}>
+              <span>{p.label || p.name}{p.required && <i aria-label="required"> *</i>}</span>
+              {p.allowedValues?.length ? (
+                <select value={valueOf(p)} onChange={(e) => set(e.target.value)}>{!p.required && <option value="">—</option>}{p.allowedValues.map((v) => <option key={v}>{v}</option>)}</select>
+              ) : p.type === 'boolean' ? (
+                <select value={valueOf(p)} onChange={(e) => set(e.target.value)}><option value="true">Yes</option><option value="false">No</option></select>
+              ) : (
+                <input type={p.type === 'date' ? 'date' : p.type === 'integer' || p.type === 'number' ? 'number' : 'text'} value={valueOf(p)}
+                  min={p.type === 'date' && p.min ? resolveRelative(p.min) : p.min} max={p.type === 'date' && p.max ? resolveRelative(p.max) : p.max}
+                  onChange={(e) => set(e.target.value)} />
+              )}
+              {p.description && <small>{p.description}</small>}
+              {problem && <small className="err">{problem}</small>}
+            </label>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+/** Report parameters (input controls): one clear line each, the rest under "More", and a preview of the run form. */
 export function ParametersEditor({ state, dispatch }) {
   const { report } = state;
   const set = (patch) => dispatch({ type: 'REPORT', patch });
-  const addParam = () => set({ parameters: [...report.parameters, { name: `Param${report.parameters.length + 1}`, type: 'string', label: '', required: false }] });
-  const patchParam = (index, values) => set({ parameters: report.parameters.map((p, i) => (i === index ? { ...p, ...values } : p)) });
+  const [openRows, setOpenRows] = useState(() => new Set());
+  const addParam = () => {
+    set({ parameters: [...report.parameters, { name: `Param${report.parameters.length + 1}`, type: 'string', label: '', required: false }] });
+    setOpenRows((s) => new Set([...s, report.parameters.length]));
+  };
+  const patchParam = (index, values) => set({ parameters: report.parameters.map((p, i) => {
+    if (i !== index) return p;
+    const next = { ...p, ...values };
+    Object.keys(values).forEach((k) => { if (values[k] === undefined) delete next[k]; });
+    return next;
+  }) });
+  // A new type keeps only the options that still make sense (no min/max on text, no pattern on numbers).
+  const changeType = (index, type) => {
+    const p = report.parameters[index];
+    const drop = { default: undefined, min: undefined, max: undefined };
+    if (type !== 'string') Object.assign(drop, { pattern: undefined, patternMessage: undefined });
+    if (type === 'date' || type === 'boolean') drop.allowedValues = undefined;
+    patchParam(index, { type, ...(p.type === type ? {} : drop) });
+  };
+  const toggle = (i) => setOpenRows((s) => { const n = new Set(s); if (n.has(i)) n.delete(i); else n.add(i); return n; });
   // Parameters used in the collection name (e.g. Edith-$P{ProductCode}-PaymentPlans) must list their allowed values.
   const inCollection = new Set([...String(report.collection || '').matchAll(/\$P\{(\w+)\}/g)].map((m) => m[1]));
   // With fixed text around it (Edith-…-PaymentPlans) the user may type the value; a bare $P{X} needs a list.
-  const shaped = String(report.collection || '').replace(/$P{w+}/g, '').replace(/[^A-Za-z0-9]/g, '').length >= 3;
+  const shaped = String(report.collection || '').replace(/\$P\{\w+\}/g, '').replace(/[^A-Za-z0-9]/g, '').length >= 3;
   const missing = shaped ? [] : report.parameters.filter((p) => inCollection.has(p.name) && !(p.allowedValues || []).length);
   return (
     <>
       {missing.length > 0 && (
         <p className="hint warn">
           The collection name <code>{report.collection}</code> is built from {missing.map((p) => p.name).join(', ')}.
-          The name has no fixed text, so for safety list the values a user may choose under “Allowed values” (e.g. <code>CAR, BIKE</code>), or put fixed text around the parameter (e.g. <code>Orders-$P&#123;Branch&#125;</code>).
+          The name has no fixed text, so for safety list the values a user may choose under “More → List of values” (e.g. <code>CAR, BIKE</code>), or put fixed text around the parameter (e.g. <code>Orders-$P&#123;Branch&#125;</code>).
         </p>
       )}
-      <table className="grid" data-guide="parameters">
-        <thead><tr><th>Name (URL key)</th><th>Type</th><th>Label</th><th>Allowed values</th><th>Required</th><th title="CNIC, account number…: kept masked (42*****71) in the run log">Sensitive</th><th /></tr></thead>
-        <tbody>
-          {report.parameters.map((p, i) => (
+      <div className="pe-list" data-guide="parameters">
+        {report.parameters.length > 0 && (
+          <div className="pe-row pe-headrow" aria-hidden="true"><span>Name (URL key)</span><span>Label (what the user sees)</span><span>Type</span><span>Required</span><span /><span /></div>
+        )}
+        {report.parameters.map((p, i) => {
+          const needed = missing.includes(p);
+          const open = openRows.has(i) || needed;
+          const count = optionCount(p);
+          return (
             // eslint-disable-next-line react/no-array-index-key -- a name can be edited, the position is the identity
-            <tr key={i} data-focus={`param:${p.name}`}>
-              <td><input value={p.name} onChange={(e) => patchParam(i, { name: e.target.value.replace(/[^A-Za-z0-9_]/g, '') })} /></td>
-              <td><select value={p.type} onChange={(e) => patchParam(i, { type: e.target.value })}>{['date', 'string', 'integer', 'number', 'boolean'].map((t) => <option key={t}>{t}</option>)}</select></td>
-              <td><input value={p.label || ''} onChange={(e) => patchParam(i, { label: e.target.value })} /></td>
-              <td>{p.prompt === false ? <small>—</small> : (
-                <AllowedValuesInput values={p.allowedValues} needed={inCollection.has(p.name) && !shaped}
-                  onChange={(list) => patchParam(i, list.length ? { allowedValues: list } : { allowedValues: undefined })} />
-              )}</td>
-              <td>{p.prompt === false ? <small title="Computed from other parameters">ƒ computed</small> : <input type="checkbox" checked={Boolean(p.required)} onChange={(e) => patchParam(i, { required: e.target.checked })} />}</td>
-              <td><input type="checkbox" aria-label={`${p.name} is sensitive`} title="Masked in the run log (e.g. 42*********71)" checked={p.sensitive === true}
-                onChange={(e) => patchParam(i, e.target.checked ? { sensitive: true } : { sensitive: undefined })} /></td>
-              <td><button className="icon" onClick={() => set({ parameters: report.parameters.filter((_, j) => j !== i) })}>✕</button></td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
+            <div key={i} className={`pe-item ${open ? 'open' : ''}`} data-focus={`param:${p.name}`}>
+              <div className="pe-row">
+                <input aria-label="Name" value={p.name} onChange={(e) => patchParam(i, { name: e.target.value.replace(/[^A-Za-z0-9_]/g, '') })} />
+                <input aria-label="Label" value={p.label || ''} placeholder={labelFrom(p.name)} onChange={(e) => patchParam(i, { label: e.target.value })} />
+                <select aria-label="Type" value={p.type} onChange={(e) => changeType(i, e.target.value)}>
+                  {[['string', 'Text'], ['date', 'Date'], ['integer', 'Whole number'], ['number', 'Number'], ['boolean', 'Yes / No']].map(([v, t]) => <option key={v} value={v}>{t}</option>)}
+                </select>
+                {p.prompt === false ? <small className="pe-computed" title="Computed from other parameters">ƒ computed</small>
+                  : <label className="pe-req"><input type="checkbox" checked={Boolean(p.required)} onChange={(e) => patchParam(i, { required: e.target.checked })} /><span>Required</span></label>}
+                <button type="button" className={`btn sm pe-more-btn ${open ? 'on' : ''}`} aria-expanded={open} onClick={() => toggle(i)}>
+                  ⚙ More{count ? <span className="pe-count">{count}</span> : null}
+                </button>
+                <button type="button" className="icon" aria-label={`Delete ${p.name}`} onClick={() => set({ parameters: report.parameters.filter((_, j) => j !== i) })}>✕</button>
+              </div>
+              {open && <ParameterOptions p={p} needed={needed} patch={(values) => patchParam(i, values)} />}
+            </div>
+          );
+        })}
+        {!report.parameters.length && <p className="muted pe-empty">No parameters: the report runs without asking anything. Add one when the query uses $P&#123;…&#125;.</p>}
+      </div>
       <div className="row">
         <button className="btn" onClick={addParam}>+ Add parameter</button>
-        <button className="btn" onClick={() => set({ parameters: [{ name: 'StartDate', type: 'date', label: 'Start date', required: true }, { name: 'EndDate', type: 'date', label: 'End date', required: true }] })}>Start/End date preset</button>
+        <button className="btn" onClick={() => set({ parameters: [
+          { name: 'StartDate', type: 'date', label: 'Start date', required: true, default: '{monthStart}', description: 'The first day of the period' },
+          { name: 'EndDate', type: 'date', label: 'End date', required: true, default: '{today}', max: '{today}', description: 'The last day of the period (not after today)' },
+        ] })}>Start/End date preset</button>
       </div>
+      <RunFormPreview parameters={report.parameters} />
     </>
   );
 }

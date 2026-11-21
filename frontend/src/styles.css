@@ -1013,3 +1013,59 @@ kbd { font: 11.5px ui-monospace, monospace; background: var(--bg); border: 1px s
   .coach-card { padding: 12px; }
   .coach-card h3 { font-size: 16px; }
 }
+
+/* Setup → Parameters: one row each, "More" opens the options */
+.pe-list { display: grid; gap: 6px; margin-bottom: 8px; }
+.pe-row { display: grid; grid-template-columns: minmax(110px, 1fr) minmax(140px, 1.4fr) 130px 74px auto 32px; gap: 6px; align-items: center; }
+.pe-row > * { min-width: 0; }
+.pe-headrow { font-size: 11px; color: var(--muted); padding: 0 8px; }
+.pe-item { border: 1px solid var(--line); border-radius: 8px; padding: 6px 8px; background: var(--panel); }
+.pe-item.open { border-color: color-mix(in srgb, var(--accent) 55%, var(--line)); box-shadow: 0 1px 6px color-mix(in srgb, var(--accent) 12%, transparent); }
+.pe-req { display: flex; align-items: center; gap: 4px; font-size: 12px; white-space: nowrap; }
+.pe-more-btn { white-space: nowrap; }
+.pe-more-btn.on { background: var(--accent-soft); border-color: var(--accent); }
+.pe-count { display: inline-block; min-width: 16px; margin-left: 4px; padding: 0 4px; border-radius: 8px; background: var(--accent); color: #fff; font-size: 10px; line-height: 16px; text-align: center; }
+.pe-computed { font-size: 11px; color: var(--muted); font-style: italic; }
+.pe-more { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px 14px; margin-top: 8px; padding-top: 8px; border-top: 1px dashed var(--line); }
+.pe-more > label, .pe-more > div { display: grid; gap: 3px; font-size: 12px; color: var(--muted); min-width: 0; }
+.pe-more .wide { grid-column: 1 / -1; }
+.pe-more small { color: var(--muted); font-size: 11px; }
+.pe-pair { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+.pe-date { display: flex; gap: 4px; min-width: 0; }
+.pe-date > * { flex: 1; min-width: 0; }
+.pe-check { display: flex !important; align-items: center; gap: 6px; color: var(--text) !important; }
+.pe-empty { padding: 14px; text-align: center; color: var(--muted); border: 1px dashed var(--line); border-radius: 8px; }
+.pe-preview { margin-top: 10px; border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; background: color-mix(in srgb, var(--accent) 4%, var(--panel)); }
+.pe-preview h4 { margin: 0 0 8px; font-size: 13px; }
+.pe-preview-form { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 8px 12px; }
+.pe-preview-form label { display: grid; gap: 3px; font-size: 12px; }
+.pe-preview-form label.bad input, .pe-preview-form label.bad select { border-color: #ef4444; }
+.pe-preview-form small.err { color: #ef4444; font-size: 11px; }
+.pe-preview-form .hint { color: var(--muted); font-size: 11px; }
+
+/* Setup → Fields → Details */
+.fe-views { display: inline-flex; border: 1px solid var(--line); border-radius: 6px; overflow: hidden; }
+.fe-views button { border: 0; background: transparent; color: var(--text); padding: 2px 10px; font-size: 12px; cursor: pointer; }
+.fe-views button + button { border-left: 1px solid var(--line); }
+.fe-views button.on { background: var(--accent); color: #fff; }
+.fe-details { display: grid; gap: 4px; max-height: 420px; overflow: auto; }
+.fe-details table.grid td { vertical-align: middle; }
+.fe-details input, .fe-details select { width: 100%; min-width: 0; }
+.fe-format { display: grid; gap: 3px; min-width: 130px; }
+.fe-kind { margin-left: 6px; padding: 0 5px; border-radius: 6px; font-size: 10px; background: var(--line); color: var(--muted); }
+.fe-kind.number { background: color-mix(in srgb, #2563eb 15%, transparent); color: #2563eb; }
+.fe-kind.date { background: color-mix(in srgb, #16a34a 15%, transparent); color: #16a34a; }
+.fe-sample { max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; }
+.fe-sample small { display: block; color: var(--muted); font-size: 10px; }
+.fe-unused code { opacity: .7; }
+
+@media (max-width: 760px) {
+  .pe-headrow { display: none; }
+  .pe-row { grid-template-columns: 1fr 1fr; }
+  .pe-row > :nth-child(5) { justify-self: start; }
+  .pe-row > :last-child { justify-self: end; }
+  .pe-more { grid-template-columns: 1fr; }
+  .fe-details table.grid thead { display: none; }
+  .fe-details table.grid tr { display: grid; grid-template-columns: 1fr 1fr; gap: 4px; padding: 6px 0; border-bottom: 1px solid var(--line); }
+  .fe-sample { max-width: none; }
+}
