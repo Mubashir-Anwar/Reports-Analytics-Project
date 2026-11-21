@@ -22,6 +22,30 @@ export function StatusChip({ status }) {
   return <span className={`status-chip ${kind || status}`}>{text}</span>;
 }
 
+/** One-click starting points for "When". */
+const PRESETS = [
+  ['Every morning', 'Every day at 08:00', { type: 'daily', time: '08:00' }],
+  ['Every Monday', 'Monday at 09:00', { type: 'weekly', time: '09:00', weekdays: [0] }],
+  ['Weekdays', 'Mon–Fri at 08:00', { type: 'weekly', time: '08:00', weekdays: [0, 1, 2, 3, 4] }],
+  ['Start of month', 'Day 1 at 07:00', { type: 'monthly', time: '07:00', day: 1 }],
+  ['End of month', 'Last day at 22:00', { type: 'monthly', time: '22:00', day: 'last' }],
+  ['Every 30 minutes', 'All day long', { type: 'minutes', every: 30 }],
+];
+const STEPS = [['when', 'When'], ['values', 'Parameters'], ['output', 'Output'], ['email', 'E-mail'], ['deliver', 'Send file']];
+
+/** The schedule in one sentence: when, what, and where it goes. */
+export function scheduleSummary(form) {
+  const r = form.recurrence || {};
+  const when = r.type === 'once' ? (r.at ? `once on ${r.at.replace('T', ' at ')}` : 'once (choose the date)')
+    : r.type === 'minutes' ? `every ${r.every || '…'} minutes`
+      : r.type === 'daily' ? `every day at ${r.time}`
+        : r.type === 'weekly' ? `every ${(r.weekdays || []).map((d) => DAYS[d]).join(', ') || '… (choose days)'} at ${r.time}`
+          : `every month on ${r.day === 'last' ? 'the last day' : `day ${r.day}`} at ${r.time}`;
+  const to = String(form.email?.to || '').split(/[,;\s]+/).filter(Boolean).length;
+  const where = ['kept under Runs', ...(to ? [`e-mailed to ${to}`] : []), ...(form.deliver || []).filter((d) => d.enabled !== false).map((d) => `sent to ${d.label || d.host || d.url || d.folder || d.type}`)];
+  return `Runs ${when} (${form.timezone}) as ${String(form.format || 'pdf').toUpperCase()}; ${where.join(', ')}.${form.enabled === false ? ' Paused.' : ''}`;
+}
+
 function emptySchedule(report, info) {
   return {
     label: report?.title || '', reportId: report?.id || '', folder: report?.folder || '', format: report?.defaultFormat || 'pdf',
@@ -66,6 +90,7 @@ export function ScheduleDialog({ report, job, info, onClose, onSaved }) {
   const setRec = (patch) => setForm((f) => ({ ...f, recurrence: { ...f.recurrence, ...patch } }));
   const setEmail = (patch) => setForm((f) => ({ ...f, email: { ...f.email, ...patch } }));
   const rec = form.recurrence;
+  const stepIndex = STEPS.findIndex(([id]) => id === step);
   const parameters = (report?.parameters || []).filter((p) => !p.computed);
   const filters = optionalFilters(report);
 
@@ -93,14 +118,22 @@ export function ScheduleDialog({ report, job, info, onClose, onSaved }) {
           <button className="btn quiet sm" onClick={onClose} aria-label="Close">✕</button>
         </div>
         <div className="tabs">
-          {[['when', '1 · When'], ['values', '2 · Parameters'], ['output', '3 · Output'], ['email', '4 · E-mail'], ['deliver', `5 · Send file${form.deliver?.length ? ` (${form.deliver.length})` : ''}`]].map(([id, label]) => (
-            <button key={id} className={step === id ? 'on' : ''} onClick={() => setStep(id)}>{label}</button>
+          {STEPS.map(([id, label], i) => (
+            <button key={id} className={step === id ? 'on' : ''} onClick={() => setStep(id)}>{i + 1} · {label}{id === 'deliver' && form.deliver?.length ? ` (${form.deliver.length})` : ''}</button>
           ))}
         </div>
 
         {step === 'when' && (
           <div className="stack">
             <label className="field"><span>Name</span><input value={form.label} onChange={(e) => set({ label: e.target.value })} placeholder="Daily sales for the management" /></label>
+            <div className="preset-row" role="group" aria-label="Quick choices">
+              {PRESETS.map(([title, hint, value]) => {
+                const on = rec.type === value.type && (!value.time || rec.time === value.time) && (!value.weekdays || String(rec.weekdays) === String(value.weekdays))
+                  && (value.day === undefined || String(rec.day) === String(value.day)) && (!value.every || Number(rec.every) === value.every);
+                return <button key={title} type="button" className={`preset ${on ? 'on' : ''}`} onClick={() => setRec(value)}><b>{title}</b><small>{hint}</small></button>;
+              })}
+            </div>
+            <p className="muted small">…or set it yourself:</p>
             <div className="segmented wrap">
               {[['once', 'Once'], ['minutes', 'Every N minutes'], ['daily', 'Daily'], ['weekly', 'Weekly'], ['monthly', 'Monthly']].map(([id, label]) => (
                 <button key={id} type="button" className={rec.type === id ? 'on' : ''} onClick={() => setRec({ type: id })}>{label}</button>
@@ -187,10 +220,14 @@ export function ScheduleDialog({ report, job, info, onClose, onSaved }) {
             : <p className="muted">Only designers and administrators can send report files to other systems.</p>
         )}
 
+        <p className="schedule-summary" aria-live="polite">🗓 {scheduleSummary(form)}</p>
         <Notice message={error} />
         <div className="row" style={{ justifyContent: 'flex-end' }}>
           <button className="btn" onClick={onClose}>Cancel</button>
-          <button className="btn primary" disabled={busy} onClick={save}>{busy ? 'Saving…' : job ? 'Save schedule' : 'Create schedule'}</button>
+          {stepIndex > 0 && <button className="btn" onClick={() => setStep(STEPS[stepIndex - 1][0])}>← Back</button>}
+          {stepIndex < STEPS.length - 1 && <button className={job ? 'btn' : 'btn primary'} onClick={() => setStep(STEPS[stepIndex + 1][0])}>Next: {STEPS[stepIndex + 1][1]} →</button>}
+          {(job || stepIndex === STEPS.length - 1) && <button className="btn primary" disabled={busy} onClick={save}>{busy ? 'Saving…' : job ? 'Save schedule' : 'Create schedule'}</button>}
+          {!job && stepIndex < STEPS.length - 1 && <button className="btn quiet" disabled={busy} onClick={save} title="Save now; the other steps keep their defaults">Create now</button>}
         </div>
       </div>
     </div>
@@ -256,7 +293,13 @@ export function SchedulesList({ report, info, onMessage, version = 0 }) {
       {report && info?.canSchedule && <div className="row"><button className="btn primary" onClick={() => setEditing({ report })}>＋ Schedule this report</button></div>}
       {info && !info.schedulerOn && <Notice message={{ kind: 'warn', text: 'The scheduler is switched off on this server (REPORTING_SCHEDULER=off); schedules wait until it is on.' }} />}
       {items === null && <div className="empty">Loading…</div>}
-      {items?.length === 0 && <div className="empty">{report ? 'This report has no schedules.' : 'No schedules yet. Open a report → Schedules → “Schedule this report”.'}</div>}
+      {items?.length === 0 && (
+        <div className="empty">
+          <b>{report ? 'This report has no schedules yet.' : 'No schedules yet.'}</b>
+          <p className="muted">A schedule runs a report by itself, for example <i>“Sales — every morning at 08:00 as PDF, e-mailed to the manager and uploaded to the bank SFTP”</i>.</p>
+          {!report && <p className="muted">Open a report (Repository) → <b>Schedules</b> → <b>＋ Schedule this report</b>.</p>}
+        </div>
+      )}
       {items?.map((job) => (
         <div key={job.id} className={`item schedule-item ${job.enabled ? '' : 'off'}`}>
           <div className="schedule-main">
@@ -287,6 +330,8 @@ export function SchedulesList({ report, info, onMessage, version = 0 }) {
 /** Background runs and scheduled outputs; refreshes itself while something is running. */
 export function RunsList({ onMessage, version = 0 }) {
   const [runs, setRuns] = useState(null);
+  const [show, setShow] = useState('all');
+  const [find, setFind] = useState('');
   const load = useCallback(() => serverApi.runs().then((r) => setRuns(r.runs)).catch((e) => { setRuns([]); onMessage({ kind: 'error', text: e.message }); }), [onMessage]);
   useEffect(() => { load(); }, [load, version]);
   const busy = runs?.some((r) => r.status === 'queued' || r.status === 'running');
@@ -301,17 +346,29 @@ export function RunsList({ onMessage, version = 0 }) {
   const remove = async (run) => {
     try { await serverApi.deleteRun(run.id); await load(); } catch (e) { onMessage({ kind: 'error', text: e.message }); }
   };
+  const FILTERS = [['all', 'All', () => true], ['failed', '✕ Failed', (r) => r.status === 'failed' || (r.delivered || []).some((d) => !d.ok && !d.skipped)],
+    ['busy', '⟳ Running', (r) => r.status === 'queued' || r.status === 'running'], ['schedule', '⏰ Scheduled', (r) => Boolean(r.jobId)],
+    ['background', 'Background', (r) => !r.jobId], ['today', 'Today', (r) => new Date(r.queuedAt || r.startedAt).toDateString() === new Date().toDateString()]];
+  const needle = find.trim().toLowerCase();
+  const shown = (runs || []).filter(FILTERS.find(([id]) => id === show)[2]).filter((r) => !needle || `${r.title} ${r.jobLabel} ${r.owner} ${r.reportId}`.toLowerCase().includes(needle));
   return (
     <div className="stack">
-      <div className="row"><button className="btn sm" onClick={load}>↻ Refresh</button>{busy && <span className="muted">Updating every few seconds while a run is busy…</span>}</div>
+      <div className="row runs-tools">
+        <div className="segmented wrap" role="group" aria-label="Show">
+          {FILTERS.map(([id, label, test]) => <button key={id} type="button" className={show === id ? 'on' : ''} onClick={() => setShow(id)}>{label} <small>{(runs || []).filter(test).length}</small></button>)}
+        </div>
+        <input type="search" placeholder="⌕  Report, schedule or user" value={find} onChange={(e) => setFind(e.target.value)} />
+        <button className="btn sm" onClick={load}>↻ Refresh</button>{busy && <span className="muted">Updating every few seconds while a run is busy…</span>}
+      </div>
       {runs === null && <div className="empty">Loading…</div>}
-      {runs?.length === 0 && <div className="empty">No runs yet. Run a report “in the background”, or wait for a schedule.</div>}
-      {runs?.length > 0 && (
+      {runs?.length === 0 && <div className="empty"><b>No runs yet.</b><p className="muted">A run appears here when a schedule runs, or when you open a report and press <b>⟳ Run in background</b> (good for big reports: you can leave the page).</p></div>}
+      {runs?.length > 0 && !shown.length && <div className="empty">Nothing matches. <button className="btn sm" onClick={() => { setShow('all'); setFind(''); }}>Show all</button></div>}
+      {shown.length > 0 && (
         <div className="table-wrap">
           <table className="grid-table runs-table">
             <thead><tr><th>Report</th><th>Status</th><th>Started</th><th>Records</th><th>From</th><th /></tr></thead>
             <tbody>
-              {runs.map((run) => (
+              {shown.map((run) => (
                 <tr key={run.id}>
                   <td data-label="Report"><b>{run.title}</b><br /><small className="muted">{run.format.toUpperCase()}{run.size ? ` · ${(run.size / 1024).toFixed(0)} KB` : ''}</small></td>
                   <td data-label="Status"><StatusChip status={run.status} />{run.error && <div className="err small">{run.error}</div>}{run.email && <div className="muted small">✉ {run.email}</div>}{(run.delivered || []).map((d) => <div key={d.id} className={`small ${d.ok ? 'muted' : d.skipped ? 'muted' : 'err'}`} title={d.result}>{d.type === 'sftp' ? '🔐' : d.type === 'http' ? '🔗' : '📂'} {d.label}: {d.ok ? '✓ ' : d.skipped ? '' : '✕ '}{d.result}</div>)}</td>

@@ -5,6 +5,7 @@ import { BRAND } from '../shared/brand.js';
 import { Logo } from '../shared/NavBar.jsx';
 import { Breadcrumbs, FolderDeleteDialog, FolderTree, NewFolderDialog, SubfolderTiles } from '../shared/folders.jsx';
 import PermissionsDialog from './PermissionsDialog.jsx';
+import ServerGuide, { markPermissionsSet, readGuideHidden, showGuideAgain } from './ServerGuide.jsx';
 import ResourcePanel from './ResourcePanel.jsx';
 import { RunsList, SchedulesList } from './Schedules.jsx';
 import LogsView from './LogsView.jsx';
@@ -84,6 +85,7 @@ function Repository({ user, onUser }) {
   const [scheduleInfo, setScheduleInfo] = useState(null);
   const [runsVersion, setRunsVersion] = useState(0);
   const [newFolder, setNewFolder] = useState(null); // parent path while the New folder dialog is open
+  const [guideHidden, setGuideHidden] = useState(readGuideHidden);
   useEffect(() => { serverApi.scheduleInfo().then(setScheduleInfo).catch(() => setScheduleInfo(null)); }, []);
   const showMessage = useCallback((m) => setMessage(m), []);
   const designer = roleAtLeast(user, 'designer');
@@ -254,11 +256,16 @@ function Repository({ user, onUser }) {
           </div>
           {view === 'repository' && designer && <button className="btn primary" onClick={() => setUploading(true)}>⤒ Add Resource</button>}
           {view === 'repository' && <button className="btn" onClick={load}>↻ Refresh</button>}
+          {view === 'repository' && guideHidden && <button className="btn quiet" onClick={() => { showGuideAgain(); setGuideHidden(false); }} title="Show the Get started steps again">? Get started</button>}
         </div>
       </div>
       {user.bootstrap && <Notice message={{ kind: 'warn', text: 'You are signed in with the first-setup admin login. Create a real admin user in Admin → Users; this login then stops working.' }} />}
       {message && <div style={{ marginTop: 10 }}><Notice message={message} /></div>}
       {clipboard && <div className="clip-bar">📋 {clipboard.mode === 'cut' ? 'Cut' : 'Copied'}: <b>{clipboard.title}</b> — right-click a folder → Paste <button className="btn quiet sm" onClick={() => setClipboard(null)}>✕</button></div>}
+      {view === 'repository' && !openDash && !loading && !guideHidden && (
+        <ServerGuide folders={folders} reports={reports} designer={designer} admin={admin} onHide={() => setGuideHidden(true)}
+          onFolder={() => createFolder('')} onUpload={() => setUploading(true)} onPermissions={() => setPermFolder(folder)} onSchedules={() => setView('schedules')} />
+      )}
       {view === 'schedules' && <section className="card"><SchedulesList info={scheduleInfo} onMessage={showMessage} /></section>}
       {view === 'runs' && <section className="card"><RunsList onMessage={showMessage} version={runsVersion} /></section>}
       {view === 'logs' && admin && <section className="card"><LogsView /></section>}
@@ -309,7 +316,7 @@ function Repository({ user, onUser }) {
                 onContextMenu={(e) => { setSelectedId(r.ref); showMenu(reportMenu(r))(e); }}
               >
                 <strong>{r.title}</strong>
-                <small>{r.folder} · {r.formats.map((f) => f.toUpperCase()).join(', ')}{r.parameters.length ? ` · ${r.parameters.length} question${r.parameters.length > 1 ? 's' : ''}` : ''}</small>
+                <small>{!r.folder || r.folder === 'General' ? 'Top level' : r.folder} · {r.formats.map((f) => f.toUpperCase()).join(', ')}{r.parameters.length ? ` · ${r.parameters.length} question${r.parameters.length > 1 ? 's' : ''}` : ''}</small>
                 {r.description && <small>{r.description}</small>}
               </button>
             ))}
@@ -317,7 +324,7 @@ function Repository({ user, onUser }) {
               <button key={d.id} className={`report-card dashboard-card ${clipboard?.mode === 'cut' && clipboard.id === d.id ? 'cut' : ''}`}
                 onClick={() => setOpenDash(d)} onContextMenu={showMenu(dashboardMenu(d))}>
                 <strong><span className="kind-badge" aria-hidden="true">📊</span> {d.name}</strong>
-                <small>{d.folder} · dashboard · {d.tiles} visual{d.tiles === 1 ? '' : 's'}{d.owner ? ` · by ${d.owner}` : ''}</small>
+                <small>{!d.folder || d.folder === 'General' ? 'Top level' : d.folder} · dashboard · {d.tiles} visual{d.tiles === 1 ? '' : 's'}{d.owner ? ` · by ${d.owner}` : ''}</small>
                 {d.description && <small>{d.description}</small>}
               </button>
             ))}
@@ -327,12 +334,24 @@ function Repository({ user, onUser }) {
           ? <ResourcePanel key={`${selectedId}-${version}`} reportId={selectedId} tab={tab} setTab={setTab} onChanged={load}
               scheduleInfo={scheduleInfo} onBackground={() => setRunsVersion((n) => n + 1)} onBack={() => setSelectedId('')}
               menu={(event, info) => setMenu({ x: event.clientX, y: event.clientY, items: reportMenu(reports.find((r) => r.ref === info.ref) || info) })} />
-          : <section className="card resource hide-mobile" style={{ textAlign: 'center', padding: '48px 18px' }}><div style={{ fontSize: 30, opacity: 0.5 }}>▤</div><h2>Choose a report</h2><p className="muted">Run it, or check its parameters, data source, query and history. Right-click for more.</p></section>}
+          : (
+            <section className="card resource hide-mobile choose-hint">
+              <div className="choose-icon" aria-hidden="true">▤</div>
+              <h2>Choose a report</h2>
+              <p className="muted">Click a report in the middle. Then you can:</p>
+              <ul>
+                <li><b>▶ Run</b> it now and download PDF / Excel / CSV <small>(double-click does this too)</small></li>
+                <li><b>⏰ Schedule</b> it: every morning, every Monday, month end…</li>
+                <li>See its <b>parameters</b>, <b>data source</b>, <b>query</b>, <b>versions</b> and <b>history</b></li>
+                <li><b>Right-click</b> it to copy, move, download or delete</li>
+              </ul>
+            </section>
+          )}
       </div>}
       <ContextMenu menu={menu} onClose={() => setMenu(null)} />
       {newFolder !== null && <NewFolderDialog folders={folders} parent={newFolder} onCreate={saveNewFolder} onClose={() => setNewFolder(null)} title="New folder on the server" />}
       {deleting && <FolderDeleteDialog path={deleting.path} contents={deleting.contents} folders={folders} onConfirm={confirmDelete} onClose={() => setDeleting(null)} />}
-      {permFolder !== null && <PermissionsDialog folder={permFolder} onClose={() => setPermFolder(null)} onSaved={load} />}
+      {permFolder !== null && <PermissionsDialog folder={permFolder} onClose={() => setPermFolder(null)} onSaved={() => { markPermissionsSet(); load(); }} />}
       {uploading && (
         <UploadDialog folders={folders} folder={folder} onClose={() => setUploading(false)}
           onDone={async (result) => {

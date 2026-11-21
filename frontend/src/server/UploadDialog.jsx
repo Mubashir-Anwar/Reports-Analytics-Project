@@ -7,7 +7,7 @@ import { splitReportFiles } from '../mrd.js';
 
 export default function UploadDialog({ folders, folder, onClose, onDone }) {
   const [file, setFile] = useState(null); // { name, text, kind }
-  const [target, setTarget] = useState(folder || 'General');
+  const [target, setTarget] = useState(folder || '');
   const [replace, setReplace] = useState(false);
   const [newId, setNewId] = useState('');
   const [connectionId, setConnectionId] = useState('');
@@ -71,7 +71,7 @@ export default function UploadDialog({ folders, folder, onClose, onDone }) {
         <p className="muted" style={{ fontSize: 12, marginTop: -6 }}>For a .jrxml, select its PNG/JPEG pictures together with it (Ctrl+click): they are saved inside the report, and the report's “Files in this report” list shows which file each image uses.</p>
         {file?.kind && <p className="muted" style={{ fontSize: 12 }}>{file.kind === 'dashboard' ? <>Dashboard <b>{file.id}</b> · {file.datasets} dataset(s)</> : <>{file.kind === 'mrd' ? 'Report file' : 'Jaspersoft JRXML'} · ID <code>{file.id || '?'}</code>{Object.keys(file.images || {}).length ? <> · pictures: {Object.keys(file.images).join(', ')}</> : null}</>}</p>}
         <label className="field"><span>Folder</span>
-          <input list="upload-folders" value={target} onChange={(e) => setTarget(e.target.value)} required />
+          <input list="upload-folders" value={target} onChange={(e) => setTarget(e.target.value)} placeholder="Empty = top level (no folder)" />
           <datalist id="upload-folders">{folders.map((f) => <option key={f} value={f} />)}</datalist>
         </label>
         <div className="params" style={{ margin: 0 }}>
