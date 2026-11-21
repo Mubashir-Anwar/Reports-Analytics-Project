@@ -8,6 +8,7 @@ import HelpDialog from './HelpDialogs.jsx';
 import { MRD_WITH_IMAGES_ACCEPT } from './mrd.js';
 import { publishState } from './panels.jsx';
 import { LookPanel } from './shared/ThemeMenu.jsx';
+import FunctionsDialog from './FunctionsDialog.jsx';
 
 const KEY = 'designer-ribbon';
 const P = {
@@ -549,6 +550,7 @@ export default function Ribbon({
         <Group label="Function Library">
           <Big icon="fx" label="Expression" title={exprTarget ? 'Open the Expression editor of the selected text' : 'Select a Static Text or Text Field first'} disabled={!exprTarget} onClick={() => onEditExpression?.(exprTarget.id)} primary />
           <Big icon="book" label="Function List" title="Every function an expression can use, with examples" onClick={() => setDialog('functions')} />
+          <Big icon="fx" label="Custom Functions" title="Make your own functions, e.g. FullName(first, last), and use them in every expression" onClick={() => setDialog('customFunctions')} />
         </Group>
         <Group label="Defined Names">
           <Stack>
@@ -560,6 +562,7 @@ export default function Ribbon({
             <span className="rb-hint">{plural(design.variables.length, 'variable')}</span>
             <span className="rb-hint">{plural(design.calculatedFields.length, 'calculated field')}</span>
             <span className="rb-hint">{plural(report.parameters.length, 'parameter')}</span>
+            <span className="rb-hint">{plural((design.functions || []).length, 'custom function')}</span>
           </Stack>
         </Group>
         <Group label="Calculation">
@@ -650,7 +653,11 @@ export default function Ribbon({
         </div>
       </div>
       {!ui.collapsed && <div key={ui.tab} className="rb-body" role="tabpanel" aria-label={TABS.find(([id]) => id === ui.tab)?.[1]}>{body[ui.tab] || body.home}</div>}
-      {dialog && <HelpDialog which={dialog} report={report} design={design} onGo={onGo} onOpen={setDialog} onClose={() => setDialog(null)} />}
+      {dialog === 'customFunctions' && (
+        <FunctionsDialog functions={design.functions || []} onClose={() => setDialog(null)}
+          onSave={(functions) => { dispatch({ type: 'DESIGN', update: (d) => ({ ...d, functions }) }); setDialog(null); }} />
+      )}
+      {dialog && dialog !== 'customFunctions' && <HelpDialog which={dialog} report={report} design={design} onGo={onGo} onOpen={setDialog} onClose={() => setDialog(null)} />}
     </header>
   );
 }

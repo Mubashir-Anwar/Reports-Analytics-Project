@@ -123,6 +123,7 @@ export function applyTemplate(id, columns, title, previous, options) {
   return {
     ...design,
     calculatedFields: previous.calculatedFields || [],
+    functions: previous.functions || [],
     variables: (previous.variables || []).filter((v) => !v.field || columns.includes(v.field)),
     sort: previous.sort || [],
     filterExpression: previous.filterExpression || '',

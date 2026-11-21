@@ -46,6 +46,11 @@ export default function ExpressionEditor({ element, report, design, onSave, onCl
       ],
     },
     functions: { label: 'Functions', items: FUNCTIONS.map(([name, insert, note]) => ({ name, insert, note, java: true })) },
+    mine: {
+      label: 'My Functions',
+      items: (design.functions || []).map((f) => ({ name: f.name, insert: `${f.name}(${(f.params || []).join(', ')})`, java: true,
+        note: `${f.description ? `${f.description}. ` : ''}Replace ${(f.params || []).join(', ') || 'the inputs'} with fields or values, e.g. $F{…}. Formula: ${f.body}` })),
+    },
   }), [report, design]);
 
   const items = groups[category].items.filter((item) => !filter || item.name.toLowerCase().includes(filter.toLowerCase()));
@@ -112,7 +117,7 @@ export default function ExpressionEditor({ element, report, design, onSave, onCl
             <ul>
               {items.map((item) => (
                 <li key={item.name} className={picked === item ? 'on' : ''} onClick={() => setPicked(item)} onDoubleClick={() => insert(item)} title="Double-click to insert">
-                  {category === 'functions' ? item.name : item.insert}
+                  {category === 'functions' || category === 'mine' ? item.name : item.insert}
                 </li>
               ))}
               {!items.length && category === 'fields' && !report.columns.length && <li className="muted">No fields yet — press “Read fields” on the Setup tab, or add one: type its name in Filter.</li>}
@@ -126,7 +131,8 @@ export default function ExpressionEditor({ element, report, design, onSave, onCl
                   <small className="muted">Adding it here is enough when the query returns it (also nested, like assignTo.Name). Otherwise add it to the $project of the query too.</small>
                 </li>
               )}
-              {!items.length && category !== 'fields' && <li className="muted">Nothing here yet.</li>}
+              {!items.length && category === 'mine' && <li className="muted">No custom functions yet: make them in Formulas → Custom Functions (e.g. FullName, WithTax).</li>}
+              {!items.length && category !== 'fields' && category !== 'mine' && <li className="muted">Nothing here yet.</li>}
             </ul>
           </div>
           <div className="expr-info">
@@ -144,7 +150,7 @@ export default function ExpressionEditor({ element, report, design, onSave, onCl
           <div className="expr-missing" role="alert">
             {missing.map((m) => (
               <div key={m.name}>
-                <p><b>⚠ $F&#123;{m.name}&#125; is not a field of this report</b> — it prints empty. Where: Setup → 2 Data adapter and query → Fields.</p>
+                <p><b>⚠ $F&#123;{m.name}&#125; is not a field of this report</b> — it prints empty. Where: Setup → 4 Fields.</p>
                 <div className="row">
                   {m.similar.map((s) => <button key={s.name} type="button" className="btn sm" title={s.why} onClick={() => useInstead(m.name, s.name)}>Use {s.name} instead <small>({s.why})</small></button>)}
                   {onAddField && <button type="button" className="btn sm primary-soft" onClick={() => onAddField(m.name)}>＋ Add {m.name} to Fields</button>}

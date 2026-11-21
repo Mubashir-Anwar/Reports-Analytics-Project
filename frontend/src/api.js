@@ -104,6 +104,8 @@ export const api = {
   auditEvents: (limit) => request(`/api/admin/audit-events?limit=${encodeURIComponent(limit)}`),
   verifyAudit: () => request('/api/admin/audit-events/verify'),
   async logFile() { return (await request('/api/admin/logs/download', { raw: true })).blob(); },
+  /** Custom functions: check them and run one test expression ({ value, type }). */
+  tryFunction: (functions, expression, values) => request('/api/admin/designer/functions/try', { method: 'POST', body: { functions, expression, values } }),
   validateDesign: (definition) => request('/api/admin/designer/validate', { method: 'POST', body: { definition } }),
   /** Render the design as 'pdf' | 'xlsx' | 'csv' (body.format) and return the file as a Blob. */
   renderFile(body) {

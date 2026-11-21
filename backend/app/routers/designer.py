@@ -130,6 +130,35 @@ def register(app: FastAPI, ctx: SimpleNamespace) -> None:
             raise HTTPException(status_code=422, detail=f"design: {exc}") from None
         return {"ok": True, "design": design}
 
+    @app.post("/api/admin/designer/functions/try")
+    async def admin_try_function(request: Request) -> dict[str, Any]:
+        """Formulas → Custom Functions → Try it: check the report's custom functions and run one expression with
+        sample values. Body {"functions": [...], "expression": "FullName(\"Ali\", \"Khan\")", "values": {"Name": "x"}};
+        $F{X} / $P{X} in the expression read "values". Answers {"ok": true, "value": "...", "type": "text|number|..."}."""
+        require_admin(request, "designer")
+        payload = await json_body(request)
+        from backend.app.expressions import jexpr
+        functions = payload.get("functions") or []
+        expression = str(payload.get("expression", "") or "").strip()
+        expression = expression[1:].strip() if expression.startswith("=") else expression
+        values = payload.get("values") if isinstance(payload.get("values"), dict) else {}
+        if not isinstance(functions, list):
+            raise HTTPException(status_code=422, detail="functions must be a list")
+        try:
+            jexpr.compile_functions(functions)
+        except jexpr.JExprError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from None
+        if not expression:
+            return {"ok": True, "value": None, "type": "empty"}
+        jexpr.use_functions(functions)
+        try:
+            result = jexpr.evaluate(expression, lambda kind, name: values.get(name))
+        except jexpr.JExprError as exc:
+            raise HTTPException(status_code=422, detail=f"The test expression failed: {exc}") from None
+        kind = ("empty" if result is None else "yes/no" if isinstance(result, bool) else
+                "number" if isinstance(result, (int, float)) else "text" if isinstance(result, str) else "date" if hasattr(result, "year") else "value")
+        return {"ok": True, "value": jexpr.java_str(result) if result is not None else None, "type": kind}
+
     @app.post("/api/admin/designer/render")
     async def admin_designer_render(request: Request) -> Response:
         """Render a design for live preview as PDF, Excel or CSV. Uses supplied rows, else synthetic sample rows."""

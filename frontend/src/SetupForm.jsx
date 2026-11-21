@@ -2,7 +2,8 @@ import { useEffect, useRef, useState } from 'react';
 import { api } from './api.js';
 import { inferColumns } from './designModel.js';
 import { AdapterOptions, DbLogo } from './panels.jsx';
-import { checkSetup, optionalFilters, placeOf } from './errorHelp.js';
+import { checkSetup, explainError, optionalFilters, placeOf } from './errorHelp.js';
+import { reportPayload } from './store.js';
 import CodeArea, { selectLine } from './CodeArea.jsx';
 import FieldsEditor from './FieldsEditor.jsx';
 
@@ -31,7 +32,11 @@ const useAdapters = (notify, refreshKey) => {
 };
 
 /** Data adapter, collection, query and fields (Jasper: Dataset and Query → Query). */
-export function QueryEditor({ state, dispatch, notify, refreshKey, markLine, markNote }) {
+/**
+ * tests: show the Test connection / Check query / Try with data tools (Setup only).
+ * wrap(key, content, { summary, issues, tested }): puts the adapter, query and fields parts in their own segments.
+ */
+export function QueryEditor({ state, dispatch, notify, refreshKey, markLine, markNote, tests = false, wrap, onFocus, onMeta }) {
   const { report } = state;
   const [busy, setBusy] = useState(false);
   const [adapters, loadAdapters] = useAdapters(notify, refreshKey);
@@ -107,10 +112,64 @@ export function QueryEditor({ state, dispatch, notify, refreshKey, markLine, mar
     } catch (error) { notify(`The query could not be parsed: ${error.message}`, 'error'); } finally { setBusy(false); }
   };
 
-  return (
+  // ---- tests (Setup only): connection, query check, a run with test values; reset when what they tested changes
+  const [connTest, setConnTest] = useState(null); // { state: busy|ok|error, text }
+  const [queryTest, setQueryTest] = useState(null); // { state, text, error?, rows?, columns? }
+  const [testValues, setTestValues] = useState({});
+  useEffect(() => { setConnTest(null); }, [report.connectionId]);
+  useEffect(() => { setQueryTest(null); }, [report.querySource, report.queryLanguage, report.collection, report.connectionId]);
+  const asked = (report.parameters || []).filter((p) => p.prompt !== false && p.name);
+  const testValueOf = (p) => testValues[p.name] ?? (p.type === 'date' ? new Date().toISOString().slice(0, 10) : p.type === 'boolean' ? 'true' : '');
+
+  const testConnection = async () => {
+    setConnTest({ state: 'busy', text: 'Connecting…' });
+    try {
+      const r = await api.testConnection(report.connectionId);
+      setConnTest({ state: 'ok', text: r.message || 'Connected' });
+    } catch (error) { setConnTest({ state: 'error', text: error.message, error: explainError(error.message) }); }
+  };
+  const checkQuery = async () => {
+    setQueryTest({ state: 'busy', text: 'Checking the query…' });
+    try {
+      if (isSql) {
+        const r = await api.queryFields(report.connectionId, report.querySource);
+        setQueryTest({ state: 'ok', text: `The database accepts the query: ${r.columns.length} column(s) (no rows were read).` });
+      } else {
+        const r = await api.parseQuery(report.queryLanguage, report.querySource, report.parameters);
+        setQueryTest({ state: 'ok', text: `The query is valid: ${r.stageCount} stage(s)${r.collection ? ` on ${r.collection}` : ''}. It was only checked, not run.` });
+      }
+    } catch (error) { setQueryTest({ state: 'error', text: error.message, error: explainError(error.message) }); }
+  };
+  const tryQuery = async () => {
+    const empty = asked.filter((p) => p.required && !String(testValueOf(p)).trim());
+    if (empty.length) { setQueryTest({ state: 'error', text: `Fill in the test value of ${empty.map((p) => p.label || p.name).join(', ')} first.` }); return; }
+    setQueryTest({ state: 'busy', text: 'Reading the first records…' });
+    try {
+      const values = Object.fromEntries(asked.map((p) => [p.name, testValueOf(p)]));
+      const data = await api.draftPreview(reportPayload(state), values, report.connectionId);
+      setQueryTest({ state: 'ok', text: data.rowCount ? `It works: first ${data.rowCount} record(s) shown below.` : 'It works, but no records match these test values.', rows: data.rows.slice(0, 5), columns: data.columns });
+    } catch (error) { setQueryTest({ state: 'error', text: error.message, error: explainError(error.message) }); }
+  };
+
+  const sourceIssues = [];
+  if (selected && !selected.configured) sourceIssues.push({ level: 'error', text: 'This adapter has no saved connection URL yet', fix: 'Add it in the Data Adapters tab or on /admin → Data sources.' });
+  if (adapters !== null && report.connectionId && !known) sourceIssues.push({ level: 'error', text: 'This adapter ID is not registered on this server', fix: 'Choose one from the list.' });
+  if (kindMismatch) sourceIssues.push({ level: 'error', text: isSql ? 'SQL query, but a MongoDB adapter' : 'MongoDB query, but a SQL adapter', fix: isSql ? 'Choose a SQL data adapter.' : 'Choose a MongoDB adapter, or Query language SQL.' });
+  const languageName = { mongosh: 'Mongo Shell', 'aggregation-json': 'Aggregation JSON', javascript: 'JavaScript', python: 'Python', sql: 'SQL' }[report.queryLanguage] || report.queryLanguage;
+  const lineCount = report.querySource.trim() ? report.querySource.trim().split('\n').length : 0;
+  const usedParams = [...new Set([...report.querySource.matchAll(/\$[PX]\{(?:IN,\s*[^,]+,\s*)?(\w+)\}/g)].map((m) => m[1]))];
+
+  const readFieldsRow = (
+    <div className="row" data-guide="fields">
+      <button className="btn primary" onClick={isSql ? readSqlFields : detect} disabled={busy || !report.querySource.trim() || (isSql && !report.connectionId)}>Read fields</button>
+      <span className="muted">{isSql ? 'Asks the database for the columns (LIMIT 0): no rows are read, nothing is changed.' : 'Reads the field names from the query ($project / $group). The query is only parsed, not executed.'}</span>
+    </div>
+  );
+
+  const sourcePart = (
     <>
       <div className="form-grid">
-        <label data-focus="adapter">Data adapter <small>(the database connection this report reads from)</small>
+        <label data-focus="adapter" data-guide="adapter">Data adapter <small>(the database connection this report reads from)</small>
           <span className="inline">
             {selected && <DbLogo type={selected.type || 'mongodb'} />}
             <select value={report.connectionId} onChange={(e) => chooseAdapter(e.target.value)} disabled={adapters === null}>
@@ -121,8 +180,8 @@ export function QueryEditor({ state, dispatch, notify, refreshKey, markLine, mar
             </select>
             <button type="button" className="btn sm" onClick={loadAdapters} title="Reload the adapter list">↻</button>
           </span>
-          {selected && !selected.configured && <small className="err">This adapter has no saved connection URL yet. Add it in the Data Adapters tab or on /admin → Data sources.</small>}
-          {adapters !== null && report.connectionId && !known && <small className="err">This adapter ID is not registered on this server. Choose one from the list.</small>}
+          {!wrap && selected && !selected.configured && <small className="err">This adapter has no saved connection URL yet. Add it in the Data Adapters tab or on /admin → Data sources.</small>}
+          {!wrap && adapters !== null && report.connectionId && !known && <small className="err">This adapter ID is not registered on this server. Choose one from the list.</small>}
         </label>
         <label data-focus="language">Query language
           <select value={report.queryLanguage} onChange={(e) => chooseLanguage(e.target.value)}>
@@ -134,30 +193,122 @@ export function QueryEditor({ state, dispatch, notify, refreshKey, markLine, mar
               <option value="sql">SQL — PostgreSQL, MySQL, SQL Server, Oracle</option>
             </optgroup>
           </select>
-          {kindMismatch && <small className="err">{isSql ? 'This is a SQL query: choose a SQL data adapter above (PostgreSQL, MySQL, SQL Server or Oracle).' : 'This adapter is a SQL database: choose a MongoDB adapter, or Query language SQL.'}</small>}
+          {!wrap && kindMismatch && <small className="err">{isSql ? 'This is a SQL query: choose a SQL data adapter above (PostgreSQL, MySQL, SQL Server or Oracle).' : 'This adapter is a SQL database: choose a MongoDB adapter, or Query language SQL.'}</small>}
         </label>
         {!isSql && (
-          <label data-focus="collection">Collection name <small>(only the name, e.g. Orders; filled in from a Jasper runCommand query)</small>
+          <label data-focus="collection" data-guide="collection">Collection name <small>(only the name, e.g. Orders; filled in from a Jasper runCommand query)</small>
             <input value={report.collection} onChange={(e) => set({ collection: e.target.value })} onBlur={(e) => { const clean = cleanCollection(e.target.value); if (clean !== e.target.value) set({ collection: clean }); }} placeholder="Collection name" />
           </label>
         )}
       </div>
+      {tests && (
+        <div className="seg-test" data-guide="conn-test">
+          <button type="button" className="btn" onClick={testConnection} disabled={!report.connectionId || !known || connTest?.state === 'busy'}>🔌 Test connection</button>
+          <TestResult result={connTest} onFocus={onFocus} idle="Checks that the server can reach this database. Nothing is read or changed." />
+        </div>
+      )}
+    </>
+  );
+
+  const queryPart = (
+    <>
       {isSql ? (
-        <div className="block query-block">SQL query <small>(one SELECT; parameters: $P&#123;StartDate&#125;; a list filter: $X&#123;IN, branch, Branches&#125; — an empty list = no filter)</small>
+        <div className="block query-block" data-guide="query">SQL query <small>(one SELECT; parameters: $P&#123;StartDate&#125;; a list filter: $X&#123;IN, branch, Branches&#125; — an empty list = no filter)</small>
           <CodeArea focusName="query" markLine={markLine} markNote={markNote} rows={14} value={report.querySource} onChange={(e) => set({ querySource: e.target.value })} placeholder={'SELECT o.id, o.branch, o.amount, o.placed_on\nFROM orders o\nWHERE o.placed_on BETWEEN $P{StartDate} AND $P{EndDate}\n  AND $X{IN, o.branch, Branches}\nORDER BY o.placed_on'} />
         </div>
       ) : (
-        <div className="block query-block">Query <small>(parameters: $P&#123;StartDate&#125;; db.collection.aggregate([...]) or a Jaspersoft Studio &#123;"runCommand": &#123;"aggregate": …, "pipeline": [...]&#125;&#125; query)</small>
+        <div className="block query-block" data-guide="query">Query <small>(parameters: $P&#123;StartDate&#125;; db.collection.aggregate([...]) or a Jaspersoft Studio &#123;"runCommand": &#123;"aggregate": …, "pipeline": [...]&#125;&#125; query)</small>
           <CodeArea focusName="query" markLine={markLine} markNote={markNote} rows={14} value={report.querySource} onChange={(e) => set({ querySource: e.target.value })} placeholder={'db.getCollection("Orders").aggregate([\n  {"$match": {"Date": {"$gte": $P{StartDate}, "$lte": $P{EndDate}}}},\n  {"$project": {"Identifier": 1, "Branch": 1, "Amount": 1}}\n])'} />
         </div>
       )}
-      <div className="row">
-        <button className="btn primary" onClick={isSql ? readSqlFields : detect} disabled={busy || !report.querySource.trim() || (isSql && !report.connectionId)}>Read fields</button>
-        <span className="muted">{isSql ? 'Asks the database for the columns (LIMIT 0): no rows are read, nothing is changed.' : 'The query is only parsed here, not executed.'}</span>
-      </div>
+      {!tests && readFieldsRow}
+      {tests && (
+        <div className="seg-test" data-guide="query-test">
+          <div className="row">
+            <button type="button" className="btn" onClick={checkQuery} disabled={!report.querySource.trim() || (isSql && !report.connectionId) || queryTest?.state === 'busy'}>✔ Check query</button>
+            <button type="button" className="btn" onClick={tryQuery} disabled={!report.querySource.trim() || !report.connectionId || !known || queryTest?.state === 'busy'}>▶ Try with data</button>
+            <span className="muted">Check = syntax only. Try = reads up to 20 records with the test values below.</span>
+          </div>
+          {asked.length > 0 && (
+            <div className="test-values">
+              <b>Test values</b>
+              {asked.map((p) => (
+                <label key={p.name}>{p.label || p.name}{p.required ? ' *' : ''}
+                  {p.allowedValues?.length ? (
+                    <select value={testValueOf(p)} onChange={(e) => setTestValues((v) => ({ ...v, [p.name]: e.target.value }))}>
+                      <option value="">—</option>{p.allowedValues.map((a) => <option key={a}>{a}</option>)}
+                    </select>
+                  ) : (
+                    <input type={p.type === 'date' ? 'date' : p.type === 'integer' || p.type === 'number' ? 'number' : 'text'} value={testValueOf(p)}
+                      onChange={(e) => setTestValues((v) => ({ ...v, [p.name]: e.target.value }))} />
+                  )}
+                </label>
+              ))}
+            </div>
+          )}
+          <TestResult result={queryTest} onFocus={onFocus} idle="Not tested yet." />
+          {queryTest?.rows?.length > 0 && (
+            <div className="test-rows">
+              <table className="grid">
+                <thead><tr>{queryTest.columns.map((c) => <th key={c}>{c}</th>)}</tr></thead>
+                <tbody>{queryTest.rows.map((row, i) => (
+                  // eslint-disable-next-line react/no-array-index-key -- rows have no id
+                  <tr key={i}>{queryTest.columns.map((c) => <td key={c}>{row[c] === null || row[c] === undefined ? <span className="muted">—</span> : String(typeof row[c] === 'object' ? JSON.stringify(row[c]) : row[c])}</td>)}</tr>
+                ))}</tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      )}
+    </>
+  );
+
+  const fieldsPart = (
+    <>
+      {tests && readFieldsRow}
       <FieldsEditor columns={report.columns} design={state.design} calculated={(state.design?.calculatedFields || []).map((c) => c.name)}
         onChange={(columns) => set({ columns })} />
     </>
+  );
+
+  const queryState = queryTest && queryTest.state !== 'busy' ? queryTest.state : null;
+  const connState = connTest && connTest.state !== 'busy' ? connTest.state : null;
+  const partsKey = JSON.stringify({ source: { issues: sourceIssues, tested: connState }, query: { issues: [], tested: queryState }, fields: { issues: [] } });
+  useEffect(() => { if (onMeta) onMeta(JSON.parse(partsKey)); }, [partsKey]); // eslint-disable-line react-hooks/exhaustive-deps
+  if (!wrap) return <>{sourcePart}{queryPart}{fieldsPart}</>;
+  return (
+    <>
+      {wrap('source', sourcePart, {
+        summary: selected ? `${selected.name}${selected.database ? ` · ${selected.database}` : ''} · ${languageName}${!isSql && report.collection ? ` · ${report.collection}` : ''}` : 'No adapter chosen',
+        issues: sourceIssues, tested: connState,
+      })}
+      {wrap('query', queryPart, {
+        summary: lineCount ? `${lineCount} line${lineCount > 1 ? 's' : ''}${usedParams.length ? ` · uses ${usedParams.join(', ')}` : ''}` : 'Empty',
+        issues: [], tested: queryState,
+      })}
+      {wrap('fields', fieldsPart, {
+        summary: report.columns.length ? `${report.columns.length} field${report.columns.length > 1 ? 's' : ''}: ${report.columns.slice(0, 4).join(', ')}${report.columns.length > 4 ? '…' : ''}` : 'No fields yet',
+        issues: [],
+      })}
+    </>
+  );
+}
+
+/** The outcome of a segment test: a one-line status, and for a failure the plain-words explanation and "Go there". */
+function TestResult({ result, onFocus, idle }) {
+  if (!result) return <p className="test-result idle">{idle}</p>;
+  const info = result.error;
+  return (
+    <div className={`test-result ${result.state}`} role="status">
+      <p><span className="dot" />{result.state === 'error' && info?.title ? <b>{info.title}: </b> : null}{result.text}</p>
+      {result.state === 'error' && info && (
+        <>
+          {info.hint && <small>{info.hint}</small>}
+          {info.steps?.length > 0 && <ol>{info.steps.map((s) => <li key={s}>{s}</li>)}</ol>}
+          {info.focus && onFocus && <button type="button" className="btn sm" onClick={() => onFocus({ ...info.focus, note: `${info.title}. ${info.steps?.[0] || ''}` })}>Go there{info.place ? ` · ${info.place}` : ''}</button>}
+        </>
+      )}
+    </div>
   );
 }
 
@@ -199,7 +350,7 @@ export function ParametersEditor({ state, dispatch }) {
           The name has no fixed text, so for safety list the values a user may choose under “Allowed values” (e.g. <code>CAR, BIKE</code>), or put fixed text around the parameter (e.g. <code>Orders-$P&#123;Branch&#125;</code>).
         </p>
       )}
-      <table className="grid">
+      <table className="grid" data-guide="parameters">
         <thead><tr><th>Name (URL key)</th><th>Type</th><th>Label</th><th>Allowed values</th><th>Required</th><th title="CNIC, account number…: kept masked (42*****71) in the run log">Sensitive</th><th /></tr></thead>
         <tbody>
           {report.parameters.map((p, i) => (
@@ -259,6 +410,188 @@ function useFocusPlace(root, focus) {
   }, [focus?.nonce]); // eslint-disable-line react-hooks/exhaustive-deps
 }
 
+const SEGMENTS = [
+  ['details', 'Report details', 'Name, ID and folder'],
+  ['source', 'Data adapter', 'Which database the report reads'],
+  ['query', 'Query', 'What data the report reads'],
+  ['fields', 'Fields', 'The columns the query returns'],
+  ['parameters', 'Parameters', 'What the user types before running'],
+  ['layout', 'Layout', 'How the report looks'],
+];
+/** The segment a problem belongs to, from the place it points to. */
+const segmentOf = (focus) => ({ adapter: 'source', language: 'source', collection: 'source', query: 'query', fields: 'fields', parameters: 'parameters', design: 'layout' }[focus?.target] || 'details');
+
+/** ok | warn | error from the segment's problems and its last test. */
+function statusOf(issues, tested) {
+  if (issues.some((p) => p.level === 'error') || tested === 'error') return 'error';
+  if (issues.some((p) => p.level === 'warn')) return 'warn';
+  return 'ok';
+}
+function badgeText(issues, tested) {
+  const errors = issues.filter((p) => p.level === 'error').length;
+  const warns = issues.filter((p) => p.level === 'warn').length;
+  const parts = [];
+  if (errors) parts.push(`${errors} error${errors > 1 ? 's' : ''}`);
+  if (warns) parts.push(`${warns} warning${warns > 1 ? 's' : ''}`);
+  if (tested === 'error') parts.push('test failed');
+  if (parts.length) return parts.join(' · ');
+  return tested === 'ok' ? 'Tested ✓' : 'Looks fine';
+}
+
+/** One collapsible part of Setup: number, title, one-line summary and status; its problems first, then its form. */
+function Segment({ id, index, title, hint, summary, issues, tested, open, onToggle, onFocus, hiddenSeg, children }) {
+  const status = statusOf(issues, tested);
+  return (
+    <section hidden={hiddenSeg} className={`card seg ${status} ${open ? 'open' : ''}`} id={`seg-${id}`} data-focus={id === 'details' || id === 'parameters' ? id : undefined}>
+      <button type="button" className="seg-head" aria-expanded={open} onClick={onToggle}>
+        <span className={`step ${status}`}>{index + 1}</span>
+        <span className="seg-title"><b>{title}</b><small>{open ? hint : summary}</small></span>
+        <span className={`seg-badge ${status}`}>{badgeText(issues, tested)}</span>
+        <span className="seg-chevron" aria-hidden="true">{open ? '▾' : '▸'}</span>
+      </button>
+      <div className="seg-body" hidden={!open}>
+        {issues.length > 0 && (
+          <ul className="seg-issues">
+            {issues.map((p) => (
+              <li key={`${p.text}-${p.place || ''}`} className={p.level}>
+                <div><span>{p.text}</span><small>{p.fix}{p.place ? ` · ${p.place}` : ''}</small></div>
+                {p.focus && onFocus && <button type="button" className="btn sm" onClick={() => onFocus({ ...p.focus, note: `${p.text}. ${p.fix}` })}>Show me</button>}
+              </li>
+            ))}
+          </ul>
+        )}
+        {children}
+      </div>
+    </section>
+  );
+}
+
+/** "StartDate" → "Start date" (a label made from a parameter name). */
+const labelFrom = (name) => String(name || '').replace(/_/g, ' ').replace(/([a-z0-9])([A-Z])/g, '$1 $2').toLowerCase().replace(/^./, (c) => c.toUpperCase());
+
+/** A starter query for the chosen language and collection: the user then changes the names to their own. */
+function starterQuery(report) {
+  if (report.queryLanguage === 'sql') {
+    return 'SELECT branch, amount, placed_on\nFROM orders\nWHERE placed_on BETWEEN $P{StartDate} AND $P{EndDate}\nORDER BY placed_on';
+  }
+  const collection = String(report.collection || '').trim() || 'Orders';
+  return `db.getCollection("${collection}").aggregate([\n  {"$match": {"Date": {"$gte": $P{StartDate}, "$lte": $P{EndDate}}}},\n  {"$project": {"_id": 0, "Branch": 1, "Amount": 1, "Date": 1}}\n])`;
+}
+
+/**
+ * Guided mode: every step as small tasks, one shown at a time. A task is
+ * { key, ask (the question), why, example, examples (chips that fill the field), apply ({ label, run }), guide (the
+ *   field to highlight below: data-guide), done, optional }.
+ */
+function guidedTasks(report, all, elements, { set, onTemplates }) {
+  const errorsIn = (id, test) => (all[id]?.issues || []).filter((p) => p.level === 'error' && (!test || test(p)));
+  const isSql = report.queryLanguage === 'sql';
+  const params = report.parameters || [];
+  const asked = params.filter((p) => p.prompt !== false);
+  const auto = report.isNew && !report.idManual;
+  const missingParams = [...new Set(errorsIn('parameters', (p) => /no parameter/.test(p.text)).map((p) => p.focus?.name).filter(Boolean))];
+  const unlabeled = asked.filter((p) => !String(p.label || '').trim());
+  const fillTitle = (title) => set({ title, ...(auto ? { id: reportIdFrom(title) } : {}) });
+  return {
+    details: [
+      { key: 'name', ask: 'What should the report be called?', why: 'Pick a name people will recognise in the report list.',
+        example: 'Branch wise sales', examples: ['Branch wise sales', 'Customer statement', 'Monthly salary slip'], onExample: fillTitle,
+        guide: 'name', done: Boolean(String(report.title || '').trim()) && report.title !== 'New report' },
+      { key: 'id', ask: 'Check the report ID', why: 'The ID is the report\'s address. Apps and links use it to run the report, so it cannot change once saved.',
+        example: `/generate/${report.id || 'BRANCH_WISE_SALES'}.pdf`, guide: 'id', done: !errorsIn('details').length,
+        apply: report.isNew && report.title ? { label: 'Make it from the name', run: () => set({ id: reportIdFrom(report.title), idManual: false }) } : null },
+      { key: 'description', ask: 'Describe it in one line', why: 'Optional. It helps others find the right report later.', optional: true,
+        example: 'Total sales of each branch for a date range, for the finance team.', guide: 'description',
+        done: Boolean(String(report.description || '').trim()),
+        apply: { label: 'Use this example', run: () => set({ description: 'Total sales of each branch for a date range, for the finance team.' }) } },
+    ],
+    source: [
+      { key: 'adapter', ask: 'Which database should it read?', why: 'A data adapter is a saved connection to a database. Pick one from the list below.',
+        example: 'Sales DB · MongoDB  — or —  Finance · PostgreSQL', guide: 'adapter', done: Boolean(report.connectionId) && !errorsIn('source', (p) => p.focus?.target !== 'collection').length },
+      ...(isSql ? [] : [{ key: 'collection', ask: 'Which collection holds the data?', why: 'In MongoDB, a collection is like a table. Type only its name.',
+        example: 'Orders', guide: 'collection', done: !errorsIn('source', (p) => p.focus?.target === 'collection').length }]),
+      { key: 'conn-test', ask: 'Test the connection', why: 'Optional, but quick. It only checks that the server can reach the database. Nothing is read or changed.', optional: true,
+        example: '● Connected', guide: 'conn-test', done: all.source?.tested === 'ok' },
+    ],
+    query: [
+      { key: 'query', ask: 'Write the query', why: isSql ? 'One SELECT statement. A value the user types becomes $P{Name}.' : 'An aggregation pipeline. A value the user types becomes $P{Name}.',
+        example: starterQuery(report), code: true, guide: 'query', done: Boolean(String(report.querySource || '').trim()),
+        apply: !String(report.querySource || '').trim() ? { label: 'Start from this example', run: () => set({ querySource: starterQuery(report) }) } : null },
+      { key: 'query-test', ask: 'Check it, then try it with data', why: '“Check query” finds typing mistakes. “Try with data” shows the first records with test values.', optional: true,
+        example: '✓ It works: first 5 records shown below.', guide: 'query-test', done: all.query?.tested === 'ok' },
+    ],
+    fields: [
+      { key: 'fields', ask: 'Read the fields from the query', why: 'Fields are the columns the report can print. Press “Read fields”; you can remove the ones you don’t need.',
+        example: 'Branch · Amount · Date', guide: 'fields', done: (report.columns || []).length > 0 && !(all.fields?.issues || []).length },
+    ],
+    parameters: [
+      { key: 'params', ask: missingParams.length ? `Add ${missingParams.join(', ')}` : 'What does the user type before running?',
+        why: 'Every $P{…} in the query is a parameter: a value the user types or picks, like a start and end date.',
+        example: 'StartDate (date) · EndDate (date) · Branch (text)', guide: 'parameters', done: !errorsIn('parameters').length,
+        apply: missingParams.length ? { label: `Add ${missingParams.length > 1 ? 'them' : 'it'} for me`, run: () => set({ parameters: [...params, ...missingParams.map((name) => ({ name, label: labelFrom(name), type: /date/i.test(name) ? 'date' : 'string', required: true }))] }) } : null },
+      { key: 'labels', ask: 'Give each parameter a friendly label', why: 'Optional. The label is what the user sees on the run screen.', optional: true,
+        example: 'StartDate → “Start date”', guide: 'parameters', done: !unlabeled.length,
+        apply: unlabeled.length ? { label: 'Make labels from the names', run: () => set({ parameters: params.map((p) => (p.prompt !== false && !String(p.label || '').trim() ? { ...p, label: labelFrom(p.name) } : p)) }) } : null },
+    ],
+    layout: [
+      { key: 'template', ask: 'How should the report look?', why: 'Start from a template: a table, a letter per record, a form or a certificate. You can change everything later in the Design tab.',
+        example: 'Table: one row per record, with totals at the end', guide: 'layout', done: elements > 0,
+        apply: { label: 'Choose a template…', run: onTemplates } },
+    ],
+  };
+}
+
+/** Guided mode: one small task at a time, with an example and the field to fill highlighted below. */
+function Coach({ step, tasks, taskIndex, onTask, onBack, onNext, onShow, allDone }) {
+  const index = SEGMENTS.findIndex(([id]) => id === step);
+  const [, title] = SEGMENTS[index];
+  const task = tasks[Math.min(taskIndex, tasks.length - 1)];
+  const lastTask = taskIndex >= tasks.length - 1;
+  const lastStep = index === SEGMENTS.length - 1;
+  const doneCount = tasks.filter((t) => t.done).length;
+  return (
+    <section className="coach" aria-live="polite">
+      <div className="coach-top">
+        <span className="coach-count">Step {index + 1} of {SEGMENTS.length} · {title}</span>
+        {tasks.length > 1 && (
+          <span className="coach-dots" aria-label={`${doneCount} of ${tasks.length} done`}>
+            {tasks.map((t, i) => (
+              <button key={t.key} type="button" className={`${t.done ? 'done' : ''} ${i === taskIndex ? 'on' : ''}`} title={t.ask} onClick={() => onTask(i)}>
+                {t.done ? '✓' : i + 1}
+              </button>
+            ))}
+          </span>
+        )}
+      </div>
+      <div className={`coach-card ${task.done ? 'is-done' : ''}`}>
+        <h3>{task.done && <span className="coach-ok">✓</span>}{task.ask}{task.optional && <small className="coach-opt">optional</small>}</h3>
+        <p className="coach-why">{task.why}</p>
+        <div className="coach-example">
+          <span className="coach-example-label">Example</span>
+          {task.code ? <pre>{task.example}</pre> : <span className="coach-example-text">{task.example}</span>}
+          {task.examples && (
+            <span className="coach-chips">
+              {task.examples.map((e) => <button key={e} type="button" className="btn sm" onClick={() => task.onExample(e)}>{e}</button>)}
+            </span>
+          )}
+          {task.apply && <button type="button" className="btn sm primary-soft coach-apply" onClick={task.apply.run}>{task.apply.label}</button>}
+        </div>
+        <button type="button" className="coach-where" onClick={onShow}>👇 {task.done ? 'Done. You can still change it in the highlighted box below.' : 'Fill it in the highlighted box below'}</button>
+      </div>
+      <div className="coach-buttons">
+        <button type="button" className="btn" onClick={onBack} disabled={index === 0 && taskIndex === 0}>← Back</button>
+        {lastStep && lastTask ? (
+          <span className={`coach-finish ${allDone ? 'ok' : ''}`}>{allDone ? '🎉 All done: open Preview to run the report.' : 'Almost there: the red steps above still need something.'}</span>
+        ) : (
+          <button type="button" className={`btn ${task.done || task.optional ? 'primary' : ''}`} onClick={onNext}>
+            {task.done ? 'Next →' : task.optional ? 'Skip →' : 'Skip for now →'}
+          </button>
+        )}
+      </div>
+    </section>
+  );
+}
+
 export default function SetupForm({ state, dispatch, notify, onTemplates, refreshKey, focus, onFocus, onClearFocus }) {
   const root = useRef(null);
   useFocusPlace(root, focus);
@@ -270,32 +603,99 @@ export default function SetupForm({ state, dispatch, notify, onTemplates, refres
   // The ID follows the name until somebody types an ID of their own (only while the report is new).
   const auto = report.isNew && !report.idManual;
 
-  return (
-    <div className="setup" ref={root}>
-      {focus?.note && (
-        <div className="fix-note" role="status">
-          <p><b>Fix here:</b> {placeOf(focus)}<br />{focus.note}</p>
-          <button type="button" className="icon" aria-label="Close" onClick={onClearFocus}>✕</button>
-        </div>
-      )}
-      {problems.length > 0 && (
-        <section className={`card setup-checks ${problems.some((p) => p.level === 'error') ? '' : 'clean'}`}>
-          <h3>Before you run: {problems.length} thing{problems.length > 1 ? 's' : ''} to check</h3>
-          <ul>
-            {problems.map((p) => (
-              <li key={`${p.text}-${p.place}`} className={p.level}>
-                <div><span>{p.text}</span><small>{p.fix} · {p.place}</small></div>
-                {p.focus && onFocus && <button type="button" className="btn sm" onClick={() => onFocus({ ...p.focus, note: `${p.text}. ${p.fix}` })}>Go there</button>}
-              </li>
-            ))}
-          </ul>
-        </section>
-      )}
-      <section className="card" data-focus="details">
-        <h3><span className="step">1</span> Report details</h3>
+  const [queryMeta, setQueryMeta] = useState({});
+  const byPart = Object.fromEntries(SEGMENTS.map(([id]) => [id, []]));
+  problems.forEach((p) => byPart[segmentOf(p.focus)].push(p));
+  // Open at first: every part with a problem; when all is fine, only the first part.
+  const [open, setOpen] = useState(() => {
+    const withProblems = SEGMENTS.map(([id]) => id).filter((id) => byPart[id].length);
+    return new Set(withProblems.length ? withProblems : ['details']);
+  });
+  const toggle = (id) => setOpen((s) => { const n = new Set(s); if (n.has(id)) n.delete(id); else n.add(id); return n; });
+  const reveal = (id) => {
+    setOpen((s) => new Set([...s, id]));
+    setTimeout(() => document.getElementById(`seg-${id}`)?.scrollIntoView({ block: 'start', behavior: 'smooth' }), 30);
+  };
+  // "Go there" from anywhere (Preview errors, the problem lists) opens the part it points to.
+  useEffect(() => { if (focus) { setOpen((s) => new Set([...s, segmentOf(focus)])); setCurrent(segmentOf(focus)); setTaskIndex(0); } }, [focus?.nonce]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Guided = one step at a time with a checklist (the default); All = every part on one page. Remembered per browser.
+  const [mode, setModeState] = useState(() => { try { return localStorage.getItem('setup.mode') === 'all' ? 'all' : 'guided'; } catch { return 'guided'; } });
+  const setMode = (value) => { setModeState(value); try { localStorage.setItem('setup.mode', value); } catch { /* private window */ } };
+  const [current, setCurrent] = useState(() => SEGMENTS.find(([id]) => byPart[id].some((p) => p.level === 'error'))?.[0] || 'details');
+  const guided = mode === 'guided';
+  const [taskIndex, setTaskIndex] = useState(0);
+
+  const countElements = (band) => (Array.isArray(band?.elements) ? band.elements.length
+    : Object.values(band || {}).reduce((m, g) => m + (Array.isArray(g?.elements) ? g.elements.length : 0), 0));
+  const elements = Object.values(state.design?.bands || {}).reduce((n, b) => n + countElements(b), 0);
+  const computed = report.parameters.filter((p) => p.prompt === false).length;
+  const plural = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`;
+  const summaries = {
+    details: `${report.title || 'No name'} · ${report.id || 'no ID'} · ${String(report.folder || 'General').split('/').join(' / ')}`,
+    parameters: report.parameters.length
+      ? `${plural(report.parameters.length, 'parameter')}: ${report.parameters.slice(0, 4).map((p) => `${p.name}${p.required ? '*' : ''}`).join(', ')}${report.parameters.length > 4 ? '…' : ''}${computed ? ` · ${computed} computed` : ''}`
+      : 'None: the report runs without asking anything',
+    layout: elements ? `${plural(elements, 'element')} on the page · change them in the Design tab` : 'Empty page: choose a template or design it',
+  };
+  // The adapter, query and fields parts live in QueryEditor: it reports their own problems and test results here.
+  const all = Object.fromEntries(SEGMENTS.map(([id]) => [id, {
+    issues: [...byPart[id], ...(queryMeta[id]?.issues || [])], tested: queryMeta[id]?.tested,
+  }]));
+  const tasks = guidedTasks(report, all, elements, { set, onTemplates });
+  const stepIndex = SEGMENTS.findIndex(([id]) => id === current);
+  const stepTasks = tasks[current];
+  const task = stepTasks[Math.min(taskIndex, stepTasks.length - 1)];
+  const target = () => (task?.guide ? root.current?.querySelector(`[data-guide="${task.guide}"]`) : null);
+  const showTarget = (focusIt) => setTimeout(() => {
+    const el = target();
+    if (!el) return;
+    el.scrollIntoView({ block: focusIt ? 'center' : 'nearest', behavior: 'smooth' });
+    if (focusIt) el.querySelector?.('input, select, textarea')?.focus({ preventScroll: true });
+  }, 40);
+  /** Open a step at a task: by default its first task still to do. */
+  const goStep = (id, at) => {
+    const list = tasks[id];
+    const first = list.findIndex((t) => !t.done);
+    setCurrent(id);
+    setTaskIndex(at ?? (first < 0 ? 0 : first));
+    setTimeout(() => root.current?.scrollIntoView({ block: 'start', behavior: 'smooth' }), 20);
+  };
+  const nextTask = () => {
+    if (taskIndex < stepTasks.length - 1) { setTaskIndex(taskIndex + 1); return; }
+    if (stepIndex < SEGMENTS.length - 1) goStep(SEGMENTS[stepIndex + 1][0], 0);
+  };
+  const prevTask = () => {
+    if (taskIndex > 0) { setTaskIndex(taskIndex - 1); return; }
+    if (stepIndex > 0) { const prev = SEGMENTS[stepIndex - 1][0]; goStep(prev, tasks[prev].length - 1); }
+  };
+  // On opening: start at the first task still to do.
+  useEffect(() => { const first = stepTasks.findIndex((t) => !t.done); if (first > 0) setTaskIndex(first); }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  // The field of the current task glows, so the user knows where to type.
+  useEffect(() => {
+    root.current?.querySelectorAll('.guide-target').forEach((el) => el.classList.remove('guide-target'));
+    if (!guided) return;
+    target()?.classList.add('guide-target');
+  });
+  useEffect(() => { if (guided) showTarget(false); }, [guided, current, taskIndex]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const segment = (id, content, extra = {}) => {
+    const index = SEGMENTS.findIndex(([k]) => k === id);
+    const [, title, hint] = SEGMENTS[index];
+    const issues = [...byPart[id], ...(extra.issues || [])];
+    return (
+      <Segment key={id} id={id} index={index} title={title} hint={hint} summary={extra.summary || summaries[id]} issues={issues}
+        tested={extra.tested} open={guided ? id === current : open.has(id)} hiddenSeg={guided && id !== current}
+        onToggle={() => (guided ? undefined : toggle(id))} onFocus={onFocus}>{content}</Segment>
+    );
+  };
+
+  const body = (
+    <>
+      {segment('details', (
         <div className="form-grid">
-          <label>Report name<input value={report.title} onChange={(e) => set({ title: e.target.value, ...(auto ? { id: reportIdFrom(e.target.value) } : {}) })} placeholder="e.g. Branch wise amount report" /></label>
-          <label>Report ID <small>{report.isNew ? (auto ? '(made from the name — type to choose your own)' : '(your own ID)') : '(fixed once saved: /generate/ID.pdf)'}</small>
+          <label data-guide="name">Report name<input value={report.title} onChange={(e) => set({ title: e.target.value, ...(auto ? { id: reportIdFrom(e.target.value) } : {}) })} placeholder="e.g. Branch wise amount report" /></label>
+          <label data-guide="id">Report ID <small>{report.isNew ? (auto ? '(made from the name — type to choose your own)' : '(your own ID)') : '(fixed once saved: /generate/ID.pdf)'}</small>
             <span className="inline">
               <input value={report.id} disabled={!report.isNew} onChange={(e) => set({ id: e.target.value.replace(/[^A-Za-z0-9_-]/g, ''), idManual: true })} placeholder="BRANCH_WISE_AMOUNT_REPORT" />
               {report.isNew && !auto && <button type="button" className="btn sm" title="Make the ID from the report name again" onClick={() => set({ id: reportIdFrom(report.title), idManual: false })}>↺ From name</button>}
@@ -317,26 +717,67 @@ export default function SetupForm({ state, dispatch, notify, onTemplates, refres
               <option value="__new__">＋ New folder…</option>
             </select>
           </label>
-          <label className="wide">Description<input value={report.description} onChange={(e) => set({ description: e.target.value })} /></label>
+          <label className="wide" data-guide="description">Description<input value={report.description} onChange={(e) => set({ description: e.target.value })} placeholder="What this report shows and who uses it (optional)" /></label>
         </div>
-      </section>
+      ))}
+      <QueryEditor state={state} dispatch={dispatch} notify={notify} refreshKey={refreshKey} tests wrap={segment} onFocus={onFocus} onMeta={setQueryMeta}
+        markLine={focus?.target === 'query' ? focus.line : undefined} markNote={focus?.note} markFixed={Boolean(focus?.fixed)} />
+      {segment('parameters', <ParametersEditor state={state} dispatch={dispatch} />)}
+      {segment('layout', (
+        <>
+          <p className="muted">Start from a template: a blank page, a letter (one letter per record), a table from the fields, a form, or a certificate. Nothing is changed until you choose one; you can also design everything yourself in the Design tab.</p>
+          <button className="btn primary" data-guide="layout" onClick={onTemplates}>Choose a layout template…</button>
+        </>
+      ))}
+    </>
+  );
 
-      <section className="card">
-        <h3><span className="step">2</span> Data adapter and query</h3>
-        <QueryEditor state={state} dispatch={dispatch} notify={notify} refreshKey={refreshKey}
-          markLine={focus?.target === 'query' ? focus.line : undefined} markNote={focus?.note} markFixed={Boolean(focus?.fixed)} />
-      </section>
+  const errors = Object.values(all).reduce((n, m) => n + m.issues.filter((p) => p.level === 'error').length + (m.tested === 'error' ? 1 : 0), 0);
+  const warns = Object.values(all).reduce((n, m) => n + m.issues.filter((p) => p.level === 'warn').length, 0);
+  const allOpen = open.size === SEGMENTS.length;
 
-      <section className="card" data-focus="parameters">
-        <h3><span className="step">3</span> Parameters</h3>
-        <ParametersEditor state={state} dispatch={dispatch} />
-      </section>
-
-      <section className="card">
-        <h3><span className="step">4</span> Layout</h3>
-        <p className="muted">Start from a template: a blank page, a letter (one letter per record), a table from the fields, a form, or a certificate. Nothing is changed until you choose one; you can also design everything yourself in the Design tab.</p>
-        <button className="btn primary" onClick={onTemplates}>Choose a layout template…</button>
-      </section>
+  return (
+    <div className="setup" ref={root}>
+      <nav className="seg-nav" aria-label="Setup parts">
+        <ol>
+          {SEGMENTS.map(([id, title], i) => {
+            const m = all[id] || { issues: [] };
+            const status = statusOf(m.issues, m.tested);
+            return (
+              <li key={id}>
+                <button type="button" className={`seg-chip ${status} ${guided && id === current ? 'current' : ''}`} onClick={() => (guided ? goStep(id) : reveal(id))} title={badgeText(m.issues, m.tested)}
+                  aria-current={guided && id === current ? 'step' : undefined}>
+                  <span className={`step ${status}`}>{status === 'ok' ? '✓' : status === 'warn' ? '!' : '✕'}</span>
+                  <span>{i + 1}. {title}</span>
+                </button>
+              </li>
+            );
+          })}
+        </ol>
+        <div className="seg-overall">
+          <span className={errors ? 'err' : warns ? 'warn' : 'ok'}>
+            {errors ? `${plural(errors, 'thing')} to fix before the report can run` : warns ? `Ready to run · ${plural(warns, 'warning')} to look at` : 'All parts look fine: the report is ready to run'}
+          </span>
+          <span className="seg-tools">
+            {!guided && <button type="button" className="btn sm" onClick={() => setOpen(new Set(allOpen ? [] : SEGMENTS.map(([id]) => id)))}>{allOpen ? 'Collapse all' : 'Expand all'}</button>}
+            <span className="seg-mode" role="group" aria-label="How to show the setup">
+              <button type="button" className={guided ? 'on' : ''} aria-pressed={guided} onClick={() => setMode('guided')} title="One step at a time, with a checklist and hints">Guided</button>
+              <button type="button" className={!guided ? 'on' : ''} aria-pressed={!guided} onClick={() => setMode('all')} title="Every part on one page">All parts</button>
+            </span>
+          </span>
+        </div>
+        {focus?.note && (
+          <div className="fix-note" role="status">
+            <p><b>Fix here:</b> {placeOf(focus)}<br />{focus.note}</p>
+            <button type="button" className="icon" aria-label="Close" onClick={onClearFocus}>✕</button>
+          </div>
+        )}
+      </nav>
+      {guided && (
+        <Coach step={current} tasks={stepTasks} taskIndex={Math.min(taskIndex, stepTasks.length - 1)} onTask={setTaskIndex} allDone={errors === 0}
+          onBack={prevTask} onNext={nextTask} onShow={() => showTarget(true)} />
+      )}
+      {body}
     </div>
   );
 }

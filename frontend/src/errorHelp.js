@@ -6,15 +6,15 @@
 //   target = details | adapter | language | collection | query | fields | parameters | design | datasets
 //   name   = the parameter / field it is about, line = the query line.
 
-const SETUP = 'Setup → 2 Data adapter and query';
+const SETUP = 'Setup → 2 Data adapter';
 export const PLACES = {
   details: 'Setup → 1 Report details',
-  adapter: `${SETUP} → Data adapter`,
+  adapter: SETUP,
   language: `${SETUP} → Query language`,
   collection: `${SETUP} → Collection name`,
-  query: `${SETUP} → Query`,
-  fields: `${SETUP} → Fields`,
-  parameters: 'Setup → 3 Parameters',
+  query: 'Setup → 3 Query',
+  fields: 'Setup → 4 Fields',
+  parameters: 'Setup → 5 Parameters',
   design: 'Design tab',
   datasets: 'Dataset and Query → Datasets',
 };
@@ -64,7 +64,7 @@ const RULES = [
     title: 'Some report questions are empty',
     hint: `Empty: ${m[1]}.`,
     steps: ['Type a value for each parameter marked * on the left of the preview, then Run again.',
-      'Or, if it is only a filter (empty = all records), press “Make it optional”: it unticks “Required” in Setup → 3 Parameters.'],
+      'Or, if it is only a filter (empty = all records), press “Make it optional”: it unticks “Required” in Setup → 5 Parameters.'],
     focus: go('parameters', { name: m[1].split(',')[0].trim() }),
     actions: [[`make-optional:${m[1]}`, 'Make it optional']],
   })],
@@ -79,7 +79,7 @@ const RULES = [
     return {
       title: 'List the allowed values for the collection name',
       hint: `The collection name is made only from ${name}; for safety the user may only pick from a list.`,
-      steps: [`In Setup → 3 Parameters, row ${name}: type the values under “Allowed values”, separated by commas (e.g. CAR, BIKE).`, 'Or put fixed text around it in the collection name (e.g. Orders-$P{Branch}).'],
+      steps: [`In Setup → 5 Parameters, row ${name}: type the values under “Allowed values”, separated by commas (e.g. CAR, BIKE).`, 'Or put fixed text around it in the collection name (e.g. Orders-$P{Branch}).'],
       focus: go('parameters', { name }),
     };
   }],
@@ -140,13 +140,13 @@ const RULES = [
   [/Define the parameter\(s\) used in the SQL query: (.*)$/i, (m) => ({
     title: 'Parameters are used in the query but not defined',
     hint: `Missing: ${m[1]}.`,
-    steps: [`In Setup → 3 Parameters press “+ Add parameter” and name it exactly ${m[1].split(',')[0].trim()} (capital letters count).`, 'Or press Read fields: it adds the missing parameters for you.'],
+    steps: [`In Setup → 5 Parameters press “+ Add parameter” and name it exactly ${m[1].split(',')[0].trim()} (capital letters count).`, 'Or press Read fields: it adds the missing parameters for you.'],
     focus: go('parameters', { name: m[1].split(',')[0].trim() }),
   })],
   [/(?:Define the (?:query |collection )?parameter|Pipeline parameter is not defined:?|parameter of this report|is not a parameter)\s*\$?P?\{?(\w+)/i, (m) => ({
     title: `Parameter ${m[1]} is used but not defined`,
     hint: `Every $P{Name} in the query or the design must exist under Parameters with the same name.`,
-    steps: [`Press “Add parameter ${m[1]}” below (or in Setup → 3 Parameters press “+ Add parameter” and name it ${m[1]} — capital letters count).`,
+    steps: [`Press “Add parameter ${m[1]}” below (or in Setup → 5 Parameters press “+ Add parameter” and name it ${m[1]} — capital letters count).`,
       `Or remove $P{${m[1]}} from the query / design.`],
     focus: go('parameters', { name: m[1] }),
     actions: [[`add-param:${m[1]}`, `Add parameter ${m[1]}`]],
@@ -166,7 +166,7 @@ const RULES = [
       steps: kind === 'field'
         ? [`Add ${m[3]} to Setup → Fields (and to the $project of the query), or`, `in the Design tab, band ${m[1]}: change the expression to an existing field.`]
         : kind === 'parameter'
-          ? [`Add the parameter ${m[3]} in Setup → 3 Parameters, or`, `change the expression in the Design tab, band ${m[1]}.`]
+          ? [`Add the parameter ${m[3]} in Setup → 5 Parameters, or`, `change the expression in the Design tab, band ${m[1]}.`]
           : [`Create the variable ${m[3]} (Outline → Variables) or change the expression in band ${m[1]}.`],
       focus: kind === 'field' ? go('fields', { name: m[3] }) : kind === 'parameter' ? go('parameters', { name: m[3] }) : go('design'),
       actions: [['design', 'Open Design']],
@@ -177,7 +177,7 @@ const RULES = [
     return {
       title: `Parameter ${name} needs a change`,
       hint: 'Parameter names are letters, numbers and _, each name once.',
-      steps: [`In Setup → 3 Parameters, row ${name}: fix the name, type or default value as the message says.`],
+      steps: [`In Setup → 5 Parameters, row ${name}: fix the name, type or default value as the message says.`],
       focus: go('parameters', { name }),
     };
   }],
@@ -332,7 +332,7 @@ export function checkSetup(report, design) {
   if (!isSql && /^\s*(select|with)\b/i.test(query)) add('error', 'The query is SQL but Query language is MongoDB', 'Set Query language to SQL and pick a SQL data adapter.', go('language'));
 
   const columns = report.columns || [];
-  if (!columns.length) add('error', 'No fields yet', 'Press “Read fields” under the query, or type the field names.', go('fields'));
+  if (!columns.length) add('error', 'No fields yet', 'Press “Read fields” in 4 Fields, or type the field names.', go('fields'));
   const seen = new Map();
   columns.forEach((c) => {
     const key = c.toLowerCase();

@@ -89,6 +89,7 @@ export function emptyDesign() {
     version: 1,
     page: { width: 595, height: 842, margins: { top: 30, right: 30, bottom: 30, left: 30 }, sheetLayout: 'grid' },
     calculatedFields: [],
+    functions: [],
     groups: [],
     variables: [],
     datasets: [],
@@ -557,6 +558,7 @@ export function autoLayout(columns, labels = {}, title = 'Report', previous = em
   });
   design.variables = previous.variables.filter((v) => !v.field || columns.includes(v.field));
   design.calculatedFields = previous.calculatedFields;
+  design.functions = previous.functions || [];
   design.datasets = previous.datasets || [];
   return design;
 }

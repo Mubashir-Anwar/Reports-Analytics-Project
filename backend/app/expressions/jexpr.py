@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import math
 import re
+from contextvars import ContextVar
 from datetime import date, datetime, timedelta, timezone
 from functools import lru_cache
 from typing import Any, Callable
@@ -94,10 +95,11 @@ _PACKAGE_PREFIXES = ("java", "lang", "util", "text", "math", "sql")
 
 
 class _Parser:
-    def __init__(self, tokens: list[tuple[str, Any]]):
+    def __init__(self, tokens: list[tuple[str, Any]], local_names: frozenset[str] = frozenset()):
         self.tokens = tokens
         self.pos = 0
         self.depth = 0
+        self.local_names = local_names  # a custom function's own parameters (bare names in its body)
 
     def peek(self, offset: int = 0):
         index = self.pos + offset
@@ -243,6 +245,10 @@ class _Parser:
                 if cls not in _NEW_CLASSES:
                     raise JExprError(f"new {cls} is not supported")
                 return ("new", cls, self.args())
+            if value in self.local_names:
+                return ("local", value)
+            if self.peek() == ("op", "(") and CUSTOM_NAME_RE.fullmatch(value):
+                return ("fn", value, self.args())  # a custom function of the report: Name(arg, ...)
             parts = [value]
             while self.peek() == ("op", ".") and self.peek(1)[0] == "name" and self.peek(2) == ("op", "."):
                 self.take()
@@ -255,6 +261,8 @@ class _Parser:
                     raise JExprError(f"{'.'.join(parts)}.{method}() is not supported")
                 return ("static", cls, method, self.args())
             raise JExprError(f"Unknown name: {value}")
+        if kind is None:
+            raise JExprError("The formula ends too early (a value or a closing bracket is missing)")
         raise JExprError(f"Unexpected token: {value!r}")
 
     def _dotted(self) -> list[str]:
@@ -778,10 +786,104 @@ def _substring(s: str, start: int, end: int | None = None) -> str:
     return s[start:end]
 
 
+# ------------------------------------------------------------------ custom functions (defined in the report design)
+CUSTOM_NAME_RE = re.compile(r"[A-Z][A-Za-z0-9_]{0,39}")
+PARAM_NAME_RE = re.compile(r"[a-z][A-Za-z0-9_]{0,29}")
+MAX_FUNCTIONS = 50
+MAX_CALL_DEPTH = 8
+_FUNCTIONS: ContextVar[dict[str, tuple[tuple[str, ...], Any]]] = ContextVar("report_functions", default={})
+
+
+def compile_function(name: str, params: Any, body: Any) -> tuple[tuple[str, ...], Any]:
+    """One custom function → (parameter names, parsed body). Raises JExprError with a plain message."""
+    if not CUSTOM_NAME_RE.fullmatch(str(name or "")):
+        raise JExprError(f"Function name {name!r}: start with a capital letter, then letters, digits or _ (e.g. FullName)")
+    names = tuple(str(p) for p in (params or []))
+    if len(names) > 8:
+        raise JExprError(f"Function {name}: at most 8 inputs")
+    for param in names:
+        if not PARAM_NAME_RE.fullmatch(param):
+            raise JExprError(f"Function {name}: input {param!r} must start with a small letter (e.g. amount)")
+    if len(set(names)) != len(names):
+        raise JExprError(f"Function {name}: two inputs have the same name")
+    text = str(body or "").strip()
+    if not text:
+        raise JExprError(f"Function {name}: the formula is empty")
+    if len(text) > MAX_EXPRESSION_CHARS:
+        raise JExprError(f"Function {name}: the formula is too long")
+    try:
+        tree = _Parser(_tokenize(text), frozenset(names)).parse()
+    except JExprError as error:
+        raise JExprError(f"Function {name}: {error}") from None
+    return names, tree
+
+
+def compile_functions(items: Any) -> dict[str, tuple[tuple[str, ...], Any]]:
+    """The design's "functions" list → {name: (params, tree)}; raises JExprError on the first bad one."""
+    out: dict[str, tuple[tuple[str, ...], Any]] = {}
+    for item in (items or [])[:MAX_FUNCTIONS]:
+        if not isinstance(item, dict):
+            raise JExprError("Each custom function must be an object")
+        name = str(item.get("name", ""))
+        if name in out:
+            raise JExprError(f"The function {name} is defined twice")
+        out[name] = compile_function(name, item.get("params"), item.get("body"))
+    return out
+
+
+def use_functions(items: Any) -> None:
+    """Make a design's custom functions callable for the expressions evaluated from now on (this request/thread).
+    Functions already in use stay available (a subreport adds its own); bad definitions are skipped."""
+    current = dict(_FUNCTIONS.get())
+    for item in (items or [])[:MAX_FUNCTIONS]:
+        try:
+            current[str(item.get("name"))] = compile_function(item.get("name"), item.get("params"), item.get("body"))
+        except (JExprError, AttributeError):
+            continue
+    _FUNCTIONS.set(current)
+
+
+def called_functions(text: str) -> set[str]:
+    """Names of the custom functions an expression calls (for the checks before saving)."""
+    try:
+        tree = compile_expression(text)
+    except JExprError:
+        return set()
+    found: set[str] = set()
+
+    def walk(node: Any) -> None:
+        if isinstance(node, tuple):
+            if node and node[0] == "fn":
+                found.add(node[1])
+            for part in node[1:]:
+                walk(part)
+        elif isinstance(node, list):
+            for part in node:
+                walk(part)
+    walk(tree)
+    return found
+
+
 class Evaluator:
-    def __init__(self, resolve: Callable[[str, str], Any]):
+    def __init__(self, resolve: Callable[[str, str], Any], local_values: dict[str, Any] | None = None, depth: int = 0):
         self.resolve = resolve
         self.steps = 0
+        self.local_values = local_values or {}
+        self.depth = depth
+
+    def call_custom(self, name: str, args: list) -> Any:
+        function = _FUNCTIONS.get().get(name)
+        if function is None:
+            raise JExprError(f"Unknown function {name}() — add it under Formulas → Custom Functions")
+        params, tree = function
+        if len(args) != len(params):
+            raise JExprError(f"{name}() needs {len(params)} value(s), got {len(args)}")
+        if self.depth >= MAX_CALL_DEPTH:
+            raise JExprError(f"{name}() calls functions too deeply (a function may be calling itself)")
+        inner = Evaluator(self.resolve, dict(zip(params, args)), self.depth + 1)
+        result = inner.run(tree)
+        self.steps += inner.steps
+        return result
 
     def run(self, node) -> Any:
         self.steps += 1
@@ -820,6 +922,10 @@ class Evaluator:
             return self.call(self.run(node[1]), node[2], [self.run(a) for a in node[3]])
         if kind == "index":
             return _index(self.run(node[1]), self.run(node[2]))
+        if kind == "local":
+            return self.local_values.get(node[1])
+        if kind == "fn":
+            return self.call_custom(node[1], [self.run(a) for a in node[2]])
         raise JExprError(f"Unknown node {kind}")
 
     def construct(self, cls: str, args: list) -> Any:

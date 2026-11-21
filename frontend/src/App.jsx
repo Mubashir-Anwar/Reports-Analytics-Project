@@ -455,7 +455,7 @@ export default function App() {
         dispatch({ type: 'REPORT', patch: { parameters: [...parameters, { name, type: 'string', label: name, required: false }] } });
       }
       setQueryTab(null); setTab('setup');
-      notify(`Parameter ${name} added (text, not required) — set its type in Setup → 3 Parameters if it is a date or number, then Run again.`, 'ok');
+      notify(`Parameter ${name} added (text, not required) — set its type in Setup → 5 Parameters if it is a date or number, then Run again.`, 'ok');
     } else if (id.startsWith('make-optional:')) {
       const names = id.slice('make-optional:'.length).split(',').map((n) => n.trim());
       const { parameters } = stateRef.current.report;

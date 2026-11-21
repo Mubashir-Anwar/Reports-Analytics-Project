@@ -332,6 +332,26 @@ def validate_design(design: Any, columns: list[str], parameter_names: set[str]) 
                           and math.isfinite(value) and -300 <= value <= 15000}),
     }
 
+    # Custom functions (Formulas → Custom Functions): Name(input, ...) = a formula over its inputs, usable in every expression.
+    functions: list[dict[str, Any]] = []
+    raw_functions = design.get("functions") or []
+    if not isinstance(raw_functions, list):
+        raise ValueError("functions must be a list")
+    if len(raw_functions) > jexpr.MAX_FUNCTIONS:
+        raise ValueError(f"At most {jexpr.MAX_FUNCTIONS} custom functions")
+    for item in raw_functions:
+        if not isinstance(item, dict):
+            raise ValueError("Each custom function must be an object")
+        functions.append({"name": str(item.get("name", "")).strip(),
+                          "params": [str(p).strip() for p in (item.get("params") or []) if str(p).strip()],
+                          "body": str(item.get("body", "") or "").strip(),
+                          "description": str(item.get("description", "") or "").strip()[:300]})
+    try:
+        jexpr.compile_functions(functions)
+    except jexpr.JExprError as error:
+        raise ValueError(str(error)) from None
+    function_names = {f["name"] for f in functions}
+
     field_names = set(columns)
     calculated: list[dict[str, str]] = []
     for item in design.get("calculatedFields", []) or []:
@@ -391,6 +411,9 @@ def validate_design(design: Any, columns: list[str], parameter_names: set[str]) 
             known = {"F": field_names if fields is None else fields, "P": parameter_names, "V": variable_names}[kind]
             if name not in known:
                 raise ValueError(f"{where}: ${kind}{{{name}}} is not defined")
+        text = expression[1:] if expression.lstrip().startswith("=") else expression
+        for name in sorted(jexpr.called_functions(text.strip()) - function_names):
+            raise ValueError(f"{where}: the function {name}() is not defined (add it under Formulas → Custom Functions)")
 
     def clean_element(raw: Any, band_name: str) -> dict[str, Any]:
         if not isinstance(raw, dict):
@@ -646,7 +669,7 @@ def validate_design(design: Any, columns: list[str], parameter_names: set[str]) 
 
     return {"version": 1, "page": page, "calculatedFields": calculated, "groups": groups,
             "variables": variables, "sort": sort_spec, "filterExpression": filter_expression, "datasets": datasets,
-            "bands": bands}
+            "bands": bands, "functions": functions}
 
 
 def _clean_datasets(raw: Any) -> list[dict[str, Any]]:
@@ -917,6 +940,7 @@ class _Render:
         self.groups = design["groups"]
         self.variables = design["variables"]
         self.calculated = design["calculatedFields"]
+        jexpr.use_functions(design.get("functions"))
         self.rows = [self._with_calculated(row) for row in rows]
         if design.get("filterExpression"):
             kept = []
