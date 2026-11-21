@@ -119,6 +119,29 @@ const PATTERNS = [
   ['dd/MM/yyyy HH:mm', 'Date and time'], ['HH:mm', 'Time 14:05'], ['hh:mm a', 'Time 02:05 PM'],
 ];
 
+/** Text Field → Expression: click an example to use it (built from this report's own fields and parameters). */
+function ExpressionExamples({ fields, params, onPick }) {
+  const f = fields[0] || 'Name';
+  const g = fields.find((name) => /amount|total|price|qty|quantity|salary|balance|value/i.test(name)) || fields[1] || 'Amount';
+  const p = params?.[0]?.name;
+  const examples = [
+    ...(fields.length ? [
+      [`$F{${f}}`, 'the value of a field'],
+      [`${f}: $F{${f}}`, 'text and a field together'],
+      [`=$F{${g}} * 2`, 'a formula (starts with =)'],
+    ] : []),
+    ...(p ? [[`$P{${p}}`, 'a parameter the user enters']] : []),
+    ['Page $V{PAGE_NUMBER} of $V{PAGE_COUNT}', 'page number'],
+    ['$V{CURRENT_DATE}', 'today’s date'],
+  ];
+  return (
+    <div className="expr-examples">
+      <span>Examples — click one to use it:</span>
+      {examples.map(([value, help]) => <button key={value} type="button" title={help} onClick={() => onPick(value)}><code>{value}</code></button>)}
+    </div>
+  );
+}
+
 export default function Properties({ state, dispatch, notify, actions, onEditExpression, onOpenQuery, onOpenTable }) {
   const { design, report, selection } = state;
   const [shiftColumns, setShiftColumns] = useState(true);
@@ -332,6 +355,7 @@ export default function Properties({ state, dispatch, notify, actions, onEditExp
         {tab === 'specific' && element.type === 'textField' && (
           <>
             {expressionRow('Expression', 'expression', '$F{Name}  or  =$F{A} * 2')}
+            <ExpressionExamples fields={report.columns} params={report.parameters} onPick={(value) => patch({ expression: value })} />
             {actions?.convertText && <Row label=""><button type="button" className="btn sm" title="Back to fixed text: the expression is printed as written" onClick={() => actions.convertText([element.id], 'staticText')}>T Convert to Static Text</button></Row>}
             <div className="prop-grid">
               <Row label="Evaluation Time">

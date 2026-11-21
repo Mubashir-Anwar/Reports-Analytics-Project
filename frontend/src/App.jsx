@@ -20,6 +20,7 @@ import Ribbon from './Ribbon.jsx';
 import './ribbon.css';
 import TemplateGallery from './TemplateGallery.jsx';
 import ImportDesignDialog from './ImportDesignDialog.jsx';
+import { DesignStart, DesignSteps, hasBands } from './DesignGuide.jsx';
 import { AdaptersPanel, Outline, Palette, ServerPanel, WorkspacePanel } from './panels.jsx';
 import { DockSide, FloatingPanel, floatDropProps, useDockLayout, useNarrow } from './DockLayout.jsx';
 import { ZOOM_LIMITS, bandWidth, clampZoom, emptyDesign, findElement, getBand, setBand } from './designModel.js';
@@ -47,6 +48,8 @@ export default function App() {
   const [ready, setReady] = useState(false);
   const [denied, setDenied] = useState('');
   const [tab, setTab] = useState('setup');
+  const [previewed, setPreviewed] = useState(false); // Design steps: "Look at it with real data"
+  useEffect(() => { if (tab === 'preview') setPreviewed(true); }, [tab]);
   const [leftTab, setLeftTab] = useState('workspace');
   const [drawer, setDrawer] = useState(null); // small screens: 'left' | 'right' panel shown over the canvas
   // wide screens: each panel can be hidden on its own (Ribbon → View → Panels) for a bigger canvas; kept per browser
@@ -549,7 +552,8 @@ export default function App() {
           </div>
           <div className="stage">
             {tab === 'setup' && <SetupForm state={state} dispatch={dispatch} notify={notify} onTemplates={() => setTemplates(true)} refreshKey={refreshKey} focus={setupFocus} onFocus={goToProblem} onClearFocus={() => setSetupFocus(null)} />}
-            {tab === 'design' && <Canvas knownFields={report.columns.length ? knownFields(report, design) : null} design={design} selection={selection} tool={tool} zoom={zoom} setZoom={setZoom} dispatch={dispatch} actions={actions} openMenu={openMenu} onEditExpression={editExpression} onPercentage={onPercentage} onWizard={onWizard} onOpenTable={setTableId} prefs={canvasPrefs} setPrefs={setCanvasPrefs} hasClipboard={Boolean(readClipboard()?.items?.length)} onQuery={() => setQueryTab('query')} onTemplates={() => setTemplates(true)} showToolbar={false} />}
+            {tab === 'design' && !hasBands(design) && <DesignStart report={report} dispatch={dispatch} notify={notify} onTemplates={() => setTemplates(true)} onImportDesign={() => setImporting(true)} onSetup={() => setTab('setup')} />}
+            {tab === 'design' && hasBands(design) && <div className="design-pane"><DesignSteps report={report} design={design} dispatch={dispatch} notify={notify} previewed={previewed} onPreview={() => setTab('preview')} onSetup={() => setTab('setup')} /><Canvas knownFields={report.columns.length ? knownFields(report, design) : null} design={design} selection={selection} tool={tool} zoom={zoom} setZoom={setZoom} dispatch={dispatch} actions={actions} openMenu={openMenu} onEditExpression={editExpression} onPercentage={onPercentage} onWizard={onWizard} onOpenTable={setTableId} prefs={canvasPrefs} setPrefs={setCanvasPrefs} hasClipboard={Boolean(readClipboard()?.items?.length)} onQuery={() => setQueryTab('query')} onTemplates={() => setTemplates(true)} showToolbar={false} /></div>}
             {tab === 'source' && <SourceView state={state} dispatch={dispatch} notify={notify} />}
             {tab === 'preview' && <Preview state={state} notify={notify} dispatch={dispatch} />}
           </div>

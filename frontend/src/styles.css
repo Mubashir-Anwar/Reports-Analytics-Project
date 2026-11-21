@@ -1114,3 +1114,45 @@ kbd { font: 11.5px ui-monospace, monospace; background: var(--bg); border: 1px s
 .seg-overall .todo { color: var(--muted); }
 .ask-name { display: grid; gap: 10px; max-width: 420px; }
 .ask-name input { font-size: 15px; padding: 8px 10px; }
+
+/* Design tab: start cards (empty page) and the steps strip */
+.design-pane { display: flex; flex-direction: column; height: 100%; min-height: 0; }
+.design-pane > .canvas-wrap { flex: 1; height: auto; min-height: 0; }
+.design-start { height: 100%; overflow: auto; padding: 28px 18px; background: var(--bg); }
+.design-start-inner { max-width: 900px; margin: 0 auto; display: grid; gap: 10px; }
+.design-start h2 { margin: 0; font-size: 20px; }
+.design-start .eyebrow, .design-steps .eyebrow { margin: 0; font-size: 11px; text-transform: uppercase; letter-spacing: .06em; color: var(--accent); font-weight: 600; }
+.start-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 10px; margin-top: 6px; }
+.start-card { display: grid; gap: 4px; align-content: start; text-align: left; padding: 14px; border: 1px solid var(--line); border-radius: 12px; background: var(--panel); color: var(--text); cursor: pointer; font: inherit; font-size: 13px; }
+.start-card:hover:not(:disabled) { border-color: var(--accent); }
+.start-card.primary { border-color: var(--accent); background: var(--accent-soft); }
+.start-card:disabled { opacity: .6; cursor: default; }
+.start-card small { color: var(--muted); font-size: 11.5px; }
+.start-card > span:not(.start-icon) { color: var(--muted); }
+.start-icon { font-size: 22px; line-height: 1; color: var(--accent); }
+.start-parts { margin-top: 8px; padding: 10px 14px; border: 1px solid var(--line); border-radius: 12px; background: var(--panel); font-size: 13px; }
+.start-parts summary { cursor: pointer; font-weight: 600; }
+.start-parts ul { margin: 8px 0 4px; padding-left: 18px; display: grid; gap: 4px; }
+.start-parts i { color: var(--muted); }
+.design-steps { border-bottom: 1px solid var(--line); background: var(--bg); font-size: 12px; }
+.design-steps.mini { padding: 3px 10px; }
+.design-steps-head { display: flex; align-items: center; gap: 8px; padding: 6px 10px; flex-wrap: wrap; }
+.steps-count { font-weight: 700; color: var(--accent); }
+.steps-chips { display: flex; gap: 6px; flex-wrap: wrap; flex: 1; min-width: 0; }
+.step-chip { display: inline-flex; align-items: center; gap: 5px; padding: 2px 9px 2px 3px; border: 1px solid var(--line); border-radius: 999px; color: var(--muted); white-space: nowrap; }
+.step-chip .dot { width: 17px; height: 17px; border-radius: 50%; display: grid; place-items: center; font-size: 10px; font-weight: 700; background: var(--panel); }
+.step-chip.now { border-color: var(--accent); color: var(--text); background: var(--accent-soft); }
+.step-chip.now .dot { background: var(--accent); color: #fff; }
+.step-chip.done { color: var(--ok); }
+.design-steps .ok-text { color: var(--ok); font-weight: 600; }
+.design-steps-body { padding: 0 14px 10px; }
+.design-steps-body ol { margin: 0; padding-left: 18px; display: grid; gap: 6px; }
+.design-steps-body li.done { opacity: .65; }
+.design-steps-body li .btn { margin-left: 6px; }
+.design-steps-body .tips { margin: 8px 0 0; color: var(--muted); line-height: 1.6; }
+.design-steps-body code, .expr-examples code { font-size: 11px; }
+.link-btn { border: 0; background: none; color: var(--accent); cursor: pointer; font: inherit; padding: 0; }
+.expr-examples { display: flex; flex-wrap: wrap; gap: 4px; margin: -2px 0 8px; }
+.expr-examples button { border: 1px solid var(--line); background: var(--panel); color: var(--text); border-radius: 999px; padding: 1px 8px; cursor: pointer; font-size: 11px; }
+.expr-examples button:hover { border-color: var(--accent); color: var(--accent); }
+.expr-examples > span { font-size: 11px; color: var(--muted); width: 100%; }
