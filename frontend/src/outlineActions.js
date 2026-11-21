@@ -309,6 +309,34 @@ export function makeActions({ get, dispatch, notify, ui = { current: {} } }) {
   /* ---------- placing things in bands ---------- */
   const presentBands = () => bandKeys(get().design).filter((key) => bandPresent(getBand(get().design, key)));
   /** Run an operation that returns { design, id } on the current design, then select the new element. */
+  /**
+   * Static Text ⇄ Text Field, same place and style. "Muhammad Ali" becomes a Text Field whose expression is that text
+   * (it prints the same until you change it); with one element the Expression Editor opens to put $F{…} / $P{…} in it.
+   */
+  const convertText = (targetIds, to) => {
+    const from = to === 'textField' ? 'staticText' : 'textField';
+    const { design } = get();
+    const hits = targetIds.filter((id) => findElement(design, id)?.element.type === from);
+    if (!hits.length) return;
+    design$((d) => mapElements(d, (el) => {
+      if (!hits.includes(el.id)) return el;
+      if (to === 'textField') {
+        const { text, ...rest } = el;
+        return { ...rest, type: 'textField', expression: String(text ?? ''), pattern: '', blankWhenNull: true, stretch: el.stretch ?? false };
+      }
+      const { expression, pattern, blankWhenNull, evaluationTime, ...rest } = el;
+      void pattern; void blankWhenNull; void evaluationTime;
+      return { ...rest, type: 'staticText', text: String(expression ?? '') };
+    }));
+    if (hits.length === 1) {
+      select({ kind: 'element', id: hits[0] });
+      if (to === 'textField') ui.current.editExpression?.(hits[0]);
+    }
+    notify(to === 'textField'
+      ? `${hits.length === 1 ? 'Now a Text Field' : `${hits.length} texts are now Text Fields`} — put $F{…}, $P{…} or a formula in the expression`
+      : `${hits.length === 1 ? 'Now a Static Text' : `${hits.length} Text Fields are now Static Texts`} — it prints the text as written`, 'ok');
+  };
+
   /** Imported design: a Static Text (e.g. "Muhammad Ali") becomes a Text Field of a field, same place and style. */
   const makeField = (id) => {
     const { report, design } = get();
@@ -440,6 +468,15 @@ export function makeActions({ get, dispatch, notify, ui = { current: {} } }) {
       return [
         { header: `${chosen.length} elements selected` },
         ...clipboardItems,
+        ...(() => {
+          const types = chosen.map((one) => findElement(get().design, one)?.element.type);
+          const statics = types.filter((t) => t === 'staticText').length;
+          const fields = types.filter((t) => t === 'textField').length;
+          return [
+            ...(statics ? [{ label: `Convert ${statics} Static Text${statics > 1 ? 's' : ''} to Text Field${statics > 1 ? 's' : ''}`, icon: 'ƒx', onClick: () => convertText(chosen, 'textField') }] : []),
+            ...(fields ? [{ label: `Convert ${fields} Text Field${fields > 1 ? 's' : ''} to Static Text`, icon: 'T', onClick: () => convertText(chosen, 'staticText') }] : []),
+          ];
+        })(),
         '-',
         ...selectItems,
         { label: 'Match format of the last clicked', icon: '🖌', onClick: matchFormat },
@@ -459,7 +496,11 @@ export function makeActions({ get, dispatch, notify, ui = { current: {} } }) {
     return [
       { header: `${found.element.type} in ${bandLabel(bandKey)}` },
       { label: 'Properties', icon: '⚙', onClick: () => select({ kind: 'element', id }) },
-      ...(found.element.type === 'staticText' ? [{ label: 'Make it a field…', icon: '$F', onClick: () => makeField(id) }] : []),
+      ...(found.element.type === 'staticText' ? [
+        { label: 'Convert to Text Field', icon: 'ƒx', onClick: () => convertText([id], 'textField') },
+        { label: 'Make it a field…', icon: '$F', onClick: () => makeField(id) },
+      ] : []),
+      ...(found.element.type === 'textField' ? [{ label: 'Convert to Static Text', icon: 'T', onClick: () => convertText([id], 'staticText') }] : []),
       ...clipboardItems,
       '-',
       ...selectItems,
@@ -529,7 +570,7 @@ export function makeActions({ get, dispatch, notify, ui = { current: {} } }) {
   ];
 
   return {
-    makeField, rename, deleteSelection, createBandAt, createGroup, createParameter, createVariable, createCalc,
+    makeField, convertText, rename, deleteSelection, createBandAt, createGroup, createParameter, createVariable, createCalc,
     align, distribute, matchSize, nudge, order, toggleLock, patchSelected, copy, cut, paste, duplicateSelected, selectAll, removeSelected,
     selectColumn, selectSimilar, setBorders, toggleHidden, toggleStretch, matchFormat,
     reportMenu, bandMenu, elementMenu, parametersMenu, parameterMenu, fieldsMenu, fieldMenu,

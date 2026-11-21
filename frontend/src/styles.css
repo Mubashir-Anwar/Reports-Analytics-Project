@@ -1103,3 +1103,4 @@ kbd { font: 11.5px ui-monospace, monospace; background: var(--bg); border: 1px s
 .own-banner { display: block; width: 100%; margin: 8px 0 0; padding: 9px 12px; text-align: left; border: 1px dashed var(--accent); border-radius: 8px; background: color-mix(in srgb, var(--accent) 7%, transparent); color: var(--text); cursor: pointer; font-size: 13px; }
 .own-banner:hover { background: color-mix(in srgb, var(--accent) 14%, transparent); }
 @media (max-width: 640px) { .own-choices { grid-template-columns: 1fr; } }
+.row-buttons { display: flex; flex-wrap: wrap; gap: 6px; }

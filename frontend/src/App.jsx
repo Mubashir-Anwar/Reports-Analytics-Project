@@ -441,6 +441,7 @@ export default function App() {
     showSource: () => setTab('source'),
     preview: () => setTab('preview'),
     saveFile,
+    editExpression,
   };
 
   // the team bar shows others which report this is, and warns when someone else has the same one open

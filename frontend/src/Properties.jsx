@@ -322,13 +322,17 @@ export default function Properties({ state, dispatch, notify, actions, onEditExp
         {tab === 'specific' && element.type === 'staticText' && (
           <>
             <Row label="Text"><span className="expr-row"><textarea rows={4} value={element.text} onChange={(e) => patch({ text: e.target.value })} /><button type="button" className="btn sm" title="Open the editor (or double-click the element)" onClick={() => onEditExpression(element.id)}>…</button></span></Row>
-            {actions?.makeField && <Row label=""><button type="button" className="btn sm" title="This text is filled from the data instead: it becomes a Text Field of a field, same place and style" onClick={() => actions.makeField(element.id)}>$F Make it a field…</button></Row>}
+            {actions?.makeField && <Row label=""><span className="row-buttons">
+              <button type="button" className="btn sm" title="Becomes a Text Field with this text as its expression; then add $F{…}, $P{…} or a formula" onClick={() => actions.convertText([element.id], 'textField')}>ƒx Convert to Text Field</button>
+              <button type="button" className="btn sm" title="This text is filled from the data instead: it becomes a Text Field of a field, same place and style" onClick={() => actions.makeField(element.id)}>$F Make it a field…</button>
+            </span></Row>}
             <TextFormat element={element} patch={patch} />
           </>
         )}
         {tab === 'specific' && element.type === 'textField' && (
           <>
             {expressionRow('Expression', 'expression', '$F{Name}  or  =$F{A} * 2')}
+            {actions?.convertText && <Row label=""><button type="button" className="btn sm" title="Back to fixed text: the expression is printed as written" onClick={() => actions.convertText([element.id], 'staticText')}>T Convert to Static Text</button></Row>}
             <div className="prop-grid">
               <Row label="Evaluation Time">
                 <select value={element.evaluationTime || 'Now'} onChange={(e) => patch({ evaluationTime: e.target.value })} title="Report / Auto: $V{…} gets its value at the end of the report — for “Page X of Y”, grand totals in the title or a percentage of the total">
