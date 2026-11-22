@@ -109,6 +109,5 @@ def upgrade_storage() -> dict[str, int]:
     from backend.app.storage.store import get_store  # noqa: PLC0415
     store = get_store()
     counts = move_documents(store, ent.get_entities())
-    if hasattr(store, "move_routed_documents"):         # SQL / MongoDB: reports, drafts, folders, adapters -> tables
-        counts.update(store.move_routed_documents())
+    counts.update(store.upgrade_v2())                   # reports, drafts, folders (and adapters on a database) -> v2 tables
     return counts

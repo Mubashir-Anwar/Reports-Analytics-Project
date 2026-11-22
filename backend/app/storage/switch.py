@@ -113,7 +113,7 @@ def test(url: str) -> dict[str, Any]:
         store.delete("meta/connection-test.json")
         existing = {
             "users": len(entities.find(ent.USERS)),
-            "reports": len(entities.find(ent.REPORTS)),
+            "reports": len(entities.find(ent.SERVER_REPORTS)) or len(entities.find(ent.REPORTS)),
             "runs": len(records.runs(limit=5000)),
             "auditEvents": 1 if records._last_event() else 0,
         }
@@ -140,19 +140,21 @@ def copy_current_to(url: str, *, overwrite: bool = False) -> dict[str, int]:
     source, source_records, source_entities = get_store(), get_records(), ent.get_entities()
     _, target, target_records, target_entities = _target(url)
     counts = {"documents": 0, "files": 0, "lines": 0, "folders": 0, "rows": 0, "runs": 0, "events": 0, "skipped": 0}
-    for area in ("reports", "workspace"):
-        for relative in source.dirs(area):
-            target.make_dir(f"{area}/{relative}")
-            counts["folders"] += 1
-    for entity in ent.ENTITIES:          # users, keys, permissions, versions, schedules, reports, drafts, folders, data sources
+    for entity in ent.ENTITIES:          # users, keys, versions, schedules, folders, reports and drafts (ids kept), data sources
         for row in source_entities.find(entity):
             if overwrite or target_entities.get(entity, *ent.key_of(entity, ent.encode(entity, row))) is None:
                 target_entities.put(entity, row)
                 counts["rows"] += 1
             else:
                 counts["skipped"] += 1
+    for area in ("reports", "workspace"):
+        if source.has_dir(area):
+            target.make_dir(area)
+        for relative in source.dirs(area):
+            target.make_dir(f"{area}/{relative}")        # already a row (copied above) unless the source had none
+            counts["folders"] += 1
     for key in source.keys(""):
-        if key.startswith(SKIP_PREFIXES):
+        if key.startswith(SKIP_PREFIXES) or source.report_id_of(key):
             continue                     # reports/, workspace/, connections.json, folders.json become typed rows in the target
         if key.endswith(".jsonl"):
             if list(target.lines(key)):

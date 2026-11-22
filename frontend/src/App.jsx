@@ -74,6 +74,8 @@ export default function App() {
   const hidePanel = (name) => setPanels((p) => ({ ...p, [name]: false }));
   const [publishing, setPublishing] = useState(null); // { folders, folder, replace, busy }
   const [clash, setClash] = useState(null); // Save hit an ID already in the workspace: { id, newId, error, busy }
+  const [stale, setStale] = useState(null); // someone else saved the draft after it was opened: { savedBy, savedAt, versionNo, busy }
+  const [editing, setEditing] = useState(null); // { editingBy: { user, since }, versionNo, updatedBy } from the server
   const [zoom, setZoom] = useState(1);
   const [message, setMessage] = useState({ text: 'Ready', kind: '' });
   const [refreshKey, setRefreshKey] = useState(0);
@@ -311,6 +313,7 @@ export default function App() {
     try {
       return await saveAs(report.id, report.isNew);
     } catch (error) {
+      if (error.status === 409 && error.data?.code === 'changed-by-someone-else') { setStale({ ...error.data, busy: false }); return null; }
       if (error.status === 409 && report.isNew) { // the ID is already in the workspace: ask replace / new ID
         setClash({ id: report.id, newId: `${report.id}_copy`, error: '', busy: false });
         return null;
@@ -320,9 +323,12 @@ export default function App() {
     }
   };
   /** Save the open report under `id` (create=true refuses an ID that is already in the workspace). */
-  const saveAs = async (id, create) => {
-    // the draft was saved in status.folder before; Setup may have moved it to another folder
-    const result = await api.saveWorkspace({ ...reportPayload(state), id }, create, state.report.status?.folder);
+  const saveAs = async (id, create, base) => {
+    // the draft was saved in status.folder before; Setup may have moved it to another folder.
+    // baseVersion: the version this copy started from — the server refuses the save when someone saved after it
+    const opened = state.report.status;
+    const baseVersion = base ?? (!create && id === state.report.id && opened?.versionNo ? opened.versionNo : undefined);
+    const result = await api.saveWorkspace({ ...reportPayload(state), id, ...(baseVersion ? { baseVersion } : {}) }, create, opened?.folder);
     dispatch({ type: 'SAVED', id, status: result.report });
     setRefreshKey((n) => n + 1);
     const where = result.report.onServer ? 'The server still has the last published version.' : 'Not on the server yet.';
@@ -330,6 +336,24 @@ export default function App() {
       ? `Saved in your workspace as ${id} ✓  ${where} Use “Publish to server” to update it.`
       : `Saved in your workspace as a draft. Before publishing: ${result.problem}`, result.readyToPublish ? 'ok' : '');
     return result;
+  };
+  /** Someone else saved the open draft: take their version, keep mine under a new ID, or save mine over theirs. */
+  const resolveStale = async (choice) => {
+    const { report } = state;
+    if (choice === 'copy') { setStale(null); setClash({ id: report.id, newId: `${report.id}_copy`, error: '', busy: false, copyOnly: true }); return; }
+    setStale({ ...stale, busy: true });
+    try {
+      if (choice === 'reload') {
+        load(await api.workspaceReport(report.id, report.status?.folder));
+        notify(`Opened the version ${stale.savedBy} saved`, 'ok');
+      } else {
+        await saveAs(report.id, false, stale.versionNo);
+      }
+      setStale(null);
+    } catch (error) {
+      setStale(null);
+      notify(`Save failed: ${error.message}`, 'error');
+    }
   };
   const resolveClash = async (replace) => {
     const id = replace ? clash.id : clash.newId.trim();
@@ -448,6 +472,18 @@ export default function App() {
   };
 
   // the team bar shows others which report this is, and warns when someone else has the same one open
+  // "is editing" mark kept in the system database (works across several app instances): every 30 s while open
+  const openedId = !state.report.isNew && state.report.status ? state.report.id : '';
+  const openedFolder = state.report.status?.folder || '';
+  useEffect(() => {
+    if (!openedId) { setEditing(null); return undefined; }
+    let stop = false;
+    const tell = () => api.workspaceEditing(openedId, openedFolder, true).then((answer) => { if (!stop) setEditing(answer); }).catch(() => {});
+    tell();
+    const timer = setInterval(tell, 30000);
+    return () => { stop = true; clearInterval(timer); api.workspaceEditing(openedId, openedFolder, false).catch(() => {}); };
+  }, [openedId, openedFolder]);
+  const newerOnServer = editing && state.report.status?.versionNo && editing.versionNo > state.report.status.versionNo;
   useEffect(() => { setTeamPlace({ place: state.report.id, title: state.report.id ? `${state.report.title || state.report.id}` : '' }); }, [state.report.id, state.report.title]);
   if (denied) return <NoAccess text={denied} />;
   if (!ready) return <div className="login"><p>Connecting to the server…</p></div>;
@@ -592,16 +628,46 @@ export default function App() {
         <ExpressionEditor element={findElement(design, exprId).element} report={report} design={design} onSave={saveExpression} onClose={() => setExprId(null)} onAddField={addField} />
       )}
       {publishing && <PublishDialog publishing={publishing} setPublishing={setPublishing} report={report} design={design} onConfirm={confirmPublish} />}
+      {(editing?.editingBy || newerOnServer) && (
+        <div className="editing-note" role="status">
+          {editing.editingBy && <span>✎ <b>{editing.editingBy.user}</b> also has this report open since {new Date(editing.editingBy.since).toLocaleTimeString()}. Agree who saves first.</span>}
+          {newerOnServer && <span> ⚠ {editing.updatedBy || 'Someone'} saved a newer version (v{editing.versionNo}); your Save will ask what to do.</span>}
+        </div>
+      )}
+      {stale && (
+        <div className="modal-back" onMouseDown={(e) => e.target === e.currentTarget && !stale.busy && setStale(null)}>
+          <div className="modal clash-dialog" role="dialog" aria-label="Saved by someone else">
+            <h3>⚠ {stale.savedBy} saved this report after you opened it</h3>
+            <p>Saved {stale.savedAt ? new Date(stale.savedAt).toLocaleString() : 'just now'} (version {stale.versionNo}). Your changes are still open here. What should happen?</p>
+            <div className="clash-choice">
+              <b>Keep both — save mine with a new ID</b>
+              <p className="muted">Nothing of theirs changes. Compare the two afterwards.</p>
+              <button type="button" className="btn primary" disabled={stale.busy} onClick={() => resolveStale('copy')}>Save mine as a copy…</button>
+            </div>
+            <div className="clash-choice">
+              <b>Use their version</b>
+              <p className="muted">Opens what {stale.savedBy} saved. Your unsaved changes are dropped.</p>
+              <button type="button" className="btn" disabled={stale.busy} onClick={() => resolveStale('reload')}>Open their version</button>
+            </div>
+            <div className="clash-choice">
+              <b>Save mine over theirs</b>
+              <p className="muted">Their changes are replaced (the server copy changes only when you publish).</p>
+              <button type="button" className="btn danger" disabled={stale.busy} onClick={() => resolveStale('overwrite')}>Overwrite with mine</button>
+            </div>
+            <div className="row"><button type="button" className="btn" disabled={stale.busy} onClick={() => setStale(null)}>Cancel — don't save</button></div>
+          </div>
+        </div>
+      )}
       {clash && (
         <div className="modal-back" onMouseDown={(e) => e.target === e.currentTarget && !clash.busy && setClash(null)}>
           <form className="modal clash-dialog" role="dialog" aria-label="Report ID already exists" onSubmit={(e) => { e.preventDefault(); resolveClash(false); }}>
-            <h3>⚠ {clash.id} is already in your workspace</h3>
-            <p>A report with the ID <b>{clash.id}</b> was saved before (for example, you opened the same file or JRXML again). What should happen?</p>
-            <div className="clash-choice">
+            <h3>{clash.copyOnly ? `Save your copy of ${clash.id}` : `⚠ ${clash.id} is already in your workspace`}</h3>
+            {!clash.copyOnly && <p>A report with the ID <b>{clash.id}</b> was saved before (for example, you opened the same file or JRXML again). What should happen?</p>}
+            {!clash.copyOnly && <div className="clash-choice">
               <b>Replace it</b>
               <p className="muted">The saved copy of {clash.id} is overwritten with what is open now. The server copy (if published) does not change until you publish.</p>
               <button type="button" className="btn danger" disabled={clash.busy} onClick={() => resolveClash(true)}>Replace {clash.id}</button>
-            </div>
+            </div>}
             <div className="clash-choice">
               <b>Keep both — save this one with a new ID</b>
               <label className="modal-field">New report ID

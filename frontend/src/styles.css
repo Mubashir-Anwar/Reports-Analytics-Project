@@ -1163,3 +1163,8 @@ kbd { font: 11.5px ui-monospace, monospace; background: var(--bg); border: 1px s
 .role-row > span { display: grid; gap: 2px; }
 .role-row small { color: var(--muted); font-size: 11.5px; }
 @media (max-width: 560px) { .role-row { grid-template-columns: 1fr; } }
+
+/* someone else has the open draft in the designer (system database mark) */
+.editing-note { position: fixed; left: 50%; bottom: 14px; transform: translateX(-50%); z-index: 40; max-width: min(720px, calc(100vw - 32px));
+  background: #fff7e6; color: #7a4b00; border: 1px solid #f0c36d; border-radius: 8px; padding: 8px 14px; font-size: 13px;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, .12); }

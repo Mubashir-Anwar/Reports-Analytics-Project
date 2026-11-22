@@ -12,9 +12,11 @@ export async function request(path, { method = 'GET', body, raw = false } = {}) 
   if (response.status === 401) goSignIn(); // the session ended: sign in again and come back to this page
   if (!response.ok) {
     let detail = response.statusText;
+    let extra = null;
     try {
       const data = await response.json();
-      detail = typeof data.detail === 'string' ? data.detail : JSON.stringify(data.detail);
+      detail = typeof data.detail === 'string' ? data.detail : (data.detail?.message || JSON.stringify(data.detail));
+      if (data.detail && typeof data.detail === 'object') extra = data.detail;
     } catch { /* not json */ }
     // A bare "Not Found" means the route itself is missing: the running server is an older version.
     if (response.status === 404 && (!detail || detail === 'Not Found')) {
@@ -22,6 +24,7 @@ export async function request(path, { method = 'GET', body, raw = false } = {}) 
     }
     const error = new Error(detail || `HTTP ${response.status}`);
     error.status = response.status;
+    error.data = extra;          // e.g. { code: 'changed-by-someone-else', savedBy, savedAt, versionNo }
     throw error;
   }
   return raw ? response : response.json();
@@ -38,6 +41,9 @@ export const api = {
   /** fromFolder = where the open draft was saved before (Setup may have moved it to another folder). */
   saveWorkspace: (definition, isNew, fromFolder) =>
     request(withQuery(`/api/admin/workspace/${encodeURIComponent(definition.id)}`, isNew ? 'create=true' : inFolder(fromFolder)), { method: 'PUT', body: definition }),
+  /** open = the designer has the draft open (sent every 30 s); answers { versionNo, editingBy } */
+  workspaceEditing: (id, folder, open = true) =>
+    request(withQuery(`/api/admin/workspace/${encodeURIComponent(id)}/editing`, inFolder(folder)), { method: 'POST', body: { open } }),
   deleteWorkspace: (id, folder) => request(withQuery(`/api/admin/workspace/${encodeURIComponent(id)}`, inFolder(folder)), { method: 'DELETE' }),
   createWorkspaceFolder: (path) => request('/api/admin/workspace-folders', { method: 'POST', body: { path } }),
   /** answer: { recursive } or { moveTo } ('' = top level), from the Delete folder dialog */

@@ -1,6 +1,6 @@
 """MongoDB backend: the same records as collections (rs_report_runs, rs_audit_events) with validators and indexes.
 
-The database comes from the URL path: mongodb://user:pw@host:27017/reporting_system (Atlas: mongodb+srv://…/db).
+The database comes from the URL path: mongodb://user:pw@host:27017/reporting (Atlas: mongodb+srv://…/db).
 Each record is one document; a standalone server is enough (no multi-document transactions are needed:
 every write touches one document, and the audit chain is protected by a unique index on seq).
 """
@@ -33,7 +33,7 @@ def client_for(url: str) -> MongoClient:
 def database_for(url: str):
     name = urlparse(url).path.strip("/").split("/")[0]
     if not name:
-        raise ValueError("Put the database name in the MongoDB URL: mongodb://host:27017/reporting_system")
+        raise ValueError("Put the database name in the MongoDB URL: mongodb://host:27017/reporting")
     return client_for(url)[name]
 
 

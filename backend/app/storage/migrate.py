@@ -2,7 +2,7 @@
 
     REPORTING_DATA_DIR=./data python -m backend.app.storage.migrate --url sqlserver://user:pw@host:1433/reporting
     REPORTING_DATA_DIR=./data python -m backend.app.storage.migrate --url oracle://user:pw@host:1521/?service_name=XEPDB1
-    REPORTING_DATA_DIR=./data python -m backend.app.storage.migrate --url mongodb://user:pw@host:27017/reporting_system
+    REPORTING_DATA_DIR=./data python -m backend.app.storage.migrate --url mongodb://user:pw@host:27017/reporting
     REPORTING_DATA_DIR=./data python -m backend.app.storage.migrate --url postgresql://user:pw@host/reporting
 
 Reports, workspace drafts, folders, data adapters, private secrets, users, API keys, history, versions, schedules
@@ -109,14 +109,29 @@ def copy_records(target: RecordsBackend, source: FileStore, *, out=sys.stdout) -
 
 def migrate(target: Any, *, overwrite: bool = False, out=sys.stdout, records: RecordsBackend | None = None) -> dict[str, int]:
     source = FileStore()
+    source.upgrade_v2()                               # report files of an older data folder become rows first
     counts = {"json": 0, "bytes": 0, "lines": 0, "folders": 0, "skipped": 0}
+    if records is not None:
+        from backend.app.db import entities as ent  # noqa: PLC0415
+        target_entities = entities_for(records)
+        copied = 0
+        for entity in ent.ENTITIES:       # the typed tables of a files installation (records/): folders and reports keep their ids
+            for row in ent.FileEntities(source.root).find(entity):
+                if overwrite or target_entities.get(entity, *ent.key_of(entity, ent.encode(entity, row))) is None:
+                    target_entities.put(entity, row)
+                    copied += 1
+        counts["typedRows"] = copied
     for folder in ("reports", "workspace"):
+        if source.has_dir(folder):
+            target.make_dir(folder)
         for relative in source.dirs(folder):
             target.make_dir(f"{folder}/{relative}")
             counts["folders"] += 1
     for key in source.keys(""):
         if key.startswith(SKIP_DIRS) or (records is not None and key == LEGACY_AUDIT):
             continue
+        if records is not None and source.report_id_of(key):
+            continue                                  # copied above as a row
         already = target.lines(key) if key.endswith(".jsonl") else target.exists(key)
         if already and (not overwrite or key.endswith(".jsonl")):  # log lines are never copied twice
             counts["skipped"] += 1
@@ -138,16 +153,7 @@ def migrate(target: Any, *, overwrite: bool = False, out=sys.stdout, records: Re
             counts["bytes"] += 1
     if records is not None:
         counts.update(copy_records(records, source, out=out))
-        from backend.app.db import entities as ent  # noqa: PLC0415
         from backend.app.db.upgrade import move_documents  # noqa: PLC0415
-        target_entities = entities_for(records)
-        copied = 0
-        for entity in ent.ENTITIES:                   # the typed tables of a files installation (data/records/entities/)
-            for row in ent.FileEntities(source.root).find(entity):
-                if overwrite or target_entities.get(entity, *ent.key_of(entity, ent.encode(entity, row))) is None:
-                    target_entities.put(entity, row)
-                    copied += 1
-        counts["typedRows"] = copied
         counts.update({f"typed_{name}": value for name, value in move_documents(target, target_entities).items()})
     print(json.dumps(counts), file=out)
     return counts

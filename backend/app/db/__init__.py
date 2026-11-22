@@ -4,7 +4,7 @@ It follows the storage setting, so one choice covers everything the service stor
 
     REPORTING_STORAGE=files                                   (default) <data dir>/records/
     REPORTING_STORAGE=postgresql|sql  REPORTING_STORAGE_URL=  postgresql:// mysql:// sqlserver:// oracle:// sqlite:///
-    REPORTING_STORAGE=mongodb         REPORTING_STORAGE_URL=  mongodb://host:27017/reporting_system
+    REPORTING_STORAGE=mongodb         REPORTING_STORAGE_URL=  mongodb://host:27017/reporting
 
     from backend.app.db import get_records
     get_records().add_run({...});  get_records().audit("user.login", actor="ali")

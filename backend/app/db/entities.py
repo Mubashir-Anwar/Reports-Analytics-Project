@@ -6,6 +6,11 @@ Each entity has real columns, the same on every backend:
     SQL      rs_<name> (SQL Server, Oracle, MySQL, PostgreSQL, SQLite)  — composite primary keys, indexes
     MongoDB  rs_<name> collection, _id built from the key, indexes on the lookup fields
 
+Schema v2 tables have plain names without the rs_ prefix (folders, workspace_reports, server_reports,
+report_versions, report_history): the service keeps them in a database of its own ("reporting" by default).
+On files they are <data dir>/records/tables/<table>.json, or one file per row for the tables that hold report
+definitions (<table>/<folderId>/<reportCode>.json), so saving one report never rewrites the others.
+
 JSON columns are stored as text everywhere, exactly as given (report definitions contain "$match"-style keys).
 Fields a record has that the entity does not list go into an "extra" JSON column, so nothing is ever lost.
 """
@@ -27,10 +32,12 @@ class Entity:
     fields: dict[str, tuple[str, int | None, bool]]          # name -> (str|int|bool|time|json, size, required)
     key: tuple[str, ...]
     indexes: tuple[tuple[str, ...], ...] = field(default_factory=tuple)
+    table_name: str = ""                                     # schema v2: the plain table name (no rs_ prefix)
+    row_files: tuple[str, ...] = ()                          # files backend: one file per row, at <table>/<these fields>.json
 
     @property
     def table(self) -> str:
-        return f"rs_{self.name}"
+        return self.table_name or f"rs_{self.name}"
 
 
 USERS = Entity("users", {
@@ -132,9 +139,57 @@ ANALYTICS_QUERIES = Entity("analytics_queries", {
     "updatedAt": ("time", None, False),
 }, key=("id",), indexes=(("name",),))
 
+# ------------------------------------------------------------------ schema v2, step 1: folders and reports
+# Folders are a tree with ids (renaming or moving one is one update); a workspace file and a server report are
+# separate tables, linked both ways; versions and history belong to a server report by its id.
+FOLDER_TREE = Entity("v2_folders", {
+    "folderId": ("str", 32, True), "orgId": ("str", 64, True), "area": ("str", 16, True),          # workspace / server
+    "parentId": ("str", 32, False), "name": ("str", 64, True), "fullPath": ("str", 240, True),
+    "createdBy": ("str", 128, False), "createdAt": ("time", None, False),
+}, key=("folderId",), indexes=(("area", "fullPath"), ("parentId",)), table_name="folders")
+
+WORKSPACE_REPORTS = Entity("v2_workspace_reports", {
+    "workspaceReportId": ("str", 32, True), "orgId": ("str", 64, True), "folderId": ("str", 32, True),
+    "reportCode": ("str", 80, True), "title": ("str", 200, False), "definition": ("json", None, True),
+    "publishStatus": ("str", 16, False),                      # draft (never published) / published / changed
+    "versionNo": ("int", None, False),                        # +1 on every save: a save from an older copy is stopped
+    "lockedBy": ("str", 128, False), "lockedAt": ("time", None, False),   # who has it open for editing now
+    "serverReportId": ("str", 32, False), "publishedAt": ("time", None, False),
+    "createdBy": ("str", 128, False), "createdAt": ("time", None, False),
+    "updatedBy": ("str", 128, False), "updatedAt": ("time", None, False),
+}, key=("workspaceReportId",), indexes=(("folderId", "reportCode"), ("reportCode",)), table_name="workspace_reports",
+   row_files=("folderId", "reportCode"))
+
+SERVER_REPORTS = Entity("v2_server_reports", {
+    "serverReportId": ("str", 32, True), "orgId": ("str", 64, True), "folderId": ("str", 32, True),
+    "reportCode": ("str", 80, True), "title": ("str", 200, False), "description": ("str", 500, False),
+    "dataSourceId": ("str", 64, False), "queryLanguage": ("str", 32, False), "collectionName": ("str", 200, False),
+    "currentVersion": ("int", None, False), "definition": ("json", None, True),
+    "publishedBy": ("str", 128, False), "publishedAt": ("time", None, False),
+    "workspaceReportId": ("str", 32, False), "updatedAt": ("time", None, False),
+}, key=("serverReportId",), indexes=(("folderId", "reportCode"), ("reportCode",)), table_name="server_reports",
+   row_files=("folderId", "reportCode"))
+
+REPORT_VERSIONS_V2 = Entity("v2_report_versions", {
+    "serverReportId": ("str", 32, True), "versionNo": ("int", None, True), "orgId": ("str", 64, True),
+    "reportCode": ("str", 80, True), "folderPath": ("str", 240, False), "title": ("str", 200, False),
+    "action": ("str", 32, False), "savedBy": ("str", 128, False), "savedAt": ("time", None, False),
+    "definition": ("json", None, False),
+}, key=("serverReportId", "versionNo"), indexes=(("reportCode",),), table_name="report_versions",
+   row_files=("serverReportId", "versionNo"))
+
+REPORT_HISTORY_V2 = Entity("v2_report_history", {
+    "historyId": ("str", 32, True), "orgId": ("str", 64, True), "serverReportId": ("str", 32, False),
+    "reportCode": ("str", 80, True), "folderPath": ("str", 240, False), "happenedAt": ("time", None, True),
+    "action": ("str", 32, True), "userName": ("str", 128, False), "detail": ("str", 300, False),
+}, key=("historyId",), indexes=(("serverReportId", "happenedAt"), ("reportCode",)), table_name="report_history")
+
+V2_STEP1 = (FOLDER_TREE, WORKSPACE_REPORTS, SERVER_REPORTS, REPORT_VERSIONS_V2, REPORT_HISTORY_V2)
+
 ENTITIES = (USERS, API_KEYS, FOLDER_PERMISSIONS, REPORT_VERSIONS, REPORT_HISTORY, JOB_SCHEDULES, JOB_RUNS,
             REPORTS, DRAFTS, FOLDERS, DATA_SOURCES,
-            ANALYTICS_DATASETS, ANALYTICS_RELATIONSHIPS, ANALYTICS_DASHBOARDS, ANALYTICS_REFRESHES, ANALYTICS_QUERIES)
+            ANALYTICS_DATASETS, ANALYTICS_RELATIONSHIPS, ANALYTICS_DASHBOARDS, ANALYTICS_REFRESHES, ANALYTICS_QUERIES,
+            *V2_STEP1)
 
 
 # ------------------------------------------------------------------ record <-> stored values
@@ -214,40 +269,81 @@ class EntityBackend:
 _FILE_LOCK = threading.RLock()
 
 
+def _write_private(path: Path, payload: Any) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_suffix(".tmp")
+    descriptor = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)   # accounts and key hashes: private
+    with os.fdopen(descriptor, "w", encoding="utf-8") as stream:
+        json.dump(payload, stream, ensure_ascii=False, indent=1)
+    temporary.replace(path)
+
+
 class FileEntities(EntityBackend):
     def __init__(self, root: Path):
         self.folder = root / "records" / "entities"
+        self.tables = root / "records" / "tables"            # schema v2
 
     def ensure(self) -> None:
         self.folder.mkdir(parents=True, exist_ok=True)
 
+    def _path(self, entity: Entity) -> Path:
+        return self.tables / f"{entity.table}.json" if entity.table_name else self.folder / f"{entity.name}.json"
+
+    # ---- one file per row (tables with report definitions): <table>/<row_files values>.json
+    def _row_path(self, entity: Entity, stored: dict[str, Any]) -> Path:
+        parts = [str(stored.get(name) or "_") for name in entity.row_files]
+        return self.tables.joinpath(entity.table, *parts[:-1], f"{parts[-1]}.json")
+
+    def _row_candidates(self, entity: Entity, where: dict[str, Any]) -> list[Path]:
+        base = self.tables / entity.table
+        prefix = []
+        for name in entity.row_files:
+            if name not in where or where[name] is None:
+                break
+            prefix.append(str(where[name]))
+        if len(prefix) == len(entity.row_files):
+            path = base.joinpath(*prefix[:-1], f"{prefix[-1]}.json")
+            return [path] if path.is_file() else []
+        start = base.joinpath(*prefix)
+        return sorted(start.rglob("*.json")) if start.is_dir() else []
+
+    @staticmethod
+    def _read_row(path: Path) -> dict[str, Any] | None:
+        try:
+            return json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return None
+
     def _load(self, entity: Entity) -> dict[str, dict[str, Any]]:
-        path = self.folder / f"{entity.name}.json"
+        if entity.row_files:
+            rows = (self._read_row(path) for path in self._row_candidates(entity, {}))
+            return {self._id(key_of(entity, row)): row for row in rows if row}
+        path = self._path(entity)
         if not path.is_file():
             return {}
         return json.loads(path.read_text(encoding="utf-8")).get("items", {})
 
     def _save(self, entity: Entity, items: dict[str, dict[str, Any]]) -> None:
-        self.folder.mkdir(parents=True, exist_ok=True)
-        path = self.folder / f"{entity.name}.json"
-        temporary = path.with_suffix(".tmp")
-        descriptor = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)   # accounts and key hashes: private
-        with os.fdopen(descriptor, "w", encoding="utf-8") as stream:
-            json.dump({"items": items}, stream, ensure_ascii=False, indent=1)
-        temporary.replace(path)
+        _write_private(self._path(entity), {"items": items})
 
     @staticmethod
     def _id(key: tuple) -> str:
         return "␟".join(str(part) for part in key)
 
     def get(self, entity, *key):
+        if entity.row_files:
+            found = self.find(entity, dict(zip(entity.key, key)), limit=1)
+            return found[0] if found else None
         with _FILE_LOCK:
             stored = self._load(entity).get(self._id(key))
         return decode(entity, stored) if stored else None
 
     def find(self, entity, where=None, order=None, limit=None):
         with _FILE_LOCK:
-            rows = list(self._load(entity).values())
+            if entity.row_files:
+                rows = [row for row in (self._read_row(path) for path in self._row_candidates(entity, where or {})) if row]
+            else:
+                rows = list(self._load(entity).values())
         rows = [row for row in rows if all(row.get(name) == value for name, value in (where or {}).items())]
         if order:
             rows.sort(key=lambda row: (row.get(order[0]) is None, row.get(order[0])), reverse=order[1])
@@ -256,12 +352,31 @@ class FileEntities(EntityBackend):
     def put(self, entity, record):
         stored = encode(entity, record)
         with _FILE_LOCK:
+            if entity.row_files:
+                key = key_of(entity, stored)
+                target = self._row_path(entity, stored)
+                here = self._read_row(target) if target.is_file() else None
+                moved = len(entity.key) == 1 and not (here and key_of(entity, here) == key)   # an update in place needs no search
+                for old in self._row_candidates(entity, {}) if moved else []:
+                    row = self._read_row(old)        # the same row stored under another folder / code: it moved
+                    if row and key_of(entity, row) == key and old != self._row_path(entity, stored):
+                        old.unlink(missing_ok=True)
+                _write_private(self._row_path(entity, stored), stored)
+                return
             items = self._load(entity)
             items[self._id(key_of(entity, stored))] = stored
             self._save(entity, items)
 
     def delete(self, entity, *key):
         with _FILE_LOCK:
+            if entity.row_files:
+                removed = False
+                for path in self._row_candidates(entity, dict(zip(entity.key, key))):
+                    row = self._read_row(path)
+                    if row and key_of(entity, row) == tuple(key):
+                        path.unlink(missing_ok=True)
+                        removed = True
+                return removed
             items = self._load(entity)
             found = items.pop(self._id(key), None)
             if found is not None:
@@ -270,6 +385,14 @@ class FileEntities(EntityBackend):
 
     def delete_where(self, entity, where):
         with _FILE_LOCK:
+            if entity.row_files:
+                count = 0
+                for path in self._row_candidates(entity, where):
+                    row = self._read_row(path)
+                    if row and all(row.get(n) == value for n, value in where.items()):
+                        path.unlink(missing_ok=True)
+                        count += 1
+                return count
             items = self._load(entity)
             kept = {k: v for k, v in items.items() if not all(v.get(n) == value for n, value in where.items())}
             if len(kept) != len(items):
@@ -382,7 +505,7 @@ class MongoEntities(EntityBackend):
             collection = self.db[entity.table]
             for fields in ((entity.key,) if len(entity.key) > 1 else ()) + entity.indexes:
                 collection.create_index([(name, ASCENDING) for name in fields], name=f"ix_{entity.table}_{'_'.join(fields)}"[:120])
-        self.db["rs_schema_version"].update_one({"_id": "entities"}, {"$max": {"version": 5}, "$set": {"appliedAt": model.now()}}, upsert=True)
+        self.db["rs_schema_version"].update_one({"_id": "entities"}, {"$max": {"version": 6}, "$set": {"appliedAt": model.now()}}, upsert=True)
 
     @staticmethod
     def _id(key: tuple) -> str:

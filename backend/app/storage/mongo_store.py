@@ -1,4 +1,4 @@
-"""The document store on MongoDB: REPORTING_STORAGE=mongodb, REPORTING_STORAGE_URL=mongodb://…/reporting_system.
+"""The document store on MongoDB: REPORTING_STORAGE=mongodb, REPORTING_STORAGE_URL=mongodb://…/reporting.
 
 Same API as FileStore. Collections rs_documents ({_id: key, kind, body, data, private, updatedAt}) and rs_lines.
 The JSON body is kept as text: report definitions contain MongoDB pipelines whose "$match"-style keys cannot be

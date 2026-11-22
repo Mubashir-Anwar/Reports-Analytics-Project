@@ -85,11 +85,12 @@ def save_report_payload(ctx: SimpleNamespace, payload: Any, expected_id: str | N
     store = get_store()
     key = report_definition_key(definition.report_id, definition.editor_config["folder"])
     config = definition.editor_config or payload
-    store.write_json(key, config)
-    if existing and existing.editor_config:
-        previous_key = report_definition_key(existing.report_id, normalize_folder_path(existing.editor_config.get("folder", "General")))
-        if previous_key != key:
-            store.delete(previous_key)
+    previous_key = report_definition_key(existing.report_id, normalize_folder_path(existing.editor_config.get("folder", "General"))) \
+        if existing and existing.editor_config else key
+    if previous_key != key:
+        store.move_json(previous_key, key, config)        # a move: the report keeps its id (versions, history, rights)
+    else:
+        store.write_json(key, config)
     if existing is not None and existing.ref != definition.ref:
         ctx.move_versions(existing.report_id, existing.folder, definition.folder)     # its versions and history go with it
     ctx.save_version(definition.report_id, config, action, user)

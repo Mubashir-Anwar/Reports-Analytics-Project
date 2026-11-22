@@ -10,41 +10,74 @@ from types import SimpleNamespace
 from typing import Any
 
 from backend.app.constants import REPORT_ID_PATTERN
-from backend.app.db.entities import REPORT_VERSIONS, get_entities
+from backend.app.db.entities import REPORT_VERSIONS_V2, SERVER_REPORTS, get_entities
 from backend.app.definitions import discover_reports
 from backend.app.logs import LOG
+from backend.app.storage.files import report_definition_key
+from backend.app.storage.routed import ghost_id
 from backend.app.storage.store import get_store
 
-__all__ = ['save_version', 'list_versions', 'get_version', 'move_versions', 'bump_revision', 'refresh_if_changed']
+__all__ = ['report_owner', 'save_version', 'list_versions', 'get_version', 'move_versions', 'bump_revision', 'refresh_if_changed']
 
 MAX_VERSIONS = 50
 REVISION_KEY = "meta/repository-revision.json"
 REFRESH_EVERY_SECONDS = 3.0
 
 
+def report_owner(report_id: str, folder: str) -> str:
+    """The server_report_id of /folder/report_id; a report that is not (or no longer) on the server has a fixed
+    stand-in id, so the versions and history of a deleted report are still found."""
+    found = get_store().report_id_of(report_definition_key(report_id, folder))
+    return found or ghost_id(folder, report_id)
+
+
+def _gone(entities: Any, owner: str, cache: dict[str, bool]) -> bool:
+    if owner not in cache:
+        cache[owner] = entities.get(SERVER_REPORTS, owner) is None
+    return cache[owner]
+
+
+def _mine(rows: list[dict[str, Any]], owner: str, folder: str) -> list[dict[str, Any]]:
+    """Rows of this report: its own id, or written for a report with the same ID and folder that is gone now."""
+    entities, cache = get_entities(), {}
+    return [row for row in rows if row.get("serverReportId") == owner
+            or (row.get("folderPath") == folder and _gone(entities, row.get("serverReportId") or "", cache))]
+
+
 def _versions(report_id: str, folder: str | None = None) -> list[dict[str, Any]]:
-    """Versions of a report from rs_report_versions, oldest first. The same ID can be published in several folders:
-    the version numbers count on across them (the table key is ID + number), the folder column says whose it is."""
-    where = {"reportId": report_id, **({"folder": folder} if folder is not None else {})}
-    return get_entities().find(REPORT_VERSIONS, where, order=("version", False))
+    """Versions of a report (report_versions, by server_report_id), oldest first. Without a folder: of every report
+    with this ID."""
+    rows = get_entities().find(REPORT_VERSIONS_V2, {"reportCode": report_id})
+    if folder is not None:
+        rows = _mine(rows, report_owner(report_id, folder), folder)
+    return sorted(rows, key=lambda row: (row.get("savedAt") or "", row["versionNo"]))
+
+
+def _public(row: dict[str, Any]) -> dict[str, Any]:
+    return {"version": row["versionNo"], "savedAt": row.get("savedAt"), "action": row.get("action"), "user": row.get("savedBy"),
+            "folder": row.get("folderPath") or "General", "title": row.get("title"), "definition": row.get("definition")}
 
 
 def save_version(ctx: SimpleNamespace, report_id: str, config: dict[str, Any], action: str = "saved", user: str = "") -> int:
-    """Keep this state of the report as a new version (the last MAX_VERSIONS of the report in its folder are kept)."""
+    """Keep this state of the report as a new version (the last MAX_VERSIONS of the report are kept)."""
     if not REPORT_ID_PATTERN.fullmatch(report_id):
         return 0
     entities = get_entities()
     folder = str(config.get("folder") or "General")
     try:
-        everywhere = [item["version"] for item in _versions(report_id)]
-        number = max(everywhere) + 1 if everywhere else 1
-        entities.put(REPORT_VERSIONS, {
-            "reportId": report_id, "version": number, "savedAt": ctx.now_iso(), "action": action[:32], "user": user[:128],
-            "folder": folder, "title": str(config.get("title", report_id))[:200], "definition": config,
+        owner = report_owner(report_id, folder)
+        mine = _versions(report_id, folder)
+        number = max([item["versionNo"] for item in mine] or [0]) + 1     # counts on after a deleted report of the same name
+        entities.put(REPORT_VERSIONS_V2, {
+            "serverReportId": owner, "versionNo": number, "reportCode": report_id, "folderPath": folder,
+            "savedAt": ctx.now_iso(), "action": action[:32], "savedBy": user[:128] or None,
+            "title": str(config.get("title", report_id))[:200], "definition": config,
         })
-        mine = [item["version"] for item in _versions(report_id, folder)]
+        get_store().set_row_fields(report_definition_key(report_id, folder), currentVersion=number,
+                                   publishedBy=user[:128] or None)
+        mine = _versions(report_id, folder)
         for old in mine[:max(0, len(mine) - MAX_VERSIONS)]:
-            entities.delete(REPORT_VERSIONS, report_id, old)
+            entities.delete(REPORT_VERSIONS_V2, old["serverReportId"], old["versionNo"])
         return number
     except (OSError, ValueError):
         LOG.warning("A version of %s could not be saved", report_id)
@@ -52,22 +85,22 @@ def save_version(ctx: SimpleNamespace, report_id: str, config: dict[str, Any], a
 
 
 def list_versions(ctx: SimpleNamespace, report_id: str, folder: str | None = None) -> list[dict[str, Any]]:
-    return [{k: item.get(k) for k in ("version", "savedAt", "action", "user", "folder", "title")} for item in reversed(_versions(report_id, folder))]
+    return [{k: v for k, v in _public(item).items() if k != "definition"} for item in reversed(_versions(report_id, folder))]
 
 
 def get_version(ctx: SimpleNamespace, report_id: str, number: int, folder: str | None = None) -> dict[str, Any] | None:
-    found = get_entities().get(REPORT_VERSIONS, report_id, int(number))
-    if found is not None and folder is not None and found.get("folder", "General") != folder:
-        return None                                   # a version of the report with this ID in another folder
-    return found
+    found = [item for item in _versions(report_id, folder) if item["versionNo"] == int(number)]
+    return _public(found[-1]) if found else None
 
 
 def move_versions(ctx: SimpleNamespace, report_id: str, old_folder: str, new_folder: str) -> None:
-    """A report moved to another folder keeps its versions and history."""
+    """A moved report keeps its id, so its versions and history stay its own; the folder shown with them changes."""
     entities = get_entities()
     try:
-        for item in _versions(report_id, old_folder):
-            entities.put(REPORT_VERSIONS, {**item, "folder": new_folder})
+        owner = report_owner(report_id, new_folder)
+        for item in entities.find(REPORT_VERSIONS_V2, {"reportCode": report_id}):
+            if item["serverReportId"] == owner and item.get("folderPath") == old_folder:
+                entities.put(REPORT_VERSIONS_V2, {**item, "folderPath": new_folder})
     except (OSError, ValueError):
         LOG.warning("The versions of %s could not be moved to %s", report_id, new_folder)
     ctx.move_history(report_id, old_folder, new_folder)

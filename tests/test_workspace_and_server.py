@@ -103,6 +103,51 @@ def test_publish_copies_the_draft_to_the_server(client):
     assert "_workspace" not in json.dumps(client.get("/api/admin/reports/D1", headers=token()).json())
 
 
+def test_a_save_from_an_older_copy_is_stopped_and_says_who_saved(client):
+    first = client.put("/api/admin/workspace/D1?create=true", headers=token(), json=draft())
+    base = first.json()["report"]["versionNo"]
+    assert base == 1 and client.get("/api/admin/workspace/D1", headers=token()).json()["workspace"]["versionNo"] == 1
+    other = client.put("/api/admin/workspace/D1", headers=token(ADMIN), json=draft(title="Theirs", baseVersion=base))
+    assert other.status_code == 200 and other.json()["report"]["versionNo"] == 2
+    mine = client.put("/api/admin/workspace/D1", headers=token(), json=draft(title="Mine", baseVersion=base))
+    assert mine.status_code == 409
+    detail = mine.json()["detail"]
+    assert detail["code"] == "changed-by-someone-else" and detail["savedBy"] == "admin token" and detail["versionNo"] == 2
+    assert client.get("/api/admin/workspace/D1", headers=token()).json()["title"] == "Theirs"            # nothing lost
+    assert client.put("/api/admin/workspace/D1", headers=token(), json=draft(title="Mine", baseVersion=2)).status_code == 200
+    # publishing does not count as a change of the design: the open copy can still be saved
+    client.post("/api/admin/workspace/D1/publish", headers=token(), json={"folder": "Finance"})
+    assert client.put("/api/admin/workspace/D1", headers=token(), json=draft(title="Again", baseVersion=3)).status_code == 200
+
+
+def test_the_designer_says_who_else_is_editing(client):
+    client.put("/api/admin/workspace/D1?create=true", headers=token(), json=draft())
+    url = "/api/admin/workspace/D1/editing?folder=Mine"
+    assert client.post(url, headers=token(), json={"open": True}).json()["editingBy"] is None
+    theirs = client.post(url, headers=token(ADMIN), json={"open": True}).json()
+    assert theirs["editingBy"]["user"] == "designer token" and theirs["versionNo"] == 1
+    assert client.get("/api/admin/workspace/D1?folder=Mine", headers=token(ADMIN)).json()["workspace"]["editingBy"]["user"] == "designer token"
+    client.post(url, headers=token(), json={"open": False})                      # closed: the mark goes
+    assert client.post(url, headers=token(ADMIN), json={"open": True}).json()["editingBy"] is None
+    assert client.post(url, headers=token(), json={"open": True}).json()["editingBy"]["user"] == "admin token"
+
+
+def test_moving_a_draft_or_a_server_report_keeps_its_id(client):
+    from backend.app.storage.store import get_store
+    client.put("/api/admin/workspace/D1?create=true", headers=token(), json=draft())
+    store = get_store()
+    draft_id = store.report_id_of("workspace/Mine/D1.json")
+    assert client.put("/api/admin/workspace/D1?folder=Mine", headers=token(), json=draft(folder="Other")).status_code == 200
+    assert store.report_id_of("workspace/Other/D1.json") == draft_id and not store.exists("workspace/Mine/D1.json")
+    server_id = store.report_id_of("reports/General/R1.json")
+    history_before = len(client.get("/api/admin/reports/R1", headers=token()).json().get("history", []))
+    client.post("/api/admin/workspace/R1/publish", headers=token(), json={"folder": "General", "replace": True})
+    assert store.report_id_of("reports/General/R1.json") == server_id                                    # a republish keeps it
+    row = store.report_row("reports/General/R1.json")
+    assert row["currentVersion"] >= 1 and row["publishedBy"]
+    assert history_before >= 0
+
+
 def test_deleting_a_draft_keeps_the_server_copy(client):
     response = client.delete("/api/admin/workspace/R1", headers=token())
     assert response.json() == {"status": "deleted", "reportId": "R1", "stillOnServer": True}

@@ -35,7 +35,7 @@ def _prefix(prefix: str) -> str:
     return f"{_clean_key(prefix)}/" if prefix else ""
 
 
-class FileStore:
+class _FileDocuments:
     backend = "files"
 
     @property
@@ -68,9 +68,9 @@ class FileStore:
     def read_many(self, prefix: str, suffix: str = ".json") -> list[tuple[str, Any]]:
         """(key, payload) of every document under prefix; unreadable files are returned with payload None."""
         found = []
-        for key in self.keys(prefix, suffix):
+        for key in _FileDocuments.keys(self, prefix, suffix):          # the files themselves, not the routed rows
             try:
-                found.append((key, self.read_json(key)))
+                found.append((key, _FileDocuments.read_json(self, key)))
             except (OSError, ValueError):
                 found.append((key, None))
         return found
@@ -151,7 +151,7 @@ class FileStore:
         return path.read_bytes() if path.is_file() else None
 
 
-class PostgresStore:
+class _PostgresDocuments:
     """The same API on two tables: reporting_documents (JSON, binary files, folders) and reporting_lines (logs)."""
     backend = "postgresql"
 
@@ -281,6 +281,17 @@ class PostgresStore:
         return bytes(row[0]) if row and row[0] is not None else None
 
 
+from backend.app.storage.routed import RoutedStore  # noqa: E402 - routed.py needs _clean_key above
+
+
+class FileStore(RoutedStore, _FileDocuments):
+    """Files in the data directory; reports, drafts and folders in records/tables (routed.py)."""
+
+
+class PostgresStore(RoutedStore, _PostgresDocuments):
+    """PostgreSQL documents; reports, drafts, folders and data adapters in their own tables (routed.py)."""
+
+
 def _like(text: str) -> str:
     return text.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
 
@@ -304,7 +315,7 @@ def storage_settings() -> tuple[str, str]:
         raise RuntimeError("REPORTING_STORAGE=sql needs REPORTING_STORAGE_URL, e.g. sqlserver://user:password@host:1433/reporting, "
                            "oracle://user:password@host:1521/?service_name=XEPDB1, mysql://… or postgresql://…")
     if backend == "mongodb" and not url.startswith(("mongodb://", "mongodb+srv://")):
-        raise RuntimeError("REPORTING_STORAGE=mongodb needs REPORTING_STORAGE_URL=mongodb://user:password@host:27017/reporting_system")
+        raise RuntimeError("REPORTING_STORAGE=mongodb needs REPORTING_STORAGE_URL=mongodb://user:password@host:27017/reporting")
     return backend, url
 
 

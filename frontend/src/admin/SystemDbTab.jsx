@@ -79,7 +79,7 @@ export default function SystemDbTab({ notify }) {
             <div className="db-picker" role="radiogroup" aria-label="Database type">
               {ORDER.filter((id) => kinds[id]).map((id) => (
                 <button key={id} type="button" role="radio" aria-checked={form.kind === id} className={`db-choice ${form.kind === id ? 'on' : ''}`}
-                  onClick={() => set({ kind: id, port: '', windowsLogin: id === 'sqlserver' ? form.windowsLogin : false, database: id === 'sqlite' ? 'data/reporting.db' : id === 'mongodb' ? 'reporting_system' : 'reporting' })}>
+                  onClick={() => set({ kind: id, port: '', windowsLogin: id === 'sqlserver' ? form.windowsLogin : false, database: id === 'sqlite' ? 'data/reporting.db' : 'reporting' })}>
                   <DbLogo type={LOGO[id]} size={22} /><span><b>{kinds[id].label}</b><small>{kinds[id].family === 'relational' ? 'SQL' : 'NoSQL'}</small></span>
                 </button>
               ))}
@@ -87,7 +87,8 @@ export default function SystemDbTab({ notify }) {
             <div className="form-grid-2">
               {form.kind !== 'sqlite' && <label className="field"><span>Host{form.kind === 'sqlserver' ? ' (or host\\instance)' : ''}</span><input value={form.host} onChange={(e) => set({ host: e.target.value })} /></label>}
               {form.kind !== 'sqlite' && <label className="field"><span>Port</span><input value={form.port} placeholder={String(kind.port || '')} onChange={(e) => set({ port: e.target.value.replace(/\D/g, '') })} /></label>}
-              {form.kind !== 'oracle' && <label className="field"><span>{form.kind === 'sqlite' ? 'File' : 'Database'}</span><input value={form.database} onChange={(e) => set({ database: e.target.value })} /></label>}
+              {form.kind !== 'oracle' && <label className="field"><span>{form.kind === 'sqlite' ? 'File' : 'Database'}</span><input value={form.database} onChange={(e) => set({ database: e.target.value })} />
+                {form.kind !== 'sqlite' && <span className="hint">A database of its own (default name reporting): every table of the service goes inside it — folders, reports, users, runs, analytics.</span>}</label>}
               {form.kind === 'oracle' && <label className="field"><span>Service name</span><input value={form.service} placeholder="XEPDB1" onChange={(e) => set({ service: e.target.value })} /></label>}
             </div>
             {form.kind === 'sqlserver' && <label className="check-line"><input type="checkbox" checked={form.windowsLogin} onChange={(e) => set({ windowsLogin: e.target.checked })} /> Windows sign-in (Trusted connection, ODBC Driver 18)</label>}
@@ -100,7 +101,7 @@ export default function SystemDbTab({ notify }) {
           </>
         ) : (
           <label className="field"><span>Database URL</span>
-            <input value={form.url} placeholder="mongodb://user:pw@host:27017/reporting_system" onChange={(e) => set({ url: e.target.value })} />
+            <input value={form.url} placeholder="mongodb://user:pw@host:27017/reporting" onChange={(e) => set({ url: e.target.value })} />
             <span className="hint">sqlserver://user:pw@host:1433/reporting · mssql+pyodbc://@localhost/reporting?driver=ODBC+Driver+18+for+SQL+Server&amp;trusted_connection=yes · postgresql://… · mysql://… · oracle://user:pw@host:1521/?service_name=XEPDB1 · sqlite:///data/reporting.db · mongodb://…</span>
           </label>
         )}

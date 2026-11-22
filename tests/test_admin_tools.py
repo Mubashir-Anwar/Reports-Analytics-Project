@@ -74,7 +74,7 @@ def test_test_copy_and_save_to_a_new_database(client, env_file, tmp_path):
     from backend.app.db.sql import SqlRecords
     rows = ent.SqlEntities(target)
     assert {item["username"] for item in rows.find(ent.USERS)} >= {"boss"}
-    assert any(item.get("reportId") == "SWITCH_ME" or item.get("report_id") == "SWITCH_ME" for item in rows.find(ent.REPORTS))
+    assert any(item["reportCode"] == "SWITCH_ME" for item in rows.find(ent.SERVER_REPORTS))      # same server_report_id as before
     assert SqlRecords(target).verify_chain()["ok"]
     again = client.post("/api/admin/system-db/test", json={"url": target}).json()
     assert again["ok"] and again["empty"] is False

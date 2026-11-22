@@ -6,6 +6,8 @@ from typing import Any
 
 from fastapi import FastAPI, HTTPException, Request
 
+from backend.app.db import model
+
 from backend.app.constants import REPORT_ID_PATTERN, WORKSPACE_META
 from backend.app.definitions import _dynamic_report, clean_folder
 from backend.app.logs import LOG
@@ -30,6 +32,24 @@ def register(app: FastAPI, ctx: SimpleNamespace) -> None:
     workspace_folders = ctx.workspace_folders
     workspace_summary = ctx.workspace_summary
 
+    EDITING_FRESH_SECONDS = 90          # the designer says "still editing" every 30 s; older marks are ignored
+
+    def editing_now(row: dict[str, Any] | None, me: str) -> dict[str, Any] | None:
+        """Someone else who has this draft open in the designer right now."""
+        if not row or not row.get("lockedBy") or row["lockedBy"] == me or not row.get("lockedAt"):
+            return None
+        age = (model.now() - model.parse_time(row["lockedAt"])).total_seconds()
+        return {"user": row["lockedBy"], "since": row["lockedAt"]} if age < EDITING_FRESH_SECONDS else None
+
+    def draft_state(key: str, me: str) -> dict[str, Any]:
+        """Version number (for the save clash check) and who else is editing the draft."""
+        row = get_store().report_row(key) or {}
+        return {"versionNo": row.get("versionNo") or 0, "publishStatus": row.get("publishStatus") or "draft",
+                "updatedBy": row.get("updatedBy") or "", "editingBy": editing_now(row, me)}
+
+    def actor(request: Request) -> str:
+        return str(getattr(request.state, "actor", "") or "designer")[:128]
+
     @app.get("/api/admin/workspace")
     def workspace_list(request: Request) -> dict[str, Any]:
         require_admin(request, "designer")
@@ -46,7 +66,26 @@ def register(app: FastAPI, ctx: SimpleNamespace) -> None:
         entry = find_workspace_entry(report_id, asked_folder(request))
         if entry is None:
             raise HTTPException(status_code=404, detail="This report is not in the designer workspace")
-        return {**strip_workspace_meta(entry[1]), "workspace": workspace_summary(entry[1])}
+        return {**strip_workspace_meta(entry[1]), "workspace": {**workspace_summary(entry[1]), **draft_state(entry[0], actor(request))}}
+
+    @app.post("/api/admin/workspace/{report_id}/editing")
+    async def workspace_editing(report_id: str, request: Request) -> dict[str, Any]:
+        """The designer has this draft open ({"open": true}, every 30 s) or closed it ({"open": false}).
+        Answers who else is editing it and its version number now."""
+        require_admin(request, "designer")
+        body = await json_body(request, optional=True)
+        entry = find_workspace_entry(report_id, asked_folder(request))
+        if entry is None:
+            raise HTTPException(status_code=404, detail="This report is not in the designer workspace")
+        me, store = actor(request), get_store()
+        row = store.report_row(entry[0]) or {}
+        other = editing_now(row, me)
+        if body.get("open", True) is False:
+            if row.get("lockedBy") == me:
+                store.set_row_fields(entry[0], lockedBy=None, lockedAt=None)
+        elif other is None:
+            store.set_row_fields(entry[0], lockedBy=me, lockedAt=model.now())   # the first one keeps the mark
+        return draft_state(entry[0], me)
 
     @app.put("/api/admin/workspace/{report_id}")
     async def workspace_save(report_id: str, request: Request, create: bool = False) -> dict[str, Any]:
@@ -72,22 +111,33 @@ def register(app: FastAPI, ctx: SimpleNamespace) -> None:
             if in_target is not None and existing is not None and in_target[0] != existing[0]:
                 raise HTTPException(status_code=409, detail=f"Your workspace folder {folder} already has a report with the ID {report_id}; "
                                                             "choose another ID or folder")
+        base = payload.pop("baseVersion", None)
+        if existing is not None and base is not None:
+            current = draft_state(existing[0], actor(request))
+            if str(current["versionNo"]) != str(base):
+                who = current["updatedBy"] or "someone"
+                raise HTTPException(status_code=409, detail={
+                    "code": "changed-by-someone-else", "versionNo": current["versionNo"], "savedBy": who,
+                    "savedAt": (existing[1].get(WORKSPACE_META) or {}).get("updatedAt", ""),
+                    "message": f"{who} saved this report after you opened it. Reload it to see their changes, or save yours as a copy"})
         meta = dict((existing[1].get(WORKSPACE_META) or {}) if existing else {"createdAt": now_iso()})
         meta["updatedAt"] = now_iso()
+        meta["updatedBy"] = actor(request)
         clean = strip_workspace_meta(payload)
         clean["folder"] = folder
         clean[WORKSPACE_META] = meta
         target = workspace_file(report_id, folder)
         store = get_store()
-        store.write_json(target, clean)
         if existing is not None and existing[0] != target:
-            store.delete(existing[0])
+            store.move_json(existing[0], target, clean)                 # moved: the draft keeps its id
+        else:
+            store.write_json(target, clean)
         problem = ""
         try:
             _dynamic_report(strip_workspace_meta(clean))
         except (TypeError, ValueError, KeyError) as exc:
             problem = str(exc)
-        return {"report": workspace_summary(clean), "readyToPublish": not problem, "problem": problem}
+        return {"report": {**workspace_summary(clean), **draft_state(target, actor(request))}, "readyToPublish": not problem, "problem": problem}
 
     @app.delete("/api/admin/workspace/{report_id}")
     def workspace_delete(report_id: str, request: Request) -> dict[str, Any]:
@@ -162,8 +212,7 @@ def register(app: FastAPI, ctx: SimpleNamespace) -> None:
                 store.make_dir("/".join(["workspace", *moved(sub).split("/")]))
             for key, data in drafts:
                 data["folder"] = moved(clean_folder(data.get("folder")) or "General")
-                store.write_json(workspace_file(data["id"], data["folder"]), data)
-                store.delete(key)
+                store.move_json(key, workspace_file(data["id"], data["folder"]), data)
         elif drafts and payload.get("recursive") is not True:
             raise HTTPException(status_code=409, detail=f"The folder has {len(drafts)} report(s); confirm to delete them, or move them to another folder")
         else:
@@ -210,4 +259,5 @@ def register(app: FastAPI, ctx: SimpleNamespace) -> None:
         record_history(report_id, "published", request.state.actor or f"designer ({role})", f"{'replaced' if existing is not None else 'new'} in {folder}",
                        folder=saved.folder)
         LOG.info("Report %s published to the server folder %s", report_id, folder)
-        return {"report": admin_report_payload(saved), "replaced": existing is not None, "workspace": workspace_summary(data)}
+        return {"report": admin_report_payload(saved), "replaced": existing is not None,
+                "workspace": {**workspace_summary(data), **draft_state(path, actor(request))}}
