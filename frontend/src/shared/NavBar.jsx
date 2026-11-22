@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from 'react';
 import '../../../ui/brand/navbar.css';
 import { useBrand } from './brand.js';
 import { signOut, useMe } from './session.js';
+import AccountDialog from './AccountDialog.jsx';
 import ThemeMenu from './ThemeMenu.jsx';
 import TeamBar from './TeamBar.jsx';
 
@@ -61,6 +62,12 @@ function UserMenu({ me }) {
     document.addEventListener('keydown', escape);
     return () => { document.removeEventListener('mousedown', close); document.removeEventListener('keydown', escape); };
   }, [open]);
+  const [account, setAccount] = useState(null);   // null | 'open' | 'forced' (an admin set the password)
+  useEffect(() => {
+    let must = false;
+    try { must = sessionStorage.getItem('must-change-password') === '1'; sessionStorage.removeItem('must-change-password'); } catch { /* private mode */ }
+    if (must) setAccount('forced');
+  }, []);
   if (!me) return null;
   const isAdmin = me.rights?.includes('admin');
   return (
@@ -75,6 +82,7 @@ function UserMenu({ me }) {
             <span className="fx-avatar" aria-hidden="true">{initials(me.username)}</span>
             <div><b>{me.username}</b><small>{(me.rights || []).length} of 5 parts</small><br /><span className="fx-badge">{me.superAdmin ? 'Super admin' : isAdmin ? 'Admin' : me.role === 'designer' ? 'Designer' : 'User'}</span></div>
           </div>
+          {!me.bootstrap && <button type="button" role="menuitem" onClick={() => { setOpen(false); setAccount('open'); }}><Icon name="key" />My account and password</button>}
           {isAdmin && <a role="menuitem" href="/admin#developer"><Icon name="api" />API, Postman and curl</a>}
           {isAdmin && <a role="menuitem" href="/admin#keys"><Icon name="key" />API keys</a>}
           {me.superAdmin && <a role="menuitem" href="/admin#branding"><Icon name="brand" />Name and logo</a>}
@@ -82,6 +90,7 @@ function UserMenu({ me }) {
           <button type="button" role="menuitem" className="fx-danger" onClick={signOut}><Icon name="out" />Sign out</button>
         </div>
       )}
+      {account && <AccountDialog forced={account === 'forced'} onClose={() => setAccount(null)} />}
     </div>
   );
 }

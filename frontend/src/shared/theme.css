@@ -119,3 +119,22 @@ code, pre, .mono { font-family: var(--mono); }
     --text: #ffffff; --muted: #e5e7eb; --band: #0a0a0a; --guide: #9ca3af; --accent: #fde047; --accent-hover: #fef08a; --accent-soft: #3a3206; --on-accent: #000000; }
 }
 :root[data-contrast="high"] :focus-visible { box-shadow: 0 0 0 3px var(--accent), 0 0 0 5px var(--text) !important; }
+
+/* password box with an eye button */
+.pw-box { position: relative; display: block; }
+.pw-box > input { width: 100%; padding-right: 34px; box-sizing: border-box; }
+.pw-eye { position: absolute; right: 4px; top: 50%; transform: translateY(-50%); border: 0; background: transparent; color: inherit;
+  opacity: .6; cursor: pointer; padding: 4px; line-height: 0; border-radius: 4px; }
+.pw-eye:hover, .pw-eye[aria-pressed="true"] { opacity: 1; }
+/* "already taken" while typing */
+.field-ok { color: #15803d; }
+.field-bad { color: #b91c1c; }
+.contact-edit { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 8px; align-items: end; margin: 6px 0; }
+.team-edit { margin-bottom: 12px; padding-bottom: 12px; border-bottom: 1px solid var(--line, #e5e7eb); }
+.wide-card { grid-column: 1 / -1; }
+.field .radio-line, .radio-line { display: flex; flex-direction: row; gap: 8px; align-items: flex-start; font-weight: normal; margin: 4px 0; text-align: left; }
+.field .radio-line > input, .radio-line > input { width: auto; flex: none; margin: 3px 0 0; padding: 0; }
+.radio-line small { display: inline; }
+.link-btn { align-self: center; text-decoration: underline; }
+.selectable { user-select: all; word-break: break-all; }
+.account-dialog { max-width: 640px; }

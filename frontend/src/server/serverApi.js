@@ -19,6 +19,7 @@ async function call(path, { method = 'GET', body, raw = false } = {}) {
     if (response.status === 404 && (!detail || detail === 'Not Found')) {
       detail = 'The server does not have this feature yet (HTTP 404): it is still running an older version. Restart the reporting service (uvicorn) and reload this page.';
     }
+    if (detail && typeof detail === 'object') detail = detail.message || '';
     const error = new Error(typeof detail === 'string' && detail ? detail : `Request failed (HTTP ${response.status})`);
     error.status = response.status;
     if (response.status === 401 && path !== '/api/server/login' && path !== '/api/server/me') onSignedOut();

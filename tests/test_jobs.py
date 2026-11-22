@@ -73,7 +73,7 @@ def test_job_checks():
 # ---------------------------------------------------------------- API, runner, files, e-mail
 def make_user(client, username, role):
     admin = {"X-Admin-Token": ADMIN}
-    assert client.post("/api/admin/users", headers=admin, json={"username": username, "password": "Passw0rd-long-enough", "role": role}).status_code in (200, 201)
+    assert client.post("/api/admin/users", headers=admin, json={"username": username, "email": f"{username}@example.com", "password": "Passw0rd-long-enough", "role": role}).status_code in (200, 201)
 
 
 def test_schedule_runs_when_due_and_keeps_the_file(client, monkeypatch):

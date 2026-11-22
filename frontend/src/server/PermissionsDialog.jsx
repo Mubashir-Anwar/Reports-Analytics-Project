@@ -8,7 +8,7 @@ const LEVEL_LABEL = { none: 'None', run: 'Run', manage: 'Manage' };
 
 export default function PermissionsDialog({ folder, onClose, onSaved }) {
   const [data, setData] = useState(null);
-  const [rows, setRows] = useState([]); // { kind: 'user' | 'role', name, level }
+  const [rows, setRows] = useState([]); // { kind: 'user' | 'role' | 'team', name (group id for a team), level }
   const [message, setMessage] = useState(null);
   const [busy, setBusy] = useState(false);
 
@@ -16,6 +16,7 @@ export default function PermissionsDialog({ folder, onClose, onSaved }) {
     setData(result);
     setRows([
       ...Object.entries(result.rules.roles).map(([name, level]) => ({ kind: 'role', name, level })),
+      ...Object.entries(result.rules.groups || {}).map(([name, level]) => ({ kind: 'team', name, level })),
       ...Object.entries(result.rules.users).map(([name, level]) => ({ kind: 'user', name, level })),
     ]);
   };
@@ -25,11 +26,14 @@ export default function PermissionsDialog({ folder, onClose, onSaved }) {
   const usedUsers = new Set(rows.filter((r) => r.kind === 'user').map((r) => r.name.toLowerCase()));
   const freeUsers = (data?.users || []).filter((u) => !usedUsers.has(u.toLowerCase()));
   const freeRoles = ['viewer', 'designer'].filter((role) => !rows.some((r) => r.kind === 'role' && r.name === role));
+  const teams = data?.groups || [];
+  const teamName = (id) => teams.find((g) => g.groupId === id)?.name || '(deleted team)';
+  const freeTeams = teams.filter((g) => !rows.some((r) => r.kind === 'team' && r.name === g.groupId));
 
   const save = async () => {
     setBusy(true);
-    const rules = { users: {}, roles: {} };
-    rows.forEach((row) => { if (row.name) rules[row.kind === 'user' ? 'users' : 'roles'][row.name] = row.level; });
+    const rules = { users: {}, roles: {}, groups: {} };
+    rows.forEach((row) => { if (row.name) rules[{ user: 'users', role: 'roles', team: 'groups' }[row.kind]][row.name] = row.level; });
     try {
       fill(await serverApi.setPermissions(folder, rules));
       setMessage({ kind: 'ok', text: 'Saved. The rules apply to this folder and every folder below it.' });
@@ -44,7 +48,7 @@ export default function PermissionsDialog({ folder, onClose, onSaved }) {
           <div><p className="eyebrow">Permissions</p><h2>{folder ? `/${folder}` : 'Repository root (all folders)'}</h2></div>
           <button className="btn quiet sm" onClick={onClose} aria-label="Close">✕</button>
         </div>
-        <p className="muted">A rule here applies to this folder and its subfolders. The nearest folder with a rule wins; a rule for a user wins over a rule for their role. Viewers can get at most <b>Run</b>; administrators always have every permission.</p>
+        <p className="muted">A rule here applies to this folder and its subfolders. The nearest folder with a rule wins; in one folder a rule for a user wins over their teams, and a team wins over a role. Viewers can get at most <b>Run</b>; administrators always have every permission.</p>
         {!data && !message && <div className="empty">Loading…</div>}
         {data && (
           <>
@@ -54,7 +58,7 @@ export default function PermissionsDialog({ folder, onClose, onSaved }) {
                 // eslint-disable-next-line react/no-array-index-key -- the position is the identity
                 <div className="perm-row" key={index}>
                   <span className="chip">{row.kind}</span>
-                  <b>{row.name}</b>
+                  <b>{row.kind === 'team' ? teamName(row.name) : row.name}</b>
                   <select value={row.level} onChange={(e) => change(index, { level: e.target.value })} aria-label={`Permission of ${row.name}`}>
                     {LEVELS.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
                   </select>
@@ -67,13 +71,18 @@ export default function PermissionsDialog({ folder, onClose, onSaved }) {
                 <option value="">＋ Rule for a user…</option>
                 {freeUsers.map((u) => <option key={u} value={u}>{u}</option>)}
               </select>
+              <select value="" onChange={(e) => e.target.value && setRows([...rows, { kind: 'team', name: e.target.value, level: 'run' }])} aria-label="Add a rule for a team" disabled={!freeTeams.length}
+                title={teams.length ? '' : 'Make teams in Admin → Users'}>
+                <option value="">＋ Rule for a team…</option>
+                {freeTeams.map((g) => <option key={g.groupId} value={g.groupId}>{g.name} ({g.members.length})</option>)}
+              </select>
               <select value="" onChange={(e) => e.target.value && setRows([...rows, { kind: 'role', name: e.target.value, level: 'none' }])} aria-label="Add a rule for a role" disabled={!freeRoles.length}>
                 <option value="">＋ Rule for a role…</option>
                 {freeRoles.map((r) => <option key={r} value={r}>every {r}</option>)}
               </select>
             </div>
             {data.inherited.length > 0 && (
-              <p className="muted">From parent folders: {data.inherited.map((item) => `/${item.folder || '(root)'} — ${[...Object.entries(item.roles).map(([n, l]) => `${n}s ${l}`), ...Object.entries(item.users).map(([n, l]) => `${n} ${l}`)].join(', ')}`).join(' · ')}</p>
+              <p className="muted">From parent folders: {data.inherited.map((item) => `/${item.folder || '(root)'} — ${[...Object.entries(item.roles).map(([n, l]) => `${n}s ${l}`), ...Object.entries(item.groups || {}).map(([n, l]) => `team ${teamName(n)} ${l}`), ...Object.entries(item.users).map(([n, l]) => `${n} ${l}`)].join(', ')}`).join(' · ')}</p>
             )}
             <details>
               <summary className="muted">Who gets what here (saved rules)</summary>

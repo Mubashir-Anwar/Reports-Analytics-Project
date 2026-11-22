@@ -41,7 +41,7 @@ def test_server_shows_the_kind_tests_and_refuses_a_wrong_kind(client, monkeypatc
     assert client.post(f"/api/server/connections/{pg}/test", json={}).json()["message"] == "Connected postgresql"
     wrong = client.put("/api/server/reports/R1", json={"connectionId": pg})   # a MongoDB query on PostgreSQL
     assert wrong.status_code == 422 and "MongoDB" in wrong.json()["detail"]
-    client.post("/api/admin/users", headers=ADMIN_HEADERS, json={"username": "v1", "password": "Passw0rd-long-enough", "role": "viewer"})
+    client.post("/api/admin/users", headers=ADMIN_HEADERS, json={"username": "v1", "email": "v1@example.com", "password": "Passw0rd-long-enough", "role": "viewer"})
     client.post("/api/server/logout", json={})
     assert login(client, "v1", "Passw0rd-long-enough").status_code == 200
     assert client.post(f"/api/server/connections/{pg}/test", json={}).status_code == 403

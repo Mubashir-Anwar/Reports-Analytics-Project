@@ -20,7 +20,7 @@ ADMIN_HEADERS = {"X-Admin-Token": ADMIN}
 
 def make_user(client, name, rights, super_admin=False, headers=ADMIN_HEADERS):
     return client.post("/api/admin/users", headers=headers,
-                       json={"username": name, "password": PASSWORD, "rights": rights, "superAdmin": super_admin})
+                       json={"username": name, "email": f"{name}@example.com", "password": PASSWORD, "rights": rights, "superAdmin": super_admin})
 
 
 def sign_in(client, name):

@@ -36,7 +36,7 @@ def set_rules(client, path, users=None, roles=None):
 @pytest.fixture
 def repo(client):
     for name, role in (("ali", "viewer"), ("sara", "viewer"), ("dan", "designer")):
-        assert client.post("/api/admin/users", headers=ADMIN_HEADERS, json={"username": name, "password": PASSWORD, "role": role}).status_code in (200, 201)
+        assert client.post("/api/admin/users", headers=ADMIN_HEADERS, json={"username": name, "email": f"{name}@example.com", "password": PASSWORD, "role": role}).status_code in (200, 201)
     publish(client, "FIN", "Finance")
     publish(client, "SECRET", "Finance/Secret")
     publish(client, "HR", "HR")
@@ -132,7 +132,7 @@ def test_permission_admin_api(repo):
         assert repo.put("/api/server/permissions", json={"path": "Finance", "rules": rules}).status_code == 422
     set_rules(repo, "Finance/Secret", users={"ali": "none"})
     assert repo.request("DELETE", "/api/server/folders", json={"path": "Finance", "recursive": True}).status_code == 200
-    assert repo.get("/api/server/permissions?path=Finance/Secret").json()["rules"] == {"users": {}, "roles": {}}
+    assert repo.get("/api/server/permissions?path=Finance/Secret").json()["rules"] == {"users": {}, "roles": {}, "groups": {}}
 
 
 def test_subreports_and_schedules_respect_permissions(repo):

@@ -86,13 +86,11 @@ def register(app: FastAPI, ctx: SimpleNamespace) -> None:
             raise HTTPException(status_code=401, detail="Wrong username or password")
         shared_state.clear_failures(client)
         if user is not None and not bootstrap:
-            users = load_users()
-            for item in users:
-                if item["username"] == user["username"]:
-                    item["lastLoginAt"] = now_iso()
-                    if password_needs_upgrade(item):  # older, weaker hash: replace it now that we know the password
-                        set_user_password(item, password)
-            save_users(users)
+            from backend.app.db.people import put_user  # noqa: PLC0415
+            user["lastLoginAt"] = now_iso()
+            if password_needs_upgrade(user):  # older, weaker hash: replace it now that we know the password
+                set_user_password(user, password)
+            put_user(user)                    # only this account's row changes
         rights = sorted(USER_RIGHTS) if bootstrap else sorted(user_rights(user))
         super_admin = bootstrap or is_super_admin(user)
         role = derived_role(set(rights), super_admin)
@@ -109,6 +107,7 @@ def register(app: FastAPI, ctx: SimpleNamespace) -> None:
                             actor=session_user, actor_type="user")
         response = JSONResponse({"username": session_user, "role": role, "bootstrap": bootstrap, "rights": rights,
                                  "superAdmin": super_admin,
+                                 "mustChangePassword": bool(user and not bootstrap and user.get("mustChangePassword")),
                                  "replacedOther": {"by": previous["agent"], "seconds": shared_state.grace_seconds()} if previous else None})
         secure = request.url.scheme == "https" or os.getenv("REPORTING_SECURE_COOKIES", "false").strip().lower() == "true"
         response.set_cookie(SESSION_COOKIE, cookie, max_age=session_lifetime_seconds(),
@@ -429,7 +428,7 @@ def register(app: FastAPI, ctx: SimpleNamespace) -> None:
         except ValueError as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from None
         rules = permissions.load_rules()
-        entry = rules.get(folder, {"users": {}, "roles": {}})
+        entry = {"users": {}, "roles": {}, "groups": {}, **rules.get(folder, {})}
         effective = []
         for user in load_users():
             if user.get("disabled"):
@@ -442,8 +441,10 @@ def register(app: FastAPI, ctx: SimpleNamespace) -> None:
                 level, why = permissions.NONE, "no Report Server right"
             effective.append({"username": user["username"], "role": role, "level": permissions.NAMES[level], "why": why})
         inherited = [{"folder": f, **rules[f]} for f in permissions.folder_chain(folder)[1:] if f in rules]
+        from backend.app.db.people import load_groups  # noqa: PLC0415
         return {"folder": folder, "rules": entry, "inherited": inherited, "effective": effective,
-                "users": sorted(u["username"] for u in load_users())}
+                "users": sorted(u["username"] for u in load_users()),
+                "groups": [{"groupId": g["groupId"], "name": g["name"], "members": g["members"]} for g in load_groups()]}
 
     @app.put("/api/server/permissions")
     async def server_set_permissions(request: Request) -> dict[str, Any]:
@@ -459,7 +460,7 @@ def register(app: FastAPI, ctx: SimpleNamespace) -> None:
         unknown = sorted(name for name in entry["users"] if name not in known)
         if unknown:
             raise HTTPException(status_code=422, detail=f"Unknown user(s): {', '.join(unknown)}")
-        permissions.save_rules_for(folder, entry)
+        permissions.save_rules_for(folder, entry, by=session["username"])
         LOG.info("Permissions of /%s changed by %s: %s", folder, session["username"], entry)
         return server_get_permissions(request, folder)
 

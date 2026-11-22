@@ -109,5 +109,9 @@ def upgrade_storage() -> dict[str, int]:
     from backend.app.storage.store import get_store  # noqa: PLC0415
     store = get_store()
     counts = move_documents(store, ent.get_entities())
-    counts.update(store.upgrade_v2())                   # reports, drafts, folders (and adapters on a database) -> v2 tables
+    counts.update(store.upgrade_v2())
+    from backend.app.db.people import upgrade_people  # noqa: PLC0415
+    counts.update({f"people_{name}": value for name, value in upgrade_people(store).items()})
+    from backend.app.security.secrets import upgrade_secrets  # noqa: PLC0415
+    counts["secrets"] = upgrade_secrets()                   # reports, drafts, folders (and adapters on a database) -> v2 tables
     return counts

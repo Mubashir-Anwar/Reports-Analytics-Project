@@ -257,7 +257,7 @@ def test_whole_service_records_runs_and_audit(backend, monkeypatch):
     assert login(app, "admin", ADMIN).status_code == 200
     assert app.get("/api/server/me").status_code == 200 and app.get("/admin").status_code == 200   # signed-in pages
     assert login(app, "admin", "wrong").status_code == 401
-    assert app.post("/api/admin/users", headers=token(ADMIN), json={"username": "ali", "password": "Passw0rd-long-enough", "rights": ["runner"]}).status_code == 200
+    assert app.post("/api/admin/users", headers=token(ADMIN), json={"username": "ali", "email": "ali@example.com", "password": "Passw0rd-long-enough", "rights": ["runner"]}).status_code == 200
 
     run_record = app.get("/api/admin/audit?reportId=SYS1", headers=token(ADMIN)).json()["records"][0]
     assert run_record["parameters"] == {"CNIC": "42*********71", "Branch": "LHR"}       # sensitive value masked
@@ -304,7 +304,9 @@ def test_migrate_a_data_folder_into_this_backend(backend, tmp_path, monkeypatch)
     assert counts["runs"] == 1 and counts["legacyRuns"] == 1 and counts["recordsSkipped"] == 1 and counts["events"] == 2
     assert store.read_json("reports/General/OLD.json")["id"] == "OLD" and "Empty" in store.dirs("reports")
     target_entities = migrate_module.entities_for(rec)
-    assert counts["typedRows"] == 5 and target_entities.get(ent.USERS, "boss")["superAdmin"] is True
+    boss = target_entities.find(ent.USERS_V2, {"username": "boss"})[0]          # copied as a step 2 row, with its rights
+    assert counts["typedRows"] >= 5 and boss["isSuperAdmin"] is True
+    assert {row["rightName"] for row in target_entities.find(ent.USER_RIGHTS, {"userId": boss["userId"]})} >= {"admin", "designer"}
     assert target_entities.get(ent.JOB_SCHEDULES, "job-20260101000000-0123abcd")["recurrence"] == {"type": "daily", "at": "08:00"}
     legacy = rec.runs(status="failed")[0]
     assert legacy["startedAt"] == "2025-11-09T18:11:39.809Z" and legacy["format"] == "xlsx" and legacy["actor"] == "admin-token"
@@ -393,8 +395,58 @@ def test_older_documents_move_into_the_tables(backend):
     assert store.read_json("users.json") is None and store.read_json("migrated/users.json")["users"][0]["username"] == "boss"
     assert not any(move_documents(store, entities).values())
 
+    # then into the step 2 tables, once: rights become rows, rules point at folder ids and user ids
+    from backend.app.db import people
+    store.delete("meta/schema-v2.json")
+    copied = people.upgrade_people(store)
+    assert copied["users"] == 1 and copied["apiKeys"] == 1 and copied["folderRules"] == 2
+    boss = people.load_users()[0]
+    assert boss["username"] == "boss" and boss["superAdmin"] is True and "admin" in boss["rights"]
+    assert people.load_keys()[0]["name"] == "Site"
+    assert people.load_rules()["HR"]["roles"] == {"viewer": "none"} and "HR" in store.dirs("reports")
+    assert "" not in people.load_rules()              # the root rule was for "ali", who has no account: nothing to point at
+    assert not any(people.upgrade_people(store).values())
+
+
+def test_people_and_access_tables(backend):
+    """users with e-mail and phone, rights as rows, teams, rules by id, API key folders and networks."""
+    from backend.app.db import entities as ent
+    from backend.app.db import people
     from backend.app.security import permissions
-    assert permissions.load_rules()[""] == {"users": {"ali": "run"}, "roles": {}}     # the root folder reads back as ""
+    people.save_users([{"username": "ali", "rights": ["server", "runner"], "email": "Ali@Example.com", "phone": "+92 300 1234567",
+                        "fullName": "Ali Khan", "salt": "s", "hash": "h"},
+                       {"username": "sara", "rights": ["designer", "server"], "email": "sara@example.com"}])
+    users = {item["username"]: item for item in people.load_users()}
+    assert users["ali"]["email"] == "Ali@Example.com" and users["ali"]["rights"] == ["runner", "server"] and users["ali"]["userId"]
+    row = ent.get_entities().get(ent.USERS_V2, users["sara"]["userId"])
+    assert row["role"] == "designer" and row["isSuperAdmin"] is False
+    assert people.taken("email", " ali@example.COM ") and people.taken("phone", "+923001234567") and people.taken("username", "ALI")
+    assert not people.taken("email", "ali@example.com", except_username="ali") and not people.taken("phone", "")
+
+    team = people.save_group("Finance", "Money people", ["ali"], by="boss")
+    assert team["members"] == ["ali"] and people.groups_of("ali") == [team["groupId"]]
+    with pytest.raises(ValueError):
+        people.save_group("finance", "", [])
+    permissions.save_rules_for("Finance/Monthly", permissions.clean_entry({"groups": {team["groupId"]: "none"}, "users": {"sara": "run"}}))
+    rules = permissions.load_rules()
+    assert rules["Finance/Monthly"]["groups"] == {team["groupId"]: "none"} and rules["Finance/Monthly"]["users"] == {"sara": "run"}
+    assert permissions.explain({"username": "ali", "role": "viewer"}, "Finance/Monthly/Q1") == (0, "team rule on /Finance/Monthly")
+    assert permissions.explain({"username": "sara", "role": "designer"}, "Finance/Monthly")[1] == "user rule on /Finance/Monthly"
+    store = store_module.get_store()
+    store.move_dir("reports/Finance", "reports/Money")                          # the rules follow the folder id
+    assert "Money/Monthly" in permissions.load_rules()
+
+    people.save_keys([{"id": "0123456789ab", "name": "Site", "hash": "f" * 64, "folders": ["Money"], "allowedIps": ["10.0.0.0/24"],
+                       "webhookUrl": "https://x.example/hook"}])
+    key = people.load_keys()[0]
+    assert key["folders"] == ["Money"] and key["allowedIps"] == ["10.0.0.0/24"] and key["webhookUrl"] == "https://x.example/hook"
+    people.touch_key("0123456789ab", "2026-01-01T00:00:00Z")
+    assert people.load_keys()[0]["lastUsedAt"] == "2026-01-01T00:00:00.000Z"
+
+    people.save_users([users["sara"]])                                            # ali deleted: his rows go too
+    assert [item["username"] for item in people.load_users()] == ["sara"]
+    assert people.load_groups()[0]["members"] == [] and not ent.get_entities().find(ent.USER_RIGHTS, {"userId": users["ali"]["userId"]})
+    assert people.delete_group(team["groupId"]) and "groups" not in str(permissions.load_rules().get("Money/Monthly", {}).get("groups") or "")
 
 
 # ------------------------------------------------------------------ reports, drafts, folders, data adapters in tables
@@ -501,3 +553,33 @@ def test_tables_of_the_previous_version_are_copied_once(backend):
     assert entities.find(ent.REPORT_VERSIONS_V2, {"serverReportId": ghost_id("Old", "GONE")})[0]["reportCode"] == "GONE"
     assert entities.get(ent.REPORT_HISTORY_V2, "h1")["serverReportId"] == server_id
     assert not any(store.upgrade_v2().values())                                    # once
+
+
+def test_secrets_table(backend, monkeypatch):
+    """private_secrets.json becomes one row per secret, linked to its owner; encrypted rows when a key is set."""
+    from backend.app.db import entities as ent
+    from backend.app.security import secrets as secret_store
+    store = store_module.get_store()
+    store.write_json("private_secrets.json", {"admin_token": ADMIN, "mongo_connections": {"default": {"uri": "mongodb://u:pw@main/a"}},
+                                              "delivery_secrets": {"job1": {"t1": {"password": "sftp-pw"}}}}, private=True)
+    assert secret_store.upgrade_secrets() == 3 and secret_store.upgrade_secrets() == 0          # once
+    assert store.read_json("private_secrets.json") is None and store.read_json("migrated/private_secrets.json")["admin_token"] == ADMIN
+    rows = {(row["ownerType"], row["ownerId"], row["secretName"]): row for row in ent.get_entities().find(ent.SECRETS)}
+    assert set(rows) == {("system", "service", "admin_token"), ("data_source", "default", "uri"), ("schedule_target", "job1/t1", "password")}
+    assert rows[("data_source", "default", "uri")]["keyVersion"] == "plain"
+    loaded = secret_store._load_private_secrets()
+    assert loaded["mongo_connections"]["default"]["uri"] == "mongodb://u:pw@main/a" and loaded["delivery_secrets"]["job1"]["t1"]["password"] == "sftp-pw"
+
+    monkeypatch.setenv("REPORTING_SECRETS_KEY", "a-long-passphrase-for-the-tests-0123456789")
+    assert secret_store._load_private_secrets()["admin_token"] == ADMIN                       # encrypts every row
+    assert secret_store.secrets_encrypted()
+    assert all("pw" not in str(row["encryptedValue"]) for row in ent.get_entities().find(ent.SECRETS))
+    before = {row["secretId"]: row["encryptedValue"] for row in ent.get_entities().find(ent.SECRETS)}
+    loaded = secret_store._load_private_secrets()
+    loaded["delivery_secrets"] = {}                                                            # the schedule was deleted
+    secret_store._save_private_secrets(loaded, by="admin")
+    after = {row["secretId"]: row["encryptedValue"] for row in ent.get_entities().find(ent.SECRETS)}
+    assert len(after) == 2 and all(after[key] == before[key] for key in after)                # unchanged rows are not rewritten
+    monkeypatch.setenv("REPORTING_SECRETS_KEY", "another-wrong-passphrase-0123456789abcdef")
+    with pytest.raises(RuntimeError, match="wrong key"):
+        secret_store._load_private_secrets()

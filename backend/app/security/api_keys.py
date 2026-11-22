@@ -37,15 +37,15 @@ def _digest(secret: str) -> str:
 
 
 def load_keys() -> list[dict[str, Any]]:
-    """API keys from rs_api_keys (files: data/records/entities/api_keys.json), oldest first."""
-    from backend.app.db.entities import API_KEYS, get_entities  # noqa: PLC0415
-    items = get_entities().find(API_KEYS)
+    """API keys from api_keys, api_key_folders and api_key_networks (db/people.py), oldest first."""
+    from backend.app.db.people import load_keys as load  # noqa: PLC0415
+    items = load()
     return sorted((item for item in items if ID_PATTERN.fullmatch(str(item.get("id", "")))), key=lambda item: item.get("createdAt") or "")
 
 
 def save_keys(keys: list[dict[str, Any]]) -> None:
-    from backend.app.db.entities import API_KEYS, get_entities  # noqa: PLC0415
-    get_entities().replace_all(API_KEYS, keys)
+    from backend.app.db.people import save_keys as save  # noqa: PLC0415
+    save(keys)
 
 
 def key_view(item: dict[str, Any]) -> dict[str, Any]:
@@ -86,8 +86,8 @@ def _touch(item: dict[str, Any]) -> None:
     if time.monotonic() - _last_touch.get(item["id"], -_TOUCH_SECONDS) < _TOUCH_SECONDS:
         return
     _last_touch[item["id"]] = time.monotonic()
-    from backend.app.db.entities import API_KEYS, get_entities  # noqa: PLC0415
-    get_entities().put(API_KEYS, {**item, "lastUsedAt": _now()})
+    from backend.app.db.people import touch_key  # noqa: PLC0415
+    touch_key(item["id"], _now())
 
 
 def key_from_token(token: str, client_ip: str) -> dict[str, Any] | None:

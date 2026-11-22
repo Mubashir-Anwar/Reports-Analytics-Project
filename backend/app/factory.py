@@ -13,6 +13,7 @@ from backend.app.context import create_context
 from backend.app.logs import HTTP_LOG
 from backend.app.offload import ThreadedRoute
 from backend.app.routers import (
+    accounts,
     admin_tools,
     analytics,
     api_keys,
@@ -119,6 +120,7 @@ def make_app() -> FastAPI:
     server_portal.register(app, ctx)
     jobs.register(app, ctx)
     users.register(app, ctx)
+    accounts.register(app, ctx)
     api_keys.register(app, ctx)
     system.register(app, ctx)
     generate.register(app, ctx)

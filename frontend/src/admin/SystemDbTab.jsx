@@ -1,6 +1,7 @@
 // /admin → System database: where the service keeps its own data (users, rights, reports, folders, run log,
 // audit trail). A super admin picks a relational or non-relational database, tests it, copies the data and
 // saves the choice; the service uses it after the next restart. The old database is not changed.
+import PasswordInput from '../shared/PasswordInput.jsx';
 import { useEffect, useState } from 'react';
 import { request } from '../api.js';
 import { DbLogo } from '../shared/adapters.jsx';
@@ -95,7 +96,7 @@ export default function SystemDbTab({ notify }) {
             {form.kind !== 'sqlite' && !(form.kind === 'sqlserver' && form.windowsLogin) && (
               <div className="form-grid-2">
                 <label className="field"><span>User</span><input value={form.username} autoComplete="off" onChange={(e) => set({ username: e.target.value })} /></label>
-                <label className="field"><span>Password</span><input type="password" value={form.password} autoComplete="new-password" onChange={(e) => set({ password: e.target.value })} /></label>
+                <label className="field"><span>Password</span><PasswordInput value={form.password} autoComplete="new-password" onChange={(e) => set({ password: e.target.value })} /></label>
               </div>
             )}
           </>

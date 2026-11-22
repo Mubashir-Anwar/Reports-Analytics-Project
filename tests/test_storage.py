@@ -121,7 +121,7 @@ def test_versions_restore_and_history(client):
 
 def test_versions_need_a_designer(client):
     admin = {"X-Admin-Token": ADMIN}
-    client.post("/api/admin/users", headers=admin, json={"username": "viewer9", "password": "Passw0rd-long-enough", "role": "viewer"})
+    client.post("/api/admin/users", headers=admin, json={"username": "viewer9", "email": "viewer9@example.com", "password": "Passw0rd-long-enough", "role": "viewer"})
     assert login(client, "viewer9", "Passw0rd-long-enough").status_code == 200
     assert client.get("/api/server/reports/R1/versions").status_code == 403
 
@@ -153,7 +153,9 @@ def test_migrate_the_data_directory_into_postgresql(client, pg_schema_url):
     assert counts["json"] >= 3 and counts["runs"] >= 1 and counts["events"] >= 1
     assert records.runs(reportId="R1")[0]["status"] == "success" and records.verify_chain()["ok"]
     assert target.read_json("reports/General/R1.json")["id"] == "R1"
-    assert target.read_json("private_secrets.json")["admin_token"] == ADMIN
+    from backend.app.db import entities as ent
+    names = {row["secretName"] for row in ent.SqlEntities(pg_schema_url).find(ent.SECRETS)}
+    assert "admin_token" in names                                  # copied as rows of the secrets table
     assert "General" in target.dirs("reports")
     again = migrate(target, out=io.StringIO(), records=records)
     assert again["json"] == 0 and again["runs"] == 0 and again["events"] == 0 and again["skipped"] >= counts["json"]

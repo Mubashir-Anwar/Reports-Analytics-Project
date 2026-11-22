@@ -119,6 +119,20 @@ class RoutedStore:
     def _paths(self, area: str) -> dict[str, str]:
         return {row["folderId"]: row["fullPath"] for row in self._folder_rows(area)}
 
+    def folder_id(self, area: str, path: str, *, create: bool = False) -> str | None:
+        """The id of a folder ("reports" = the server tree, "workspace"), made when create is set."""
+        path = path.strip("/")
+        if not path:
+            return None
+        if create:
+            return self._ensure_folder(area, path)
+        row = self._folder(area, path)
+        return row["folderId"] if row else None
+
+    def folder_paths(self, area: str) -> dict[str, str]:
+        """{folder_id: full path} of one tree."""
+        return self._paths(area)
+
     # ---- report rows
     def _row_at(self, area: str, folder: str, code: str) -> dict[str, Any] | None:
         place = self._folder(area, folder)

@@ -29,7 +29,9 @@ PUBLIC = {("GET", "/"), ("GET", "/ui"), ("GET", "/designer"), ("GET", "/server")
           ("GET", "/api/v1/openapi.json"),                       # describes the public API; no data
           ("GET", "/api/branding"),                              # product name and tagline for the sign-in page; no data
           ("GET", "/health"), ("POST", "/api/server/logout"), ("GET", "/docs"), ("GET", "/redoc"),
-          ("GET", "/openapi.json"), ("GET", "/docs/oauth2-redirect")}
+          ("GET", "/openapi.json"), ("GET", "/docs/oauth2-redirect"),
+          ("GET", "/api/server/password-help"),                  # which forgot-password ways the sign-in page offers
+          ("POST", "/api/server/forgot-password")}               # same answer for every account, known or not
 
 
 def test_no_data_endpoint_answers_without_credentials(client):
@@ -73,12 +75,12 @@ def test_pipelines_cannot_read_server_internals(pipeline, message):
 
 
 def test_secrets_are_encrypted_at_rest(client, monkeypatch):
-    path = Path(core.data_directory()) / "private_secrets.json"
+    path = Path(core.data_directory()) / "records" / "tables" / "secrets.json"     # the secrets table on files
+    assert not (Path(core.data_directory()) / "private_secrets.json").exists()      # the older document became rows
     assert "mongodb://main/a" in path.read_text()             # plain text without a key (the old behaviour)
     monkeypatch.setenv("REPORTING_SECRETS_KEY", "a-long-passphrase-for-the-tests-0123456789")
-    assert secret_store._load_private_secrets()["admin_token"] == ADMIN   # first read with a key encrypts the file
-    stored = json.loads(path.read_text())
-    assert stored["format"] == "fernet-v1" and "mongodb://" not in path.read_text() and ADMIN not in path.read_text()
+    assert secret_store._load_private_secrets()["admin_token"] == ADMIN   # first read with a key encrypts every row
+    assert secret_store.secrets_encrypted() and "mongodb://" not in path.read_text() and ADMIN not in path.read_text()
     saved = client.post("/api/admin/connections", headers={"X-Admin-Token": ADMIN},
                         json={"type": "postgresql", "name": "Secret PG", "uri": "postgresql://u:VerySecret-pw@db/x"})
     assert saved.status_code == 200 and "VerySecret-pw" not in path.read_text()

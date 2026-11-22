@@ -65,14 +65,15 @@ def register(app: FastAPI, ctx: SimpleNamespace) -> None:
         from backend.app.security.users import bootstrap_login_active
         from backend.app.storage.store import get_store
         store = get_store()
-        secrets_raw = store.read_json("private_secrets.json") or {}
+        from backend.app.security.secrets import secrets_encrypted  # noqa: PLC0415
+        encrypted = secrets_encrypted()
         env = os.environ
         checks = [
             {"id": "storage", "ok": store.backend != "files", "label": "Storage",
              "value": storage_label(),
              "hint": "REPORTING_STORAGE=sql (SQL Server, Oracle, MySQL, PostgreSQL) or mongodb, for several instances and backups"},
-            {"id": "secrets", "ok": secrets_raw.get("format") == "fernet-v1", "label": "Adapter passwords",
-             "value": "encrypted" if secrets_raw.get("format") == "fernet-v1" else "plain text in a private file",
+            {"id": "secrets", "ok": encrypted, "label": "Adapter passwords",
+             "value": "encrypted (secrets table)" if encrypted else "plain text in the private secrets table",
              "hint": "Set REPORTING_SECRETS_KEY to encrypt them"},
             {"id": "session", "ok": bool(env.get("REPORTING_SESSION_SECRET", "").strip()), "label": "Session secret",
              "value": "set" if env.get("REPORTING_SESSION_SECRET", "").strip() else "random per start (sign-ins end at restart)",

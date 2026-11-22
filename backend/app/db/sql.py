@@ -118,6 +118,9 @@ ENTITY_MIGRATIONS: list[tuple[int, str, Any]] = [
     (4, "analytics: datasets, relationships, dashboards and refreshes", _create_entities),
     (5, "analytics: saved DAX / SQL queries", _create_entities),
     (6, "schema v2: folders, workspace_reports, server_reports, report_versions, report_history", _create_entities),
+    (7, "schema v2: users, user_rights, user_groups, user_group_members, folder_permissions, password_resets, api_keys",
+     _create_entities),
+    (8, "schema v2: secrets", _create_entities),
 ]
 
 _ENGINES: dict[str, sa.Engine] = {}

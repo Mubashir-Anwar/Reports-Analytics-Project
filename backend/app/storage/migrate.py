@@ -110,6 +110,10 @@ def copy_records(target: RecordsBackend, source: FileStore, *, out=sys.stdout) -
 def migrate(target: Any, *, overwrite: bool = False, out=sys.stdout, records: RecordsBackend | None = None) -> dict[str, int]:
     source = FileStore()
     source.upgrade_v2()                               # report files of an older data folder become rows first
+    from backend.app.db.people import upgrade_people  # noqa: PLC0415
+    upgrade_people(source)                            # and its accounts, keys and folder rules
+    from backend.app.security.secrets import upgrade_secrets  # noqa: PLC0415
+    upgrade_secrets()                                 # and private_secrets.json -> the secrets table
     counts = {"json": 0, "bytes": 0, "lines": 0, "folders": 0, "skipped": 0}
     if records is not None:
         from backend.app.db import entities as ent  # noqa: PLC0415
@@ -143,7 +147,7 @@ def migrate(target: Any, *, overwrite: bool = False, out=sys.stdout, records: Re
                     counts["lines"] += 1
         elif key.endswith(".json"):
             try:
-                target.write_json(key, source.read_json(key), private=key in PRIVATE)
+                target.write_json(key, source.read_json(key), private=key.rsplit("/", 1)[-1] in PRIVATE)
                 counts["json"] += 1
             except ValueError:
                 print(f"skipped (not valid JSON): {key}", file=out)

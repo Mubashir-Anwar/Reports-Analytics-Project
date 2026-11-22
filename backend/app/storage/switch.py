@@ -112,7 +112,7 @@ def test(url: str) -> dict[str, Any]:
         store.read_json("meta/connection-test.json")
         store.delete("meta/connection-test.json")
         existing = {
-            "users": len(entities.find(ent.USERS)),
+            "users": len(entities.find(ent.USERS_V2)) or len(entities.find(ent.USERS)),
             "reports": len(entities.find(ent.SERVER_REPORTS)) or len(entities.find(ent.REPORTS)),
             "runs": len(records.runs(limit=5000)),
             "auditEvents": 1 if records._last_event() else 0,
@@ -170,7 +170,7 @@ def copy_current_to(url: str, *, overwrite: bool = False) -> dict[str, int]:
             continue
         if key.endswith(".json"):
             try:
-                target.write_json(key, source.read_json(key), private=key in ("users.json", "private_secrets.json", "api-keys.json"))
+                target.write_json(key, source.read_json(key), private=key.rsplit("/", 1)[-1] in ("users.json", "private_secrets.json", "api-keys.json"))
                 counts["documents"] += 1
             except ValueError:
                 counts["skipped"] += 1

@@ -42,7 +42,8 @@ def test_move_adapter_between_folders_keeps_its_url(make_client, tmp_path):
     client = make_client()
     assert client.put("/api/admin/connections/broken/folder", headers=admin(), json={"folder": "cascade/KMBLSP/Data Source"}).status_code == 200
     assert adapters(client)["broken"]["folder"] == "cascade/KMBLSP/Data Source"
-    secrets = json.loads((tmp_path / "private_secrets.json").read_text(encoding="utf-8"))
+    from backend.app.security.secrets import _load_private_secrets
+    secrets = _load_private_secrets()
     assert secrets["mongo_connections"]["broken"]["uri"] == "mongodb://down/b"
     # back to the top level
     assert client.put("/api/admin/connections/broken/folder", headers=admin(), json={"folder": ""}).status_code == 200

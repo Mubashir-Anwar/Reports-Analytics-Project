@@ -1,5 +1,6 @@
 // Schedule → "Send the file": after each run the report file also goes to an SFTP server, an API (HTTP POST)
 // or a folder on the network. Passwords are sent once and never shown again (the server keeps them encrypted).
+import PasswordInput from '../shared/PasswordInput.jsx';
 import { useState } from 'react';
 import { serverApi } from './serverApi.js';
 
@@ -58,12 +59,12 @@ function Target({ target, index, info, report, format, jobId, onChange, onRemove
               <select value={target.auth || 'password'} onChange={(e) => set({ auth: e.target.value })}><option value="password">Password</option><option value="key">Private key (more secure)</option></select>
             </label>
             {(target.auth || 'password') === 'password'
-              ? <label className="field"><span>Password {target.hasPassword && <small className="muted">(saved — leave empty to keep it)</small>}</span><input type="password" value={target.password || ''} onChange={(e) => set({ password: e.target.value })} autoComplete="new-password" placeholder={target.hasPassword ? '••••••••' : ''} /></label>
+              ? <label className="field"><span>Password {target.hasPassword && <small className="muted">(saved — leave empty to keep it)</small>}</span><PasswordInput value={target.password || ''} onChange={(e) => set({ password: e.target.value })} autoComplete="new-password" placeholder={target.hasPassword ? '••••••••' : ''} /></label>
               : (
                 <>
                   <label className="field wide"><span>Private key {target.hasPrivateKey && <small className="muted">(saved — leave empty to keep it)</small>}</span>
                     <textarea rows={3} value={target.privateKey || ''} onChange={(e) => set({ privateKey: e.target.value })} placeholder="-----BEGIN OPENSSH PRIVATE KEY----- …" spellCheck={false} /></label>
-                  <label className="field"><span>Key passphrase (if any)</span><input type="password" value={target.passphrase || ''} onChange={(e) => set({ passphrase: e.target.value })} autoComplete="new-password" /></label>
+                  <label className="field"><span>Key passphrase (if any)</span><PasswordInput value={target.passphrase || ''} onChange={(e) => set({ passphrase: e.target.value })} autoComplete="new-password" /></label>
                 </>
               )}
             <label className="field wide"><span>Server key <small className="muted">(optional; remembered on the first upload)</small></span>
@@ -85,7 +86,7 @@ function Target({ target, index, info, report, format, jobId, onChange, onRemove
               {headers.map((h, i) => (
                 <span className="row header-row" key={i}>
                   <input value={h.name} onChange={(e) => set({ headers: headers.map((x, j) => (j === i ? { ...x, name: e.target.value } : x)) })} placeholder="Authorization" aria-label="Header name" />
-                  <input type="password" value={h.value || ''} onChange={(e) => set({ headers: headers.map((x, j) => (j === i ? { ...x, value: e.target.value } : x)) })} placeholder={h.saved ? '•••••• (saved)' : 'Bearer abc123'} aria-label="Header value" autoComplete="new-password" />
+                  <PasswordInput value={h.value || ''} onChange={(e) => set({ headers: headers.map((x, j) => (j === i ? { ...x, value: e.target.value } : x)) })} placeholder={h.saved ? '•••••• (saved)' : 'Bearer abc123'} aria-label="Header value" autoComplete="new-password" />
                   <button type="button" className="btn quiet sm" onClick={() => set({ headers: headers.filter((_, j) => j !== i) })} aria-label="Remove header">✕</button>
                 </span>
               ))}

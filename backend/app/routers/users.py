@@ -15,6 +15,7 @@ from fastapi import FastAPI, HTTPException, Request
 
 from backend.app.constants import RIGHT_LABELS, USER_RIGHTS, USER_ROLES, USERNAME_PATTERN
 from backend.app.logs import LOG
+from backend.app.routers.accounts import check_contact
 from backend.app.security.users import bootstrap_login_active, is_super_admin, load_users, save_users, set_user_password, user_rights
 
 # Old clients send role instead of rights.
@@ -71,16 +72,17 @@ def register(app: FastAPI, ctx: SimpleNamespace) -> None:
         username = str(payload.get("username", "")).strip()
         if not USERNAME_PATTERN.fullmatch(username):
             raise HTTPException(status_code=422, detail="Username: 2-64 letters, numbers, dot, @, _ or -")
+        if any(str(item["username"]).casefold() == username.casefold() for item in load_users()):
+            raise HTTPException(status_code=409, detail={"field": "username", "message": "A user with this name already exists"})
         new_user: dict[str, Any] = {"username": username, "sessionVersion": 0, "createdAt": now_iso(),
-                                    "createdBy": getattr(request.state, "actor", "")}
+                                    "createdBy": getattr(request.state, "actor", ""), "mustChangePassword": True,
+                                    **check_contact(payload, required_email=payload.get("requireEmail", True) is not False)}
         apply_access(new_user, payload if ("rights" in payload or "superAdmin" in payload or "role" in payload) else {"role": "viewer"})
         guard_administrators(request, None, new_user)
         set_user_password(new_user, valid_password(payload.get("password")))
         users = load_users()
-        if any(str(item["username"]).casefold() == username.casefold() for item in users):
-            raise HTTPException(status_code=409, detail="A user with this name already exists")
         users.append(new_user)
-        save_users(users)
+        save_users(users, by=getattr(request.state, "actor", ""))
         LOG.info("User %s created by %s (rights %s%s)", username, getattr(request.state, "actor", "?"),
                  ",".join(new_user["rights"]), ", super admin" if new_user["superAdmin"] else "")
         ctx.audit_event(request, "user.created", username, {"rights": new_user["rights"], "superAdmin": new_user["superAdmin"]})
@@ -96,15 +98,18 @@ def register(app: FastAPI, ctx: SimpleNamespace) -> None:
             raise HTTPException(status_code=404, detail="User not found")
         before, super_admins_before = dict(user), super_admins_left(users)
         apply_access(user, payload)
+        user.update(check_contact({key: payload[key] for key in ("fullName", "email", "phone") if key in payload},
+                                  required_email=False, username=user["username"]))
         if "disabled" in payload:
             user["disabled"] = bool(payload["disabled"])
         if payload.get("password"):
             set_user_password(user, valid_password(payload["password"]))
+            user["mustChangePassword"] = True                          # set by an admin: the user picks their own next
         guard_administrators(request, before, user)
         if super_admins_before and not super_admins_left(users):
             raise HTTPException(status_code=409, detail="Keep at least one active super admin")
         user["sessionVersion"] = int(user.get("sessionVersion", 0)) + 1  # signs this user out everywhere
-        save_users(users)
+        save_users(users, by=getattr(request.state, "actor", ""))
         LOG.info("User %s changed by %s", user["username"], getattr(request.state, "actor", "?"))
         change: dict[str, Any] = {}
         if sorted(user_rights(before)) != sorted(user_rights(user)):

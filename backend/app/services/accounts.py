@@ -18,6 +18,8 @@ def user_view(ctx: SimpleNamespace, user: dict[str, Any]) -> dict[str, Any]:
     rights, super_admin = user_rights(user), is_super_admin(user)
     return {"username": user["username"], "role": derived_role(rights, super_admin), "rights": sorted(rights),
             "superAdmin": super_admin, "disabled": bool(user.get("disabled")),
+            "fullName": user.get("fullName") or "", "email": user.get("email") or "", "phone": user.get("phone") or "",
+            "mustChangePassword": bool(user.get("mustChangePassword")),
             "createdAt": user.get("createdAt", ""), "lastLoginAt": user.get("lastLoginAt", "")}
 
 

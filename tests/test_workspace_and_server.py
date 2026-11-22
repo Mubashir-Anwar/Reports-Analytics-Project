@@ -200,11 +200,11 @@ def test_server_writes_must_be_json(client):
 
 def test_users_roles_and_session_revocation(client):
     admin = token(ADMIN)
-    assert client.post("/api/admin/users", headers=token(DESIGNER), json={"username": "x", "password": "12345678"}).status_code == 403
-    assert client.post("/api/admin/users", headers=admin, json={"username": "boss", "password": "short", "role": "admin"}).status_code == 422
-    assert client.post("/api/admin/users", headers=admin, json={"username": "boss", "password": "boss-pass-1", "role": "admin"}).status_code == 200
-    assert client.post("/api/admin/users", headers=admin, json={"username": "ali", "password": "ali-pass-1", "role": "viewer"}).status_code == 200
-    assert client.post("/api/admin/users", headers=admin, json={"username": "ALI", "password": "ali-pass-1"}).status_code == 409
+    assert client.post("/api/admin/users", headers=token(DESIGNER), json={"username": "x", "email": "x@example.com", "password": "12345678"}).status_code == 403
+    assert client.post("/api/admin/users", headers=admin, json={"username": "boss", "email": "boss@example.com", "password": "short", "role": "admin"}).status_code == 422
+    assert client.post("/api/admin/users", headers=admin, json={"username": "boss", "email": "boss@example.com", "password": "boss-pass-1", "role": "admin"}).status_code == 200
+    assert client.post("/api/admin/users", headers=admin, json={"username": "ali", "email": "ali@example.com", "password": "ali-pass-1", "role": "viewer"}).status_code == 200
+    assert client.post("/api/admin/users", headers=admin, json={"username": "ALI", "email": "ALI@example.com", "password": "ali-pass-1"}).status_code == 409
     users = client.get("/api/admin/users", headers=admin).json()
     assert users["bootstrapLogin"] is False and "hash" not in json.dumps(users)
     assert login(client, "admin", ADMIN).status_code == 401           # bootstrap ends once an admin user exists

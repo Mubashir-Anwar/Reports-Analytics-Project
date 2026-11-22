@@ -1,4 +1,11 @@
-"""private_secrets.json (admin token, adapter secrets) and the optional local .env file."""
+"""The service's secrets (admin token, data source URLs and passwords, schedule SFTP / API passwords) and the
+optional local .env file.
+
+Since schema v2 step 3 every secret is a row of the secrets table (owner type, owner id, name, value), encrypted
+with REPORTING_SECRETS_KEY when it is set. The rest of the service still reads and writes them as one dict:
+{"admin_token", "mongo_connections": {source id: {uri, …}}, "delivery_secrets": {schedule: {target: {name: value}}}}.
+The older private_secrets.json document is read until the first save (or start-up) turns it into rows; it is
+then kept under migrated/."""
 from __future__ import annotations
 
 import base64
@@ -32,8 +39,65 @@ def _cipher():
         return Fernet(base64.urlsafe_b64encode(hashlib.sha256(raw.encode("utf-8")).digest()))
 
 
+SYSTEM, SERVICE = "system", "service"
+
+
+def _row_id(owner_type: str, owner_id: str, name: str) -> str:
+    return hashlib.sha256(f"{owner_type}|{owner_id}|{name}".encode("utf-8")).hexdigest()[:32]
+
+
+def _rows() -> list[dict[str, Any]]:
+    from backend.app.db import entities as ent  # noqa: PLC0415
+    return ent.get_entities().find(ent.SECRETS)
+
+
+def _open(row: dict[str, Any], cipher: Any) -> Any:
+    value = row["encryptedValue"]
+    if row.get("keyVersion") == ENCRYPTED_FORMAT:
+        if cipher is None:
+            raise RuntimeError("The secrets are encrypted: set REPORTING_SECRETS_KEY (the same key as when they were saved)")
+        from cryptography.fernet import InvalidToken
+        try:
+            return json.loads(cipher.decrypt(str(value).encode("ascii")))
+        except InvalidToken:
+            raise RuntimeError("REPORTING_SECRETS_KEY does not open the secrets (wrong key?)") from None
+    return value
+
+
+def _from_rows(rows: list[dict[str, Any]]) -> dict[str, Any]:
+    cipher = _cipher()
+    out: dict[str, Any] = {"admin_token": "", "mongo_connections": {}}
+    delivery: dict[str, dict[str, dict[str, Any]]] = {}
+    plain = False
+    for row in rows:
+        value = _open(row, cipher)
+        plain = plain or row.get("keyVersion") != ENCRYPTED_FORMAT
+        if row["ownerType"] == SYSTEM:
+            out[row["secretName"]] = value
+        elif row["ownerType"] == "data_source":
+            out["mongo_connections"].setdefault(row["ownerId"], {})[row["secretName"]] = value
+        elif row["ownerType"] == "schedule_target" and "/" in row["ownerId"]:
+            job, target = row["ownerId"].split("/", 1)
+            delivery.setdefault(job, {}).setdefault(target, {})[row["secretName"]] = value
+    if delivery:
+        out["delivery_secrets"] = delivery
+    out["admin_token"] = str(out.get("admin_token") or "").strip()
+    if plain and cipher is not None:
+        _save_private_secrets(out)               # first start with a key: encrypt what was stored in plain text
+        LOG.info("The secrets are now encrypted with REPORTING_SECRETS_KEY")
+    return out
+
+
+def secrets_encrypted() -> bool:
+    rows = _rows()
+    return bool(rows) and all(row.get("keyVersion") == ENCRYPTED_FORMAT for row in rows)
+
+
 def _load_private_secrets() -> dict[str, Any]:
-    raw = get_store().read_json("private_secrets.json")
+    rows = _rows()
+    if rows:
+        return _from_rows(rows)
+    raw = get_store().read_json("private_secrets.json")       # the older document, until the first save
     if raw is None:
         return {"admin_token": "", "mongo_connections": {}}
     if not isinstance(raw, dict):
@@ -47,9 +111,7 @@ def _load_private_secrets() -> dict[str, Any]:
             raw = json.loads(cipher.decrypt(str(raw.get("data", "")).encode("ascii")))
         except InvalidToken:
             raise RuntimeError("REPORTING_SECRETS_KEY does not open the private secrets (wrong key?)") from None
-    elif _cipher() is not None:
-        _save_private_secrets(raw)  # first start with a key: encrypt what was stored in plain text
-        LOG.info("The private secrets are now encrypted with REPORTING_SECRETS_KEY")
+
     connections = raw.get("mongo_connections", {})
     if not isinstance(connections, dict):
         raise ValueError("mongo_connections in private_secrets.json must be a JSON object")
@@ -61,15 +123,65 @@ def _load_private_secrets() -> dict[str, Any]:
     }
 
 
-def _save_private_secrets(payload: dict[str, Any]) -> None:
-    """Admin token and adapter URLs/passwords. Encrypted when REPORTING_SECRETS_KEY is set (recommended: then a
-    copy of the data folder or of the storage database alone does not reveal any database password).
-    files backend: mode 0600 on Unix (Windows inherits the current user's ACL); PostgreSQL: a private row."""
+def _wanted_rows(payload: dict[str, Any]) -> dict[tuple[str, str, str], Any]:
+    wanted: dict[tuple[str, str, str], Any] = {}
+    for name, value in payload.items():
+        if name == "mongo_connections":
+            for source_id, fields in (value or {}).items():
+                for field, item in (fields or {}).items() if isinstance(fields, dict) else ():
+                    wanted[("data_source", str(source_id), str(field))] = item
+        elif name == "delivery_secrets":
+            for job, targets in (value or {}).items():
+                for target, fields in (targets or {}).items() if isinstance(targets, dict) else ():
+                    for field, item in (fields or {}).items() if isinstance(fields, dict) else ():
+                        wanted[("schedule_target", f"{job}/{target}", str(field))] = item
+        elif value not in (None, ""):
+            wanted[(SYSTEM, SERVICE, str(name))] = value
+    return wanted
+
+
+def _save_private_secrets(payload: dict[str, Any], *, by: str = "") -> None:
+    """Make the secrets table equal to this dict: one row per secret, encrypted when REPORTING_SECRETS_KEY is set
+    (recommended: then a copy of the data folder or of the storage database alone reveals no password).
+    Files backend: records/tables/secrets.json, mode 0600 on Unix."""
+    from backend.app.db import entities as ent  # noqa: PLC0415
+    from backend.app.db import model  # noqa: PLC0415
     cipher = _cipher()
-    if cipher is not None:
-        token = cipher.encrypt(json.dumps(payload, ensure_ascii=False).encode("utf-8")).decode("ascii")
-        payload = {"format": ENCRYPTED_FORMAT, "data": token}
-    get_store().write_json("private_secrets.json", payload, private=True)
+    db = ent.get_entities()
+    current = {row["secretId"]: row for row in db.find(ent.SECRETS)}
+    wanted = _wanted_rows(payload)
+    keep = set()
+    for (owner_type, owner_id, name), value in wanted.items():
+        secret_id = _row_id(owner_type, owner_id, name)
+        keep.add(secret_id)
+        old = current.get(secret_id)
+        if old is not None and old.get("keyVersion") == (ENCRYPTED_FORMAT if cipher else "plain"):
+            try:
+                if _open(old, cipher) == value:
+                    continue                                   # unchanged: no new ciphertext, no write
+            except RuntimeError:
+                pass
+        stored = cipher.encrypt(json.dumps(value, ensure_ascii=False).encode("utf-8")).decode("ascii") if cipher else value
+        db.put(ent.SECRETS, {"secretId": secret_id, "ownerType": owner_type, "ownerId": owner_id[:120], "secretName": name[:120],
+                             "encryptedValue": stored, "keyVersion": ENCRYPTED_FORMAT if cipher else "plain",
+                             "updatedBy": by or None, "updatedAt": model.now()})
+    for secret_id in set(current) - keep:
+        db.delete(ent.SECRETS, secret_id)
+    store = get_store()
+    old_document = store.read_json("private_secrets.json")
+    if old_document is not None:                                # the older document: kept aside, no longer read
+        store.write_json("migrated/private_secrets.json", old_document, private=True)
+        store.delete("private_secrets.json")
+
+
+def upgrade_secrets() -> int:
+    """Start-up: the older private_secrets.json becomes rows of the secrets table (once)."""
+    if _rows() or get_store().read_json("private_secrets.json") is None:
+        return 0
+    payload = _load_private_secrets()
+    _save_private_secrets(payload, by="upgrade")
+    LOG.info("Schema v2 (secrets): %d secrets moved into the secrets table", len(_rows()))
+    return len(_rows())
 
 
 def ensure_admin_token() -> str:

@@ -31,15 +31,14 @@ def password_needs_upgrade(user: dict[str, Any]) -> bool:
 
 
 def load_users() -> list[dict[str, Any]]:
-    """Accounts from rs_users (files: data/records/entities/users.json), oldest first."""
-    from backend.app.db.entities import USERS, get_entities  # noqa: PLC0415
-    items = get_entities().find(USERS)
-    return sorted((item for item in items if item.get("username")), key=lambda item: (item.get("createdAt") or "", item["username"]))
+    """Accounts from the users and user_rights tables (db/people.py), oldest first."""
+    from backend.app.db.people import load_users as load  # noqa: PLC0415
+    return load()
 
 
-def save_users(users: list[dict[str, Any]]) -> None:
-    from backend.app.db.entities import USERS, get_entities  # noqa: PLC0415
-    get_entities().replace_all(USERS, users)
+def save_users(users: list[dict[str, Any]], *, by: str = "") -> None:
+    from backend.app.db.people import save_users as save  # noqa: PLC0415
+    save(users, by=by)
 
 
 def find_user(username: str) -> dict[str, Any] | None:

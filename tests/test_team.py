@@ -27,7 +27,7 @@ def app(tmp_path, monkeypatch):
     with TestClient(made) as setup:
         for name in ("boss", "ali", "sara"):
             assert setup.post("/api/admin/users", headers=admin,
-                              json={"username": name, "password": f"{name}-pass-1", "role": "admin" if name == "boss" else "designer"}).status_code == 200
+                              json={"username": name, "email": f"{name}@example.com", "password": f"{name}-pass-1", "role": "admin" if name == "boss" else "designer"}).status_code == 200
     return made
 
 

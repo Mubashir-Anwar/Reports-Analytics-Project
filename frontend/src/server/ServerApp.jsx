@@ -1,3 +1,4 @@
+import PasswordInput from '../shared/PasswordInput.jsx';
 import { Suspense, lazy, useCallback, useEffect, useMemo, useState } from 'react';
 import ContextMenu from '../ContextMenu.jsx';
 import { Notice, Topbar } from '../portal/Shell.jsx';
@@ -15,8 +16,86 @@ const DashboardViewer = lazy(() => import('./DashboardViewer.jsx'));     // char
 import { safeNext } from '../shared/session.js';
 import { roleAtLeast, serverApi, splitRef, whenSignedOut } from './serverApi.js';
 
+/* ---------------------------------------------------------------- forgot password */
+async function plainCall(path, body) {
+  const response = await fetch(path, { method: body ? 'POST' : 'GET', credentials: 'same-origin',
+    headers: body ? { 'Content-Type': 'application/json' } : {}, body: body ? JSON.stringify(body) : undefined });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(typeof data.detail === 'string' ? data.detail : data.detail?.message || `HTTP ${response.status}`);
+  return data;
+}
+
+/** "Forgot your password?": an e-mailed link (when the server can send mail) or a request an administrator approves. */
+function ForgotPassword({ onBack }) {
+  const [who, setWho] = useState('');
+  const [help, setHelp] = useState({ emailLink: false, adminApproval: true });
+  const [method, setMethod] = useState('admin_approval');
+  const [answer, setAnswer] = useState(null);
+  const [busy, setBusy] = useState(false);
+  useEffect(() => {
+    plainCall('/api/server/password-help').then((data) => { setHelp(data); if (data.emailLink) setMethod('email_link'); }).catch(() => {});
+  }, []);
+  const send = async (event) => {
+    event.preventDefault();
+    setBusy(true);
+    try { setAnswer({ kind: 'ok', text: (await plainCall('/api/server/forgot-password', { username: who.trim(), method })).message }); }
+    catch (failure) { setAnswer({ kind: 'error', text: failure.message }); }
+    finally { setBusy(false); }
+  };
+  return (
+    <form className="stack" onSubmit={send}>
+      <div><h2>Forgot your password?</h2><p className="muted">Give your username or e-mail address.</p></div>
+      <label className="field"><span>Username or e-mail</span><input value={who} onChange={(e) => setWho(e.target.value)} autoComplete="username" required autoFocus /></label>
+      <div className="field"><span>How</span>
+        <label className="radio-line"><input type="radio" name="reset-how" checked={method === 'email_link'} disabled={!help.emailLink} onChange={() => setMethod('email_link')} />
+          E-mail me a link (works once, for 30 minutes){!help.emailLink && <small className="muted"> — e-mail is not set up on this server</small>}</label>
+        <label className="radio-line"><input type="radio" name="reset-how" checked={method === 'admin_approval'} onChange={() => setMethod('admin_approval')} />
+          Ask an administrator (they approve it in Admin → Users and give you a link)</label>
+      </div>
+      <Notice message={answer} />
+      <div className="row">
+        <button className="btn primary" type="submit" disabled={busy || answer?.kind === 'ok'}>{busy ? 'Sending…' : 'Send'}</button>
+        <button className="btn quiet" type="button" onClick={onBack}>Back to sign in</button>
+      </div>
+      <details className="forgot">
+        <summary>Super admin, and nobody can sign in?</summary>
+        <p>On the server, in the service folder, run <code className="block">python -m backend.app.reset_password &lt;username&gt;</code>
+          Docker: <code>docker compose exec reporting python -m backend.app.reset_password &lt;username&gt;</code>.</p>
+      </details>
+    </form>
+  );
+}
+
+/** /login?reset=<token>: choose a new password with an e-mailed or approved link. */
+function ResetPassword({ token, onDone }) {
+  const [pw, setPw] = useState({ next: '', again: '' });
+  const [answer, setAnswer] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const send = async (event) => {
+    event.preventDefault();
+    if (pw.next !== pw.again) { setAnswer({ kind: 'error', text: 'The two passwords are not the same.' }); return; }
+    setBusy(true);
+    try {
+      const done = await plainCall('/api/server/reset-password', { token, password: pw.next });
+      onDone(`Password of ${done.username} changed. Sign in with the new one.`);
+    } catch (failure) { setAnswer({ kind: 'error', text: failure.message }); }
+    finally { setBusy(false); }
+  };
+  return (
+    <form className="stack" onSubmit={send}>
+      <div><h2>Choose a new password</h2><p className="muted">At least 8 characters. Every place you are signed in is signed out.</p></div>
+      <label className="field"><span>New password</span><PasswordInput value={pw.next} onChange={(e) => setPw({ ...pw, next: e.target.value })} autoComplete="new-password" minLength={8} required autoFocus /></label>
+      <label className="field"><span>New password again</span><PasswordInput value={pw.again} onChange={(e) => setPw({ ...pw, again: e.target.value })} autoComplete="new-password" minLength={8} required /></label>
+      <Notice message={answer} />
+      <button className="btn primary" type="submit" disabled={busy}>{busy ? 'Saving…' : 'Save the new password'}</button>
+    </form>
+  );
+}
+
 /* ---------------------------------------------------------------- sign in */
 function LoginForm({ onSignedIn, message }) {
+  const resetToken = new URLSearchParams(window.location.search).get('reset') || '';
+  const [mode, setMode] = useState(resetToken ? 'reset' : 'signin');   // signin | forgot | reset
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [busy, setBusy] = useState(false);
@@ -31,30 +110,40 @@ function LoginForm({ onSignedIn, message }) {
       if (user.replacedOther) {
         try { sessionStorage.setItem('team-note', `You were also signed in on ${user.replacedOther.by}. That browser is signed out in ${Math.round(user.replacedOther.seconds)} seconds: one account works in one browser at a time.`); } catch { /* private mode */ }
       }
+      if (user.mustChangePassword) {
+        try { sessionStorage.setItem('must-change-password', '1'); } catch { /* private mode */ }
+      }
       onSignedIn(user);
     } catch (failure) { setError({ text: failure.message, kind: 'error' }); }
     finally { setBusy(false); }
   };
+  const backToSignIn = (text) => {
+    if (resetToken) window.history.replaceState(null, '', window.location.pathname);
+    setError(text ? { kind: 'ok', text } : null);
+    setMode('signin');
+  };
 
+  if (mode !== 'signin') {
+    return (
+      <div className="login-wrap">
+        <div className="card login">
+          <Logo size={52} className="login-logo" />
+          <p className="eyebrow">{BRAND.name}</p>
+          {mode === 'forgot' ? <ForgotPassword onBack={() => backToSignIn('')} /> : <ResetPassword token={resetToken} onDone={backToSignIn} />}
+        </div>
+      </div>
+    );
+  }
   return (
     <div className="login-wrap">
       <form className="card login" onSubmit={submit} autoComplete="on">
         <Logo size={52} className="login-logo" />
         <div><p className="eyebrow">{BRAND.name}</p><h1>Sign in</h1><p className="muted">One sign-in for the Designer, Report Server, Analytics, Run reports and Admin. You see the parts your account has rights for.</p></div>
         <label className="field"><span>Username</span><input name="username" autoComplete="username" value={username} onChange={(e) => setUsername(e.target.value)} required autoFocus /></label>
-        <label className="field"><span>Password</span><input name="password" type="password" autoComplete="current-password" value={password} onChange={(e) => setPassword(e.target.value)} required /></label>
+        <label className="field"><span>Password</span><PasswordInput name="password" autoComplete="current-password" value={password} onChange={(e) => setPassword(e.target.value)} required /></label>
         <Notice message={error} />
         <button className="btn primary" type="submit" disabled={busy} style={{ justifyContent: 'center', padding: '10px' }}>{busy ? 'Signing in…' : 'Sign in'}</button>
-        <details className="forgot">
-          <summary>Forgot your password?</summary>
-          <ol>
-            <li><b>Users:</b> ask an administrator. In Admin → Users &amp; rights they set a new password for you.</li>
-            <li><b>Super admin</b> (or no administrator can sign in): on the server, in the service folder, run
-              <code className="block">python -m backend.app.reset_password &lt;username&gt;</code>
-              Docker: <code>docker compose exec reporting python -m backend.app.reset_password &lt;username&gt;</code>.
-              It asks for a new password (or <code>--generate</code> makes one), enables the account again and signs out its old sessions. No database editing is needed.</li>
-          </ol>
-        </details>
+        <button type="button" className="btn quiet link-btn" onClick={() => setMode('forgot')}>Forgot your password?</button>
         <p className="muted" style={{ fontSize: 12 }}>Accounts and their rights are set in Admin → Users &amp; rights. First setup: user <code>admin</code> with the admin token as the password, until a super admin exists.</p>
       </form>
     </div>

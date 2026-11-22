@@ -1,5 +1,6 @@
 // Data adapters shared by the designer, /admin and /server: logos, the <option> list grouped by folder, and the
 // Data Adapter Wizard (MongoDB, PostgreSQL, MySQL/MariaDB, SQL Server, Oracle).
+import PasswordInput from './PasswordInput.jsx';
 import { useState } from 'react';
 import { api } from '../api.js';
 import './adapters.css';
@@ -151,14 +152,14 @@ export function AdapterWizard({ initial, folders, existingIds, onClose, onSaved,
                     </label>
                   )}
                   <label className="aw-field">Username<input value={pg.user} autoComplete="off" onChange={(e) => setPgField({ user: e.target.value })} placeholder="report_reader" /></label>
-                  <label className="aw-field">Password<input type="password" autoComplete="new-password" value={pg.password} onChange={(e) => setPgField({ password: e.target.value })} /></label>
+                  <label className="aw-field">Password<PasswordInput autoComplete="new-password" value={pg.password} onChange={(e) => setPgField({ password: e.target.value })} /></label>
                 </div>
                 <small className="muted">{editing ? 'The saved password is never shown: enter the connection again (it replaces the old one).' : 'Saved with the password in a private file on the server; never shown again.'} Give the report user read-only rights — reports only read, and every query runs in a read-only transaction.</small>
               </>
             ) : (
               <>
                 <label className="aw-field">MongoDB URL
-                  <input type="password" autoComplete="new-password" value={form.uri} onChange={(e) => { setForm({ ...form, uri: e.target.value }); setResult(null); }} placeholder="mongodb://user:password@host:27017/Database" />
+                  <PasswordInput autoComplete="new-password" value={form.uri} onChange={(e) => { setForm({ ...form, uri: e.target.value }); setResult(null); }} placeholder="mongodb://user:password@host:27017/Database" />
                   <small className="muted">{editing ? 'The saved URL is never shown. Enter it again (it replaces the old one).' : 'Saved with its password in a private file on the server; never shown again. For a remote MongoDB connect the VPN first.'}</small>
                 </label>
                 <label className="aw-field">Database <small>(optional when the URL has one)</small><input value={form.database} onChange={(e) => setForm({ ...form, database: e.target.value })} /></label>

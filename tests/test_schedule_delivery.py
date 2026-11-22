@@ -157,7 +157,7 @@ def test_schedule_api_never_shows_the_password_and_delivers_after_the_run(client
 def test_designers_cannot_choose_a_server_folder(client, monkeypatch, tmp_path):
     monkeypatch.setenv("REPORTING_DELIVERY_FOLDERS", str(tmp_path))
     assert client.post("/api/admin/users", headers={"X-Admin-Token": ADMIN},
-                       json={"username": "dee", "password": "Passw0rd-long-enough", "role": "designer"}).status_code in (200, 201)
+                       json={"username": "dee", "email": "dee@example.com", "password": "Passw0rd-long-enough", "role": "designer"}).status_code in (200, 201)
     assert login(client, "dee", "Passw0rd-long-enough").status_code == 200
     refused = client.post("/api/server/schedules", json={**DAILY, "deliver": [{"type": "folder", "folder": str(tmp_path)}]})
     assert refused.status_code in (403, 422)

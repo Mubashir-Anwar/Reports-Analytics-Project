@@ -17,9 +17,9 @@ WITH_PARAM = {**PUBLISHED, "id": "R2", "title": "With question", "folder": "Fina
 
 def users(client):
     admin = token(ADMIN)
-    client.post("/api/admin/users", headers=admin, json={"username": "boss", "password": "boss-pass-1", "role": "admin"})
-    client.post("/api/admin/users", headers=admin, json={"username": "dee", "password": "dee-pass-12", "role": "designer"})
-    client.post("/api/admin/users", headers=admin, json={"username": "vic", "password": "vic-pass-12", "role": "viewer"})
+    client.post("/api/admin/users", headers=admin, json={"username": "boss", "email": "boss@example.com", "password": "boss-pass-1", "role": "admin"})
+    client.post("/api/admin/users", headers=admin, json={"username": "dee", "email": "dee@example.com", "password": "dee-pass-12", "role": "designer"})
+    client.post("/api/admin/users", headers=admin, json={"username": "vic", "email": "vic@example.com", "password": "vic-pass-12", "role": "viewer"})
 
 
 def publish(client, payload):

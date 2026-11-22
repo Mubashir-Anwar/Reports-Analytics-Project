@@ -186,10 +186,89 @@ REPORT_HISTORY_V2 = Entity("v2_report_history", {
 
 V2_STEP1 = (FOLDER_TREE, WORKSPACE_REPORTS, SERVER_REPORTS, REPORT_VERSIONS_V2, REPORT_HISTORY_V2)
 
+# ------------------------------------------------------------------ schema v2, step 2: people and access
+# A user is a row with an id; each app right is a row of its own; teams (user_groups) have members; folder access
+# is given to a user, a group or a role on a folder id; API keys have their folders and networks as rows.
+USERS_V2 = Entity("v2_users", {
+    "userId": ("str", 32, True), "orgId": ("str", 64, True), "username": ("str", 64, True),
+    "fullName": ("str", 120, False), "email": ("str", 254, False), "phone": ("str", 32, False),
+    "role": ("str", 16, False),                                 # viewer / designer / admin (from the rights)
+    "isSuperAdmin": ("bool", None, False), "isDisabled": ("bool", None, False),
+    "passwordHash": ("str", 128, False), "passwordSalt": ("str", 64, False), "passwordIterations": ("int", None, False),
+    "passwordChangedAt": ("time", None, False), "mustChangePassword": ("bool", None, False),
+    "sessionVersion": ("int", None, False),                     # +1 signs the user out everywhere
+    "createdAt": ("time", None, False), "createdBy": ("str", 128, False), "lastLoginAt": ("time", None, False),
+}, key=("userId",), indexes=(("username",), ("email",), ("phone",)), table_name="users")
+
+USER_RIGHTS = Entity("v2_user_rights", {
+    "userId": ("str", 32, True), "rightName": ("str", 16, True), "orgId": ("str", 64, True),   # designer, server, runner…
+    "grantedBy": ("str", 128, False), "grantedAt": ("time", None, False),
+}, key=("userId", "rightName"), table_name="user_rights")
+
+USER_GROUPS = Entity("v2_user_groups", {
+    "groupId": ("str", 32, True), "orgId": ("str", 64, True), "name": ("str", 64, True), "description": ("str", 300, False),
+    "createdBy": ("str", 128, False), "createdAt": ("time", None, False),
+}, key=("groupId",), indexes=(("name",),), table_name="user_groups")
+
+USER_GROUP_MEMBERS = Entity("v2_user_group_members", {
+    "groupId": ("str", 32, True), "userId": ("str", 32, True), "orgId": ("str", 64, True),
+    "addedBy": ("str", 128, False), "addedAt": ("time", None, False),
+}, key=("groupId", "userId"), indexes=(("userId",),), table_name="user_group_members")
+
+FOLDER_ACCESS = Entity("v2_folder_permissions", {
+    "permissionId": ("str", 32, True), "orgId": ("str", 64, True),
+    "folderId": ("str", 32, False),                             # empty = the root (every folder)
+    "principalType": ("str", 8, True),                          # user / group / role
+    "principalId": ("str", 32, True),                           # user_id, group_id or the role name
+    "accessLevel": ("str", 8, True),                            # none (hidden) / run / manage
+    "grantedBy": ("str", 128, False), "grantedAt": ("time", None, False),
+}, key=("permissionId",), indexes=(("folderId",), ("principalType", "principalId")), table_name="folder_permissions")
+
+PASSWORD_RESETS = Entity("v2_password_resets", {
+    "resetId": ("str", 32, True), "orgId": ("str", 64, True), "userId": ("str", 32, True),
+    "method": ("str", 16, True),                                # email_link / admin_approval
+    "status": ("str", 16, True),                                # waiting / approved / rejected / used / expired
+    "tokenHash": ("str", 64, False),                            # the link itself is never stored
+    "requestedAt": ("time", None, True), "expiresAt": ("time", None, False),
+    "decidedBy": ("str", 128, False), "decidedAt": ("time", None, False), "usedAt": ("time", None, False),
+    "clientIp": ("str", 64, False),
+}, key=("resetId",), indexes=(("userId", "requestedAt"), ("status",)), table_name="password_resets")
+
+API_KEYS_V2 = Entity("v2_api_keys", {
+    "apiKeyId": ("str", 32, True), "orgId": ("str", 64, True), "name": ("str", 64, True),
+    "keyHash": ("str", 64, True),                               # the key itself is never stored
+    "createdBy": ("str", 128, False), "createdAt": ("time", None, False), "expiresAt": ("time", None, False),
+    "lastUsedAt": ("time", None, False), "isDisabled": ("bool", None, False),
+}, key=("apiKeyId",), table_name="api_keys")
+
+API_KEY_FOLDERS = Entity("v2_api_key_folders", {
+    "apiKeyId": ("str", 32, True), "folderId": ("str", 32, True), "orgId": ("str", 64, True),
+}, key=("apiKeyId", "folderId"), table_name="api_key_folders")
+
+API_KEY_NETWORKS = Entity("v2_api_key_networks", {
+    "apiKeyId": ("str", 32, True), "ipRange": ("str", 64, True), "orgId": ("str", 64, True),   # e.g. 10.0.0.0/24
+}, key=("apiKeyId", "ipRange"), table_name="api_key_networks")
+
+# ------------------------------------------------------------------ schema v2, step 3: secrets
+# Every password, URL with a password, key and token: one row each, linked to its owner, encrypted with
+# REPORTING_SECRETS_KEY (Fernet) when it is set. Nothing else in the database holds a secret.
+SECRETS = Entity("v2_secrets", {
+    "secretId": ("str", 32, True), "orgId": ("str", 64, True),
+    "ownerType": ("str", 24, True),          # system / data_source / schedule_target
+    "ownerId": ("str", 120, True),           # "service", the data source id, or "<schedule id>/<target id>"
+    "secretName": ("str", 120, True),        # admin_token, uri, password, privateKey, header:Authorization …
+    "encryptedValue": ("json", None, True),  # the value (JSON), encrypted when keyVersion is fernet-v1
+    "keyVersion": ("str", 16, True),         # fernet-v1 / plain (no REPORTING_SECRETS_KEY)
+    "updatedBy": ("str", 128, False), "updatedAt": ("time", None, False),
+}, key=("secretId",), indexes=(("ownerType", "ownerId"),), table_name="secrets")
+
+V2_STEP2 = (USERS_V2, USER_RIGHTS, USER_GROUPS, USER_GROUP_MEMBERS, FOLDER_ACCESS, PASSWORD_RESETS,
+            API_KEYS_V2, API_KEY_FOLDERS, API_KEY_NETWORKS)
+
 ENTITIES = (USERS, API_KEYS, FOLDER_PERMISSIONS, REPORT_VERSIONS, REPORT_HISTORY, JOB_SCHEDULES, JOB_RUNS,
             REPORTS, DRAFTS, FOLDERS, DATA_SOURCES,
             ANALYTICS_DATASETS, ANALYTICS_RELATIONSHIPS, ANALYTICS_DASHBOARDS, ANALYTICS_REFRESHES, ANALYTICS_QUERIES,
-            *V2_STEP1)
+            *V2_STEP1, *V2_STEP2, SECRETS)
 
 
 # ------------------------------------------------------------------ record <-> stored values
@@ -505,7 +584,7 @@ class MongoEntities(EntityBackend):
             collection = self.db[entity.table]
             for fields in ((entity.key,) if len(entity.key) > 1 else ()) + entity.indexes:
                 collection.create_index([(name, ASCENDING) for name in fields], name=f"ix_{entity.table}_{'_'.join(fields)}"[:120])
-        self.db["rs_schema_version"].update_one({"_id": "entities"}, {"$max": {"version": 6}, "$set": {"appliedAt": model.now()}}, upsert=True)
+        self.db["rs_schema_version"].update_one({"_id": "entities"}, {"$max": {"version": 8}, "$set": {"appliedAt": model.now()}}, upsert=True)
 
     @staticmethod
     def _id(key: tuple) -> str:
