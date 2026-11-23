@@ -2,9 +2,10 @@
 
 One record per request: when, method, path, the names of the query parameters (never their values: they can hold
 customer data), status, time taken, size of the answer, caller (user / API key / token / anonymous) and address.
-Records are written by a background thread in batches, so a request never waits for the database; they are stored
-per day ("requests/YYYY-MM-DD.jsonl" in the system storage: files, SQL or MongoDB, like the run log) and days
-older than REPORTING_REQUEST_LOG_DAYS (default 30) are removed. REPORTING_REQUEST_LOG=off switches it off.
+Records are written by a background thread in batches, so a request never waits for the database; they are rows of
+the request_log table (schema v2; files: records/request_log/<day>.jsonl) and rows older than
+REPORTING_REQUEST_LOG_DAYS (default 30) are removed. REPORTING_REQUEST_LOG=off switches it off.
+Version 1 kept them as documents per hour (requests/YYYY-MM-DD/HH.jsonl): the days still kept are copied at start-up.
 
 Static files and the download panel's status checks are not recorded (they would bury everything else).
 """
@@ -18,6 +19,7 @@ import threading
 from datetime import datetime, timedelta, timezone
 from typing import Any, Callable
 
+from backend.app.db import get_records
 from backend.app.logs import LOG
 from backend.app.storage.store import get_store
 
@@ -47,6 +49,33 @@ def check_day(day: str) -> str:
 def hour_key(day: str, hour: int | str) -> str:
     """requests/2026-11-19/14.jsonl: one log per hour (the database stores keep the newest 5000 lines per log)."""
     return f"{PREFIX}{check_day(day)}/{int(hour):02d}.jsonl"
+
+
+def _has_v1_documents(store: Any) -> bool:
+    """Are there version 1 hour documents (requests/<day>/<hour>.jsonl) at all? One listing instead of 744 reads."""
+    check = getattr(store, "has_lines", None)
+    if check is None:
+        return True                                    # a store that cannot tell: look the slow way
+    try:
+        return bool(check(PREFIX.rstrip("/")))
+    except Exception:  # noqa: BLE001
+        return True
+
+
+def _row(item: dict[str, Any]) -> dict[str, Any]:
+    """The recorder's item (and a version 1 line) as a request_log row."""
+    return {"requestedAt": item["at"], "method": str(item.get("method") or "?")[:8], "path": str(item.get("path") or "")[:300],
+            "queryParamNames": item.get("query") or [], "httpStatus": int(item.get("status") or 0),
+            "durationMs": item.get("durationMs"), "bytesSent": item.get("bytes"), "caller": item.get("actor") or None,
+            "callerType": item.get("actorType") or None, "clientIp": item.get("client") or None, "userAgent": item.get("agent") or None}
+
+
+def _item(row: dict[str, Any]) -> dict[str, Any]:
+    """A request_log row in the shape the Logs screen reads."""
+    return {"at": row["requestedAt"], "method": row["method"], "path": row["path"], "query": row.get("queryParamNames") or [],
+            "status": row["httpStatus"], "durationMs": row.get("durationMs") or 0, "bytes": row.get("bytesSent"),
+            "client": row.get("clientIp") or "", "agent": row.get("userAgent") or "", "actor": row.get("caller") or "",
+            "actorType": row.get("callerType") or ""}
 
 
 class RequestLog:
@@ -100,20 +129,15 @@ class RequestLog:
                 LOG.exception("Could not save %d request records", len(batch))
 
     def _write(self, batch: list[dict[str, Any]]) -> None:
-        store = get_store()
-        lines: dict[str, list[str]] = {}
+        rows = []
         for item in batch:
             request = item.pop("_request", None)
             try:
                 item["actor"], item["actorType"] = self.identify(request) if request is not None else ("", "")
             except Exception:  # noqa: BLE001
                 item["actor"], item["actorType"] = "?", "unknown"
-            lines.setdefault(hour_key(item["at"][:10], item["at"][11:13]), []).append(
-                json.dumps(item, ensure_ascii=False, separators=(",", ":")))
-        for key, rows in lines.items():
-            for row in rows:
-                store.append_line(key, row)
-                self.written += 1
+            rows.append(_row(item))
+        self.written += get_records().add_requests(rows)
         today = datetime.now(timezone.utc).date().isoformat()
         if self._last_cleanup != today:
             self._last_cleanup = today
@@ -121,16 +145,43 @@ class RequestLog:
 
     @staticmethod
     def cleanup() -> int:
-        """Remove the days just past the keep time (the 7 days before the cutoff, so a stopped server catches up)."""
-        store = get_store()
-        if not hasattr(store, "delete_lines"):
-            return 0
+        """Remove the rows older than the keep time (and version 1 hour documents of the 7 days before the cutoff)."""
         oldest_kept = datetime.now(timezone.utc).date() - timedelta(days=keep_days())
-        removed = 0
-        for back in range(1, 8):
-            day = (oldest_kept - timedelta(days=back)).isoformat()
-            removed += sum(1 for hour in range(24) if store.delete_lines(hour_key(day, hour)))
+        removed = get_records().remove_before("requests", datetime.combine(oldest_kept, datetime.min.time(), timezone.utc))
+        store = get_store()
+        if hasattr(store, "delete_lines") and _has_v1_documents(store):
+            for back in range(1, 8):
+                day = (oldest_kept - timedelta(days=back)).isoformat()
+                removed += sum(1 for hour in range(24) if store.delete_lines(hour_key(day, hour)))
         return removed
+
+    @staticmethod
+    def upgrade() -> int:
+        """Version 1 hour documents of the kept days -> rows of request_log, once per day (the documents are kept until
+        they are older than the keep time)."""
+        store = get_store()
+        if not _has_v1_documents(store):
+            return 0                                   # a new installation, or everything already removed
+        records = get_records()
+        done = store.read_json("meta/request-log-v2.json", None) or {}
+        copied = 0
+        for day in RequestLog.days():
+            if day in done:
+                continue
+            rows = []
+            for hour in range(24):
+                for chunk in store.lines(hour_key(day, hour)):
+                    for line in str(chunk).splitlines():
+                        try:
+                            item = json.loads(line)
+                            rows.append(_row(item))
+                        except (ValueError, TypeError, KeyError):
+                            continue
+            if rows:
+                copied += records.add_requests(rows)
+            done[day] = len(rows)
+        store.write_json("meta/request-log-v2.json", done)
+        return copied
 
     # ------------------------------------------------------------------ reading
     @staticmethod
@@ -147,13 +198,10 @@ class RequestLog:
         rows: list[dict[str, Any]] = []
         totals = {"requests": 0, "errors": 0, "slow": 0, "durationMs": 0}
         by_path: dict[str, int] = {}
-        store = get_store()
-        stored = (line for hour in range(24) for chunk in store.lines(hour_key(day, hour)) for line in str(chunk).splitlines())
-        for line in stored:
-            try:
-                item = json.loads(line)
-            except ValueError:
-                continue
+        start = datetime.combine(datetime.fromisoformat(check_day(day)).date(), datetime.min.time(), timezone.utc)
+        stored = get_records().requests(since=start, until=start + timedelta(days=1), limit=100_000)
+        for row in reversed(stored):                          # oldest first, like the day's log
+            item = _item(row)
             code = int(item.get("status", 0))
             if status == "errors" and code < 400 or status == "ok" and code >= 400 or status.isdigit() and str(code) != status:
                 continue

@@ -114,6 +114,10 @@ def migrate(target: Any, *, overwrite: bool = False, out=sys.stdout, records: Re
     upgrade_people(source)                            # and its accounts, keys and folder rules
     from backend.app.security.secrets import upgrade_secrets  # noqa: PLC0415
     upgrade_secrets()                                 # and private_secrets.json -> the secrets table
+    from backend.app.db.schedules import upgrade_schedules  # noqa: PLC0415
+    upgrade_schedules(source)                         # and rs_job_schedules -> schedules + schedule_targets
+    from backend.app.jobs.store import upgrade_runs  # noqa: PLC0415
+    upgrade_runs(source)                              # and rs_job_runs -> runs, run_files, run_deliveries
     counts = {"json": 0, "bytes": 0, "lines": 0, "folders": 0, "skipped": 0}
     if records is not None:
         from backend.app.db import entities as ent  # noqa: PLC0415

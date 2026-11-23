@@ -1,5 +1,6 @@
-// Report Server → Logs (administrators): every request that reached the server, report runs, the service log,
-// the audit trail and what is being made in the background right now. Read from the system database.
+// Report Server → Logs (administrators): every request that reached the server, report runs, the data taken out
+// through the API, the service log, the audit trail and what is being made in the background right now. Read from
+// the system database (request_log, runs, api_calls, audit_events).
 import { useCallback, useEffect, useState } from 'react';
 import { Notice, formatWhen } from '../portal/Shell.jsx';
 import { serverApi } from './serverApi.js';
@@ -7,6 +8,7 @@ import { serverApi } from './serverApi.js';
 const KINDS = [
   ['requests', 'Requests'],
   ['runs', 'Report runs'],
+  ['api-calls', 'API calls'],
   ['service', 'Service log'],
   ['audit', 'Audit trail'],
   ['now', 'Right now'],
@@ -63,6 +65,9 @@ export default function LogsView() {
       } else if (kind === 'audit') {
         query.set('limit', '500');
         if (search) query.set('actor', search);
+      } else if (kind === 'api-calls') {
+        query.set('limit', '500');
+        if (search) query.set('reportId', search);
       }
       setData(await serverApi.logs(kind === 'now' ? 'downloads' : kind, query));
       setMessage(null);
@@ -78,7 +83,8 @@ export default function LogsView() {
     return () => clearInterval(timer);
   }, [auto, load]);
 
-  const records = data?.records || data?.events || data?.entries || [];
+  const records = data?.records || data?.events || data?.entries || data?.calls || [];
+  const runPill = (s) => (s === 'success' ? 'ok' : s === 'failed' ? 'bad' : 'warn');
 
   return (
     <div className="stack logs-view">
@@ -97,7 +103,7 @@ export default function LogsView() {
           <select value={status} onChange={(e) => setStatus(e.target.value)} aria-label="Status">
             {kind === 'requests'
               ? [['', 'All answers'], ['errors', 'Errors (4xx/5xx)'], ['ok', 'Successful'], ['429', '429 too many'], ['503', '503 busy'], ['500', '500 server error']].map(([v, l]) => <option key={v} value={v}>{l}</option>)
-              : [['', 'All runs'], ['success', 'Succeeded'], ['failed', 'Failed']].map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+              : [['', 'All runs'], ['success', 'Succeeded'], ['failed', 'Failed'], ['queued', 'Waiting'], ['running', 'Running']].map(([v, l]) => <option key={v} value={v}>{l}</option>)}
           </select>
         )}
         {kind === 'service' && (
@@ -106,7 +112,7 @@ export default function LogsView() {
           </select>
         )}
         {kind !== 'now' && (
-          <input type="search" placeholder={{ requests: 'Path, user or address', runs: 'Report ID', service: 'Text in the log', audit: 'User' }[kind]}
+          <input type="search" placeholder={{ requests: 'Path, user or address', runs: 'Report ID', 'api-calls': 'Report ID', service: 'Text in the log', audit: 'User' }[kind]}
             value={search} onChange={(e) => setSearch(e.target.value)} />
         )}
         <label className="check"><input type="checkbox" checked={auto} onChange={(e) => setAuto(e.target.checked)} /> Every 5 s</label>
@@ -114,8 +120,8 @@ export default function LogsView() {
         {kind === 'requests' && records.length > 0 && (
           <button className="btn" onClick={() => saveCsv(records, ['at', 'method', 'path', 'query', 'status', 'durationMs', 'bytes', 'actor', 'actorType', 'client', 'agent'], `requests-${data.day}.csv`)}>⤓ CSV</button>
         )}
-        {kind === 'runs' && records.length > 0 && (
-          <button className="btn" onClick={() => saveCsv(records, Object.keys(records[0]), 'report-runs.csv')}>⤓ CSV</button>
+        {(kind === 'runs' || kind === 'api-calls') && records.length > 0 && (
+          <button className="btn" onClick={() => saveCsv(records, Object.keys(records[0]), kind === 'runs' ? 'report-runs.csv' : 'api-calls.csv')}>⤓ CSV</button>
         )}
       </div>
       <Notice message={message} />
@@ -130,6 +136,14 @@ export default function LogsView() {
           {data.busiest?.length > 0 && (
             <div className="log-busiest"><span>Most called</span>{data.busiest.slice(0, 5).map((b) => <code key={b.path}>{b.count}× {b.path}</code>)}</div>
           )}
+        </div>
+      )}
+
+      {kind === 'api-calls' && data?.totals && (
+        <div className="log-stats">
+          <div><b>{data.totals.calls}</b><span>calls that took data out</span></div>
+          <div><b>{data.totals.rows}</b><span>rows sent</span></div>
+          <div><b>{bytes(data.totals.bytes)}</b><span>sent in files</span></div>
         </div>
       )}
 
@@ -151,6 +165,7 @@ export default function LogsView() {
             <thead>
               {kind === 'requests' && <tr><th>Time</th><th>Method</th><th>Path</th><th>Status</th><th>Took</th><th>Size</th><th>Who</th><th>Address</th></tr>}
               {kind === 'runs' && <tr><th>Time</th><th>Report</th><th>Format</th><th>Status</th><th>Rows</th><th>Took</th><th>Who</th><th>Channel</th></tr>}
+              {kind === 'api-calls' && <tr><th>Time</th><th>Key / caller</th><th>Endpoint</th><th>Report</th><th>Status</th><th>Rows</th><th>Size</th><th>Address</th></tr>}
               {kind === 'service' && <tr><th>Time</th><th>Level</th><th>Message</th></tr>}
               {kind === 'audit' && <tr><th>Time</th><th>Action</th><th>Target</th><th>Who</th><th>Address</th></tr>}
             </thead>
@@ -167,8 +182,18 @@ export default function LogsView() {
               {kind === 'runs' && records.map((r, i) => (
                 <tr key={`${r.startedAt}-${i}`}>
                   <td className="nowrap">{formatWhen(r.startedAt)}</td><td title={r.reportTitle}>{r.reportId}</td><td>{(r.format || '').toUpperCase()}</td>
-                  <td><span className={`pill ${r.status === 'success' ? 'ok' : 'bad'}`}>{r.status}</span>{r.errorCode ? <span className="muted" title={r.errorMessage}> {r.errorCode}</span> : null}</td>
-                  <td>{r.rowCount}</td><td className="nowrap">{ms(r.durationMs)}</td><td>{r.actor}</td><td>{r.channel}</td>
+                  <td><span className={`pill ${runPill(r.status)}`}>{r.status}</span>{r.errorCode ? <span className="muted" title={r.errorMessage}> {r.errorCode}</span> : null}</td>
+                  <td>{r.rowCount}</td><td className="nowrap">{ms(r.durationMs)}</td><td>{r.actor}</td>
+                  <td>{r.channel}{r.runType && r.runType !== 'interactive' ? <span className="muted"> · {r.runType}</span> : null}</td>
+                </tr>
+              ))}
+              {kind === 'api-calls' && records.map((r) => (
+                <tr key={r.id}>
+                  <td className="nowrap">{formatWhen(r.calledAt)}</td>
+                  <td>{r.caller}{r.apiKeyId ? <span className="muted mono"> {r.apiKeyId}</span> : <span className="muted"> {r.callerType}</span>}</td>
+                  <td className="mono">{r.method} {r.endpoint}</td><td title={r.folder}>{r.reportId}</td>
+                  <td><span className={`pill ${statusClass(r.httpStatus)}`}>{r.httpStatus}</span></td>
+                  <td>{r.rowsReturned}</td><td className="nowrap">{bytes(r.bytesReturned)}</td><td className="mono">{r.clientIp}</td>
                 </tr>
               ))}
               {kind === 'service' && records.slice().reverse().map((r, i) => (

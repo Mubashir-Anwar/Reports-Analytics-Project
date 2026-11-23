@@ -133,6 +133,8 @@ class JobRunner:
             "title": definition.title if definition else report_id,
             "format": output_format, "parameters": dict(parameters), "owner": owner, "status": "queued", "queuedAt": _iso(_now()),
             "startedAt": "", "finishedAt": "", "rowCount": 0, "error": "", "file": "", "size": 0, "email": "",
+            # stored masked (CNIC, account numbers); the run itself uses the values given here
+            "_sensitive": sorted(self.ctx.sensitive_parameters(definition)) if definition else [],
         }
         store.save_run(run)
         if self.inline:
@@ -207,7 +209,7 @@ class JobRunner:
             by_key = run["owner"].startswith("apikey:")
             ctx.log_run_from_audit(audit, channel="api" if by_key else ("schedule" if run.get("jobId") else "server"),
                                    actor=run["owner"], actor_type="api-key" if by_key else "user",
-                                   definition=self._quiet_report(run), body=body or None)
+                                   definition=self._quiet_report(run), body=body or None, run_id=run["id"])
         if job and job.get("email", {}).get("to"):
             if run.get("spooled") and run.get("size", 0) <= MAIL_ATTACH_MAX:
                 body = spool.export_path(run["file"]).read_bytes()

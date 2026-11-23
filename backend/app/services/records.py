@@ -15,7 +15,7 @@ from backend.app.db.model import masked_parameters
 from backend.app.logs import LOG
 from backend.app.security.access import client_address
 
-__all__ = ['sensitive_parameters', 'log_run', 'log_run_from_audit', 'audit_event', 'caller_identity']
+__all__ = ['sensitive_parameters', 'log_run', 'log_run_from_audit', 'log_download', 'audit_event', 'caller_identity']
 
 # how the old audit "access" value maps to a run channel and actor type
 _ACCESS = {"report-token": ("api", "token"), "admin-token": ("api", "token"), "open": ("runner", "anonymous")}
@@ -34,8 +34,9 @@ def log_run(ctx: SimpleNamespace, *, channel: str, actor: str, actor_type: str, 
             definition: Any = None, report_id: str = "", data_source: str = "", output_format: str = "",
             parameters: dict[str, Any] | None = None, error_code: str = "", error_message: str = "", row_count: int | None = None,
             body: bytes | None = None, duration_ms: int | None = None, request: Request | None = None,
-            required: bool = False, on_behalf_of: str = "") -> dict[str, Any] | None:
-    """Store one run. required=True (AUDIT_REQUIRED): a failure raises 503 so the report is not released unlogged."""
+            required: bool = False, on_behalf_of: str = "", run_id: str = "") -> dict[str, Any] | None:
+    """Store one run. required=True (AUDIT_REQUIRED): a failure raises 503 so the report is not released unlogged.
+    run_id: a background / scheduled / API job, whose row in runs already exists: it is completed, not repeated."""
     editor = getattr(definition, "editor_config", None) or {}
     record = {
         "startedAt": started_at, "finishedAt": datetime.now(timezone.utc), "durationMs": duration_ms,
@@ -51,7 +52,13 @@ def log_run(ctx: SimpleNamespace, *, channel: str, actor: str, actor_type: str, 
         "onBehalfOf": on_behalf_of,
     }
     try:
-        return get_records().add_run(record)
+        if run_id:
+            stored = get_records().put_run({**record, "id": run_id})
+        else:
+            stored = get_records().add_run({**record, "runType": "interactive"})
+        if channel in API_CHANNELS:
+            _api_call(stored, request)
+        return stored
     except Exception:  # noqa: BLE001 - the database may be down; the report decides below whether that blocks it
         LOG.exception("The run record could not be saved")
         if required:
@@ -59,9 +66,42 @@ def log_run(ctx: SimpleNamespace, *, channel: str, actor: str, actor_type: str, 
         return None
 
 
+API_CHANNELS = ("api", "embed", "signed-link")      # data that leaves the service through the API
+
+
+def _api_call(run: dict[str, Any], request: Request | None, *, endpoint: str = "", http_status: int | None = None,
+              bytes_returned: int | None = None) -> None:
+    """One row of api_calls: which key took which report's data, how much, from where. Never blocks the answer."""
+    try:
+        scope = getattr(request.state, "report_scope", None) if request is not None and hasattr(request, "state") else None
+        key = scope[1] if isinstance(scope, tuple) and scope[0] == "key" else None
+        owner = str(run.get("actor") or "")
+        key_id = (key or {}).get("id") or (owner[7:] if owner.startswith("apikey:") else None)
+        code = http_status
+        if code is None:
+            code = 200 if run.get("status") == "success" else int(run["errorCode"]) if str(run.get("errorCode") or "").isdigit() else 500
+        get_records().add_api_call({
+            "apiKeyId": key_id, "caller": (key or {}).get("name") or owner or "?", "callerType": run.get("actorType") or "?",
+            "channel": run.get("channel") or "api", "method": request.method if request is not None else None,
+            "endpoint": endpoint or (request.url.path if request is not None else f"/api/v1/jobs/{run.get('id')}"),
+            "reportId": run.get("reportId"), "folder": run.get("folder"), "runId": run.get("id"), "format": run.get("format"),
+            "httpStatus": code, "rowsReturned": run.get("rowCount"),
+            "bytesReturned": bytes_returned if bytes_returned is not None else run.get("outputBytes"),
+            "durationMs": run.get("durationMs"), "clientIp": client_address(request) if request is not None else None,
+        })
+    except Exception:  # noqa: BLE001 - the data was already sent; the problem goes to the service log
+        LOG.exception("The API call record could not be saved")
+
+
+def log_download(ctx: SimpleNamespace, request: Request, run: dict[str, Any], size: int | None) -> None:
+    """GET /api/v1/jobs/{id}/file: the file of a background API run leaves the service (an api_calls row)."""
+    stored = get_records().run(run["id"]) or {"id": run["id"], "actor": run.get("owner"), "actorType": "api-key", "channel": "api"}
+    _api_call({**stored, "durationMs": None}, request, http_status=200, bytes_returned=size)
+
+
 def log_run_from_audit(ctx: SimpleNamespace, audit: dict[str, Any], *, channel: str = "", actor: str = "", actor_type: str = "",
                        definition: Any = None, body: bytes | None = None, request: Request | None = None,
-                       required: bool = False) -> dict[str, Any] | None:
+                       required: bool = False, run_id: str = "") -> dict[str, Any] | None:
     """The older audit dictionaries (requestedAt, access, connectionId, …) as a run record."""
     access = str(audit.get("access", ""))
     if not channel or not actor_type:
@@ -77,7 +117,7 @@ def log_run_from_audit(ctx: SimpleNamespace, audit: dict[str, Any], *, channel: 
                        output_format=str(audit.get("format") or ""), parameters=audit.get("parameters") or {},
                        error_code=str(audit.get("errorCode") or ""), error_message=str(audit.get("errorMessage") or ""),
                        row_count=audit.get("rowCount"), body=body, duration_ms=audit.get("durationMs"), request=request,
-                       required=required, on_behalf_of=str(audit.get("GeneratedBy") or ""))
+                       required=required, on_behalf_of=str(audit.get("GeneratedBy") or ""), run_id=run_id)
 
 
 def caller_identity(ctx: SimpleNamespace, request: Request | None) -> tuple[str, str]:

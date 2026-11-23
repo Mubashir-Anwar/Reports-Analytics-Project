@@ -134,6 +134,11 @@ class _FileDocuments:
         path.unlink()
         return 1
 
+    def has_lines(self, prefix: str) -> bool:
+        """Is there any append-only log below this prefix (one listing, not one read per log)?"""
+        folder = self.path(prefix)
+        return folder.is_dir() and any(item.is_file() for item in folder.rglob("*.jsonl"))
+
     def lines(self, key: str) -> Iterable[str]:
         path = self.path(key)
         if not path.is_file():
@@ -264,6 +269,9 @@ class _PostgresDocuments:
     def delete_lines(self, key: str) -> int:
         self._execute("DELETE FROM reporting_lines WHERE key = %s", (_clean_key(key),))
         return 1
+
+    def has_lines(self, prefix: str) -> bool:
+        return bool(self._execute("SELECT 1 FROM reporting_lines WHERE key LIKE %s LIMIT 1", (_like(_prefix(prefix)) + "%",), "one"))
 
     def lines(self, key: str) -> Iterable[str]:
         rows = self._execute("SELECT line FROM (SELECT id, line FROM reporting_lines WHERE key = %s ORDER BY id DESC LIMIT 5000) AS t ORDER BY id",

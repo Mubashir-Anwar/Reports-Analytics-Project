@@ -113,5 +113,11 @@ def upgrade_storage() -> dict[str, int]:
     from backend.app.db.people import upgrade_people  # noqa: PLC0415
     counts.update({f"people_{name}": value for name, value in upgrade_people(store).items()})
     from backend.app.security.secrets import upgrade_secrets  # noqa: PLC0415
-    counts["secrets"] = upgrade_secrets()                   # reports, drafts, folders (and adapters on a database) -> v2 tables
+    counts["secrets"] = upgrade_secrets()
+    from backend.app.db.schedules import upgrade_schedules  # noqa: PLC0415
+    counts["schedules_v2"] = upgrade_schedules(store)
+    from backend.app.jobs.store import upgrade_runs  # noqa: PLC0415
+    counts["runs_v2"] = upgrade_runs(store)
+    from backend.app.services.request_log import RequestLog  # noqa: PLC0415
+    counts["requests_v2"] = RequestLog.upgrade()                   # reports, drafts, folders (and adapters on a database) -> v2 tables
     return counts

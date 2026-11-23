@@ -1,4 +1,5 @@
-"""MongoDB backend: the same records as collections (rs_report_runs, rs_audit_events) with validators and indexes.
+"""MongoDB backend: the same records as collections (runs, audit_events) with validators and indexes.
+Version 1 used rs_report_runs and rs_audit_events: they are copied once and kept.
 
 The database comes from the URL path: mongodb://user:pw@host:27017/reporting (Atlas: mongodb+srv://…/db).
 Each record is one document; a standalone server is enough (no multi-document transactions are needed:
@@ -57,24 +58,48 @@ class MongoRecords(RecordsBackend):
     def __init__(self, url: str):
         self.url = url
         self.db = database_for(url)
-        self.runs_collection = self.db["rs_report_runs"]
-        self.events_collection = self.db["rs_audit_events"]
+        self.runs_collection = self.db["runs"]
+        self.events_collection = self.db["audit_events"]
+        self.collections = {"runs": self.runs_collection, "events": self.events_collection,
+                            "requests": self.db["request_log"], "api_calls": self.db["api_calls"]}
 
     def ensure_schema(self) -> None:
-        for name, fields in (("rs_report_runs", model.RUN_FIELDS), ("rs_audit_events", model.AUDIT_FIELDS)):
+        for name, fields in (("runs", model.RUN_FIELDS), ("audit_events", model.AUDIT_FIELDS),
+                             ("request_log", model.REQUEST_FIELDS), ("api_calls", model.API_CALL_FIELDS)):
             try:
                 self.db.create_collection(name, validator=_validator(fields), validationLevel="strict")
             except CollectionInvalid:                       # already there: bring the validator up to date
                 self.db.command("collMod", name, validator=_validator(fields), validationLevel="strict")
         runs, events = self.runs_collection, self.events_collection
-        runs.create_index([("orgId", ASCENDING), ("startedAt", DESCENDING)], name="ix_rs_runs_started")
-        runs.create_index([("reportId", ASCENDING), ("startedAt", DESCENDING)], name="ix_rs_runs_report")
-        runs.create_index([("actor", ASCENDING), ("startedAt", DESCENDING)], name="ix_rs_runs_actor")
-        runs.create_index([("status", ASCENDING), ("startedAt", DESCENDING)], name="ix_rs_runs_status")
-        events.create_index([("seq", ASCENDING)], name="uq_rs_audit_seq", unique=True)
-        events.create_index([("orgId", ASCENDING), ("at", DESCENDING)], name="ix_rs_audit_at")
-        events.create_index([("action", ASCENDING), ("at", DESCENDING)], name="ix_rs_audit_action")
-        events.create_index([("actor", ASCENDING), ("at", DESCENDING)], name="ix_rs_audit_actor")
+        runs.create_index([("orgId", ASCENDING), ("startedAt", DESCENDING)], name="ix_runs_started")
+        runs.create_index([("reportId", ASCENDING), ("startedAt", DESCENDING)], name="ix_runs_report")
+        runs.create_index([("actor", ASCENDING), ("startedAt", DESCENDING)], name="ix_runs_actor")
+        runs.create_index([("status", ASCENDING), ("startedAt", DESCENDING)], name="ix_runs_status")
+        runs.create_index([("runType", ASCENDING), ("startedAt", DESCENDING)], name="ix_runs_type")
+        runs.create_index([("scheduleId", ASCENDING), ("startedAt", DESCENDING)], name="ix_runs_schedule")
+        events.create_index([("seq", ASCENDING)], name="uq_audit_events_seq", unique=True)
+        events.create_index([("orgId", ASCENDING), ("at", DESCENDING)], name="ix_audit_events_at")
+        events.create_index([("action", ASCENDING), ("at", DESCENDING)], name="ix_audit_events_action")
+        events.create_index([("actor", ASCENDING), ("at", DESCENDING)], name="ix_audit_events_actor")
+        events.create_index([("targetType", ASCENDING), ("targetId", ASCENDING)], name="ix_audit_events_target")
+        requests, calls = self.collections["requests"], self.collections["api_calls"]
+        requests.create_index([("orgId", ASCENDING), ("requestedAt", DESCENDING)], name="ix_request_log_at")
+        requests.create_index([("httpStatus", ASCENDING), ("requestedAt", DESCENDING)], name="ix_request_log_status")
+        requests.create_index([("caller", ASCENDING), ("requestedAt", DESCENDING)], name="ix_request_log_caller")
+        calls.create_index([("orgId", ASCENDING), ("calledAt", DESCENDING)], name="ix_api_calls_at")
+        calls.create_index([("apiKeyId", ASCENDING), ("calledAt", DESCENDING)], name="ix_api_calls_key")
+        calls.create_index([("reportId", ASCENDING), ("calledAt", DESCENDING)], name="ix_api_calls_report")
+        calls.create_index([("runId", ASCENDING)], name="ix_api_calls_run")
+        for old, new in (("rs_report_runs", runs), ("rs_audit_events", events)):     # version 1: copied once, kept
+            if old in self.db.list_collection_names() and new.estimated_document_count() == 0:
+                batch: list[dict[str, Any]] = []
+                for doc in self.db[old].find().sort("_id", ASCENDING):
+                    batch.append(doc)
+                    if len(batch) == 1000:
+                        new.insert_many(batch, ordered=False)
+                        batch = []
+                if batch:
+                    new.insert_many(batch, ordered=False)
         self.db["rs_schema_version"].update_one({"_id": "records"}, {"$max": {"version": model.SCHEMA_VERSION},
                                                                       "$set": {"appliedAt": model.now()}}, upsert=True)
 
@@ -109,9 +134,25 @@ class MongoRecords(RecordsBackend):
     def _insert_run(self, run: dict[str, Any]) -> None:
         self.runs_collection.insert_one(self._to_doc(run, model.RUN_FIELDS))
 
+    def _upsert_run(self, run: dict[str, Any]) -> None:
+        doc = self._to_doc(run, model.RUN_FIELDS)
+        self.runs_collection.replace_one({"_id": doc["_id"]}, doc, upsert=True)
+
+    def _delete_run(self, run_id: str) -> None:
+        self.runs_collection.delete_one({"_id": run_id})
+
+    def _insert_many(self, kind: str, records: list[dict[str, Any]]) -> None:
+        fields = model.RECORD_KINDS[kind][0]
+        self.collections[kind].insert_many([self._to_doc(record, fields) for record in records], ordered=False)
+
+    def _delete_before(self, kind: str, cutoff) -> int:
+        return self.collections[kind].delete_many({model.RECORD_KINDS[kind][1]: {"$lt": cutoff}}).deleted_count
+
     def _find(self, kind, filters, since, until, limit, newest_first=True):
-        collection, fields, time_field = ((self.runs_collection, model.RUN_FIELDS, "startedAt") if kind == "runs"
-                                          else (self.events_collection, model.AUDIT_FIELDS, "at"))
+        fields, time_field = model.RECORD_KINDS[kind]
+        filters = {("_id" if key == "id" else key): (int(value) if fields.get(key, ("",))[0] == "int" else value)
+                   for key, value in filters.items()}
+        collection = self.collections[kind]
         query: dict[str, Any] = dict(filters)
         if since or until:
             query[time_field] = {**({"$gte": since} if since else {}), **({"$lt": until} if until else {})}

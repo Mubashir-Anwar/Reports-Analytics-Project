@@ -161,3 +161,23 @@ def test_failed_runs_and_restart_recovery(client, monkeypatch):
     store.save_run({**failed, "id": schedule.new_id("run"), "status": "running", "error": ""})
     runner._recover()
     assert all(r["status"] != "running" for r in store.load_runs())
+
+
+def test_a_background_run_is_one_row_of_runs(client):
+    """Schema v2: the job and its run log are the same row; its file is in run_files; deleting it keeps the log row."""
+    from backend.app.db import entities as ent
+    from backend.app.db import get_records
+    runner = client.app.state.ctx.job_runner
+    runner.inline = True
+    assert login(client, "admin", ADMIN).status_code == 200
+    run_id = client.post("/api/server/reports/R1/background", json={"format": "csv", "parameters": {}}).json()["run"]["id"]
+    rows = [row for row in get_records().runs(reportId="R1") if row["startedAt"]]
+    assert [row["id"] for row in rows] == [run_id]                               # one row, not two
+    row = rows[0]
+    assert row["runType"] == "background" and row["status"] == "success" and row["queuedAt"] and row["outputSha256"]
+    assert row["channel"] == "server" and row["actor"] == "admin" and row["durationMs"] is not None
+    stored = ent.get_entities().get(ent.RUN_FILES, run_id)
+    assert stored["storage"] == "store" and stored["location"] == f"jobs/output/{run_id}.csv" and stored["sizeBytes"] > 0
+    assert client.request("DELETE", f"/api/server/runs/{run_id}", json={}).status_code == 200
+    assert client.get("/api/server/runs").json()["runs"] == [] and ent.get_entities().get(ent.RUN_FILES, run_id) is None
+    assert get_records().run(run_id)["removedAt"]                               # who ran what stays in the log

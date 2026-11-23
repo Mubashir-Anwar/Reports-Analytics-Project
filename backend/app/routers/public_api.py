@@ -220,11 +220,13 @@ def register(app: FastAPI, ctx: SimpleNamespace) -> None:
         on_disk = job_store.output_path(run)
         if on_disk is not None:                    # a big export: sent from disk in pieces, never read into memory
             stamp = re.sub(r"\D", "", str(run.get("finishedAt") or ""))[:14]
+            ctx.log_download(request, run, on_disk.stat().st_size)
             return FileResponse(on_disk, media_type=MEDIA[run["format"]], filename=f"{run['reportId']}-{stamp}.{run['format']}")
         body = job_store.read_output(run)
         if body is None:
             raise HTTPException(status_code=410, detail="The file is no longer kept")
         stamp = re.sub(r"\D", "", str(run.get("finishedAt") or ""))[:14]
+        ctx.log_download(request, run, len(body))
         return Response(body, media_type=MEDIA[run["format"]],
                         headers={"Content-Disposition": f'attachment; filename="{run["reportId"]}-{stamp}.{run["format"]}"'})
 

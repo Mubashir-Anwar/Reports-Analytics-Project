@@ -167,7 +167,7 @@ def test_audit_chain(backend):
 def tamper(backend, seq, how):
     """Change or remove one stored event behind the service's back."""
     if backend == "files":
-        path = Path(os.environ["REPORTING_DATA_DIR"]) / "records" / "audit-events.jsonl"
+        path = Path(os.environ["REPORTING_DATA_DIR"]) / "records" / "audit_events.jsonl"
         lines = path.read_text(encoding="utf-8").splitlines()
         kept = []
         for line in lines:
@@ -583,3 +583,165 @@ def test_secrets_table(backend, monkeypatch):
     monkeypatch.setenv("REPORTING_SECRETS_KEY", "another-wrong-passphrase-0123456789abcdef")
     with pytest.raises(RuntimeError, match="wrong key"):
         secret_store._load_private_secrets()
+
+
+def test_schedules_and_targets_tables(backend):
+    """A schedule is one row; e-mail, SFTP and API destinations are rows of schedule_targets; older rows move once."""
+    from backend.app.db import entities as ent
+    from backend.app.db import people
+    from backend.app.db import schedules as tables
+    from backend.app.jobs import store as job_store
+    people.save_users([{"username": "boss", "rights": ["admin"], "email": "boss@example.com"}])
+    old = {"id": "job-20260101000000-0123abcd", "label": "Daily", "reportId": "OLD", "folder": "Sales", "format": "pdf",
+           "parameters": {"Branch": "LHR"}, "recurrence": {"type": "daily", "time": "08:00"}, "timezone": "Asia/Karachi",
+           "enabled": True, "keep": 5, "owner": "boss", "createdAt": "2026-01-01T00:00:00+00:00", "nextRunAt": "2026-01-02T03:00:00+00:00",
+           "lastRun": {"runId": "run-20260101080000-0123abcd", "status": "success"},
+           "email": {"to": ["a@example.com"], "subject": "Hi", "message": "", "attach": True},
+           "deliver": [{"id": "t1", "type": "sftp", "label": "Bank", "host": "sftp.bank.com", "port": 22, "username": "u", "folder": "/in",
+                        "fileName": "{reportId}.{format}", "enabled": True, "onlyOnSuccess": True},
+                       {"id": "t2", "type": "http", "label": "ERP", "url": "https://erp.example.com/in", "fileName": "x.{format}", "enabled": False}]}
+    ent.get_entities().put(ent.JOB_SCHEDULES, old)                                  # an older installation
+    store = store_module.get_store()
+    assert tables.upgrade_schedules(store) == 1 and tables.upgrade_schedules(store) == 0
+    row = ent.get_entities().get(ent.SCHEDULES, old["id"])
+    assert row["repeatType"] == "daily" and row["repeatRule"] == {"time": "08:00"} and row["lastRunId"] == "run-20260101080000-0123abcd"
+    assert row["ownerId"] == people.find_user_row("boss")["userId"]
+    targets = {item["targetId"]: item for item in ent.get_entities().find(ent.SCHEDULE_TARGETS, {"scheduleId": old["id"]})}
+    assert {k: v["targetType"] for k, v in targets.items()} == {"email": "email", "t1": "sftp", "t2": "api"}
+    assert targets["t1"]["settings"]["host"] == "sftp.bank.com" and "password" not in str(targets)
+    job = job_store.load_schedules()[0]
+    assert job["email"] == old["email"] and job["deliver"] == old["deliver"] and job["folder"] == "Sales"
+    assert job["recurrence"] == old["recurrence"] and job["lastRun"] == old["lastRun"] and job["keep"] == 5
+    assert model.parse_time(job["nextRunAt"]) == model.parse_time(old["nextRunAt"])
+    job["deliver"] = job["deliver"][:1]                                             # the API target removed
+    job_store.save_schedules([job])
+    assert {item["targetId"] for item in ent.get_entities().find(ent.SCHEDULE_TARGETS)} == {"email", "t1"}
+    job_store.save_schedules([])                                                    # the schedule deleted: its targets go too
+    assert not ent.get_entities().find(ent.SCHEDULES) and not ent.get_entities().find(ent.SCHEDULE_TARGETS)
+
+
+def test_runs_files_deliveries_and_the_upgrade_of_older_runs(backend):
+    """rs_job_runs rows become rows of runs with run_files and run_deliveries, once; a newer save updates the same row."""
+    from backend.app.db import entities as ent
+    from backend.app.jobs import store as job_store
+    old = {"id": "run-20260101080000-0123abcd", "jobId": "job-20260101000000-0123abcd", "jobLabel": "Daily", "kind": "scheduled",
+           "reportId": "OLD", "title": "Old report", "format": "pdf", "parameters": {"Branch": "LHR"}, "owner": "boss",
+           "status": "success", "queuedAt": "2026-01-01T08:00:00+00:00", "startedAt": "2026-01-01T08:00:01+00:00",
+           "finishedAt": "2026-01-01T08:00:03+00:00", "rowCount": 12, "error": "", "file": "run-20260101080000-0123abcd.pdf",
+           "size": 1234, "email": "sent to 2",
+           "delivered": [{"id": "t1", "type": "sftp", "label": "Bank", "ok": True, "result": "uploaded", "file": "OLD.pdf"},
+                         {"id": "t2", "type": "http", "label": "ERP", "ok": False, "skipped": True, "result": "not sent"}]}
+    ent.get_entities().put(ent.JOB_RUNS, old)
+    store = store_module.get_store()
+    assert job_store.upgrade_runs(store) == 1 and job_store.upgrade_runs(store) == 0
+    row = db_package.get_records().run(old["id"])
+    assert row["runType"] == "scheduled" and row["scheduleId"] == old["jobId"] and row["channel"] == "schedule" and row["rowCount"] == 12
+    sends = {item["targetId"]: item for item in ent.get_entities().find(ent.RUN_DELIVERIES, {"runId": old["id"]})}
+    assert {k: (v["targetType"], v["status"]) for k, v in sends.items()} == {"email": ("email", "sent"), "t1": ("sftp", "sent"),
+                                                                          "t2": ("api", "skipped")}
+    run = job_store.load_runs()[0]
+    for name in ("id", "jobId", "jobLabel", "kind", "reportId", "title", "format", "parameters", "owner", "status", "rowCount",
+                 "file", "size", "email", "delivered"):
+        assert run[name] == old[name], name
+    job_store.save_run({**run, "status": "failed", "error": "later"})              # the same row, updated
+    assert [item["id"] for item in job_store.load_runs()] == [old["id"]] and job_store.load_runs()[0]["error"] == "later"
+
+
+def test_version_1_run_log_and_audit_trail_move_to_runs_and_audit_events(backend):
+    """A version 1 database (rs_report_runs, rs_audit_events): copied once into runs and audit_events, chain still intact."""
+    if backend == "postgresql":
+        pytest.skip("covered by SQLite")
+    records = db_package.get_records()
+    records.add_run(run(reportId="NEW"))
+    records.audit("report.published", actor="ali", target="Sales/R1")
+    event = records.events()[0]
+    assert event["targetType"] == "report" and event["targetId"] == "Sales/R1"
+    assert records.verify_chain()["ok"]
+    if backend == "files":
+        from pathlib import Path as _P
+        folder = _P(os.environ["REPORTING_DATA_DIR"]) / "records"
+        assert (folder / "runs.jsonl").is_file() and (folder / "audit_events.jsonl").is_file()
+
+
+@pytest.mark.parametrize("kind", ["files", "sqlite", "mongodb"])
+def test_version_1_records_are_copied_once(kind, tmp_path):
+    """rs_report_runs / rs_audit_events (report-runs.jsonl / audit-events.jsonl) -> runs / audit_events, old ones kept."""
+    from backend.app.db import model as m
+    old_run = m.clean({"id": m.new_id(), "orgId": "default", "startedAt": m.now(), "channel": "runner", "actor": "ali",
+                       "actorType": "user", "status": "success", "reportId": "OLD"}, m.RUN_FIELDS_V1)
+    first = {"id": m.new_id(), "seq": 1, "orgId": "default", "at": m.now(), "actor": "ali", "actorType": "user",
+             "action": "auth.login", "target": None, "details": None, "clientIp": None, "prevHash": None, "hash": "-"}
+    first = m.clean(first, m.AUDIT_FIELDS_V1)
+    first["hash"] = m.event_hash(first)                     # hashed like version 1 (no target type)
+    if kind == "files":
+        from backend.app.db.files import FileRecords
+        folder = tmp_path / "records"
+        folder.mkdir()
+        (folder / "report-runs.jsonl").write_text(json.dumps(old_run) + "\n", encoding="utf-8")
+        (folder / "audit-events.jsonl").write_text(json.dumps(first) + "\n", encoding="utf-8")
+        (folder / "schema-version.json").write_text('{"version": 1}', encoding="utf-8")
+        records = FileRecords(tmp_path)
+    elif kind == "sqlite":
+        import sqlalchemy as sa
+
+        from backend.app.db import sql
+        url = f"sqlite:///{(tmp_path / 'v1.db').as_posix()}"
+        engine = sql.engine_for(url)
+        sql.apply_migrations(engine, "records", sql.MIGRATIONS[:1])          # a version 1 database
+        with engine.begin() as connection:
+            connection.execute(sql.legacy_runs.insert().values(**sql.SqlRecords._to_row(old_run, m.RUN_FIELDS_V1)))
+            connection.execute(sql.legacy_events.insert().values(**sql.SqlRecords._to_row(first, m.AUDIT_FIELDS_V1)))
+        records = sql.SqlRecords(url)
+        assert records.schema_version() == 1
+        _ = sa
+    else:
+        if not MONGO_URL:
+            pytest.skip("set MONGO_TEST_URL to test the MongoDB backend")
+        from pymongo import MongoClient
+
+        from backend.app.db.mongo import MongoRecords
+        name = f"rs_test_{secrets.token_hex(4)}"
+        database = MongoClient(MONGO_URL)[name]
+        database["rs_report_runs"].insert_one(MongoRecords._to_doc(old_run, m.RUN_FIELDS_V1))
+        database["rs_audit_events"].insert_one(MongoRecords._to_doc(first, m.AUDIT_FIELDS_V1))
+        records = MongoRecords(f"{MONGO_URL.rstrip('/')}/{name}")
+    try:
+        records.ensure_schema()
+        records.ensure_schema()                              # twice: nothing is copied again
+        assert [item["id"] for item in records.runs()] == [old_run["id"]] and records.schema_version() == m.SCHEMA_VERSION
+        records.audit("report.deleted", actor="ali", target="Sales/OLD")
+        assert records.verify_chain() == {"ok": True, "events": 2, "problems": []}
+        assert records.events(targetType="report")[0]["targetId"] == "Sales/OLD"
+        if kind == "files":
+            assert len((tmp_path / "records" / "audit-events.jsonl").read_text().splitlines()) == 1     # the old file is kept
+    finally:
+        if kind == "mongodb":
+            MongoClient(MONGO_URL).drop_database(name)
+
+
+def test_request_log_and_api_calls_tables(backend):
+    """request_log and api_calls on every backend: written, filtered by time and fields, removed by age."""
+    from backend.app.services.request_log import RequestLog, hour_key
+    records = db_package.get_records()
+    now = model.now()
+    old = now - timedelta(days=40)
+    assert records.add_requests([
+        {"requestedAt": now, "method": "GET", "path": "/api/server/repository", "queryParamNames": ["folder"], "httpStatus": 200,
+         "durationMs": 12, "caller": "ali", "callerType": "user", "clientIp": "10.0.0.5"},
+        {"requestedAt": now, "method": "GET", "path": "/nope", "httpStatus": 404, "caller": "anonymous"},
+        {"requestedAt": old, "method": "GET", "path": "/old", "httpStatus": 200}]) == 3
+    assert [r["path"] for r in records.requests(httpStatus=404)] == ["/nope"]
+    assert {r["path"] for r in records.requests(since=now - timedelta(days=1))} == {"/api/server/repository", "/nope"}
+    records.add_api_call({"apiKeyId": "0123456789ab", "caller": "Portal", "callerType": "api-key", "channel": "api",
+                          "endpoint": "/api/v1/reports/R1/run", "reportId": "R1", "rowsReturned": 3, "bytesReturned": 99})
+    assert records.api_calls(apiKeyId="0123456789ab")[0]["rowsReturned"] == 3 and records.api_calls(reportId="X") == []
+    assert records.remove_before("requests", now - timedelta(days=30)) >= 1
+    assert "/old" not in {r["path"] for r in records.requests(limit=100)}
+
+    store = store_module.get_store()                                 # version 1: documents per hour
+    day = now.date().isoformat()
+    store.append_line(hour_key(day, 3), json.dumps({"at": f"{day}T03:04:05.000+00:00", "method": "POST", "path": "/v1-line",
+                                                     "query": [], "status": 201, "durationMs": 3, "actor": "ali", "actorType": "user"}))
+    assert RequestLog.upgrade() == 1 and RequestLog.upgrade() == 0
+    shown = RequestLog.read(day)
+    assert "/v1-line" in [r["path"] for r in shown["records"]] and shown["totals"]["requests"] == 3

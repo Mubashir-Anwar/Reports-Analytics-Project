@@ -262,13 +262,52 @@ SECRETS = Entity("v2_secrets", {
     "updatedBy": ("str", 128, False), "updatedAt": ("time", None, False),
 }, key=("secretId",), indexes=(("ownerType", "ownerId"),), table_name="secrets")
 
+# ------------------------------------------------------------------ schema v2, step 4a: the scheduler
+# When a server report runs by itself, and where its file goes (e-mail, SFTP, an API, a network folder).
+SCHEDULES = Entity("v2_schedules", {
+    "scheduleId": ("str", 40, True), "orgId": ("str", 64, True), "name": ("str", 120, False),
+    "serverReportId": ("str", 32, False),    # the server report (empty when it is no longer published)
+    "reportCode": ("str", 80, True), "ownerId": ("str", 32, False), "ownerName": ("str", 128, True),
+    "outputFormat": ("str", 8, True), "parameters": ("json", None, False),
+    "repeatType": ("str", 16, True),         # once / minutes / daily / weekly / monthly
+    "repeatRule": ("json", None, False),     # time, every, weekdays, day, at
+    "timeZone": ("str", 64, False), "isEnabled": ("bool", None, False), "keepLastRuns": ("int", None, False),
+    "nextRunAt": ("time", None, False), "lastRunId": ("str", 40, False),
+    "createdAt": ("time", None, False), "updatedAt": ("time", None, False),
+}, key=("scheduleId",), indexes=(("ownerName",), ("nextRunAt",), ("serverReportId",)), table_name="schedules")
+
+SCHEDULE_TARGETS = Entity("v2_schedule_targets", {
+    "scheduleId": ("str", 40, True), "targetId": ("str", 16, True), "orgId": ("str", 64, True), "position": ("int", None, True),
+    "targetType": ("str", 16, True),         # email / sftp / api / folder
+    "label": ("str", 80, False),
+    "settings": ("json", None, False),       # recipients, host, port, path, URL… (never a password: see secrets)
+    "fileNamePattern": ("str", 160, False), "isEnabled": ("bool", None, False),
+}, key=("scheduleId", "targetId"), table_name="schedule_targets")
+
+# ------------------------------------------------------------------ schema v2, step 4b: what a run made and sent
+# (the runs themselves are in the records part of the system database: db/model.py RUN_FIELDS, table runs)
+RUN_FILES = Entity("v2_run_files", {
+    "runId": ("str", 40, True), "orgId": ("str", 64, True),
+    "storage": ("str", 16, True),            # store (the system storage: files, SQL or MongoDB) / disk (a big export)
+    "location": ("str", 500, True),          # jobs/output/<file> or the file's path on disk
+    "fileName": ("str", 160, True), "sizeBytes": ("int", None, False), "sha256": ("str", 64, False),
+    "createdAt": ("time", None, False), "expiresAt": ("time", None, False),
+}, key=("runId",), table_name="run_files")
+
+RUN_DELIVERIES = Entity("v2_run_deliveries", {
+    "deliveryId": ("str", 64, True), "orgId": ("str", 64, True), "runId": ("str", 40, True),
+    "targetId": ("str", 16, True), "targetType": ("str", 16, True),    # email / sftp / api / folder
+    "status": ("str", 16, True),             # sent / failed / skipped
+    "message": ("str", 500, False), "bytesSent": ("int", None, False), "finishedAt": ("time", None, False),
+}, key=("deliveryId",), indexes=(("runId",),), table_name="run_deliveries")
+
 V2_STEP2 = (USERS_V2, USER_RIGHTS, USER_GROUPS, USER_GROUP_MEMBERS, FOLDER_ACCESS, PASSWORD_RESETS,
             API_KEYS_V2, API_KEY_FOLDERS, API_KEY_NETWORKS)
 
 ENTITIES = (USERS, API_KEYS, FOLDER_PERMISSIONS, REPORT_VERSIONS, REPORT_HISTORY, JOB_SCHEDULES, JOB_RUNS,
             REPORTS, DRAFTS, FOLDERS, DATA_SOURCES,
             ANALYTICS_DATASETS, ANALYTICS_RELATIONSHIPS, ANALYTICS_DASHBOARDS, ANALYTICS_REFRESHES, ANALYTICS_QUERIES,
-            *V2_STEP1, *V2_STEP2, SECRETS)
+            *V2_STEP1, *V2_STEP2, SECRETS, SCHEDULES, SCHEDULE_TARGETS, RUN_FILES, RUN_DELIVERIES)
 
 
 # ------------------------------------------------------------------ record <-> stored values
@@ -584,7 +623,7 @@ class MongoEntities(EntityBackend):
             collection = self.db[entity.table]
             for fields in ((entity.key,) if len(entity.key) > 1 else ()) + entity.indexes:
                 collection.create_index([(name, ASCENDING) for name in fields], name=f"ix_{entity.table}_{'_'.join(fields)}"[:120])
-        self.db["rs_schema_version"].update_one({"_id": "entities"}, {"$max": {"version": 8}, "$set": {"appliedAt": model.now()}}, upsert=True)
+        self.db["rs_schema_version"].update_one({"_id": "entities"}, {"$max": {"version": 10}, "$set": {"appliedAt": model.now()}}, upsert=True)
 
     @staticmethod
     def _id(key: tuple) -> str:

@@ -57,22 +57,77 @@ def _columns(fields: dict[str, tuple[str, int | None, bool]], primary: str) -> l
     return columns
 
 
-report_runs = sa.Table("rs_report_runs", metadata, *_columns(model.RUN_FIELDS, "id"),
+# version 1 tables (kept, never written again: the previous version of the service can still read them)
+legacy_runs = sa.Table("rs_report_runs", metadata, *_columns(model.RUN_FIELDS_V1, "id"),
                        sa.Index("ix_rs_runs_started", "org_id", "started_at"),
                        sa.Index("ix_rs_runs_report", "report_id", "started_at"),
                        sa.Index("ix_rs_runs_actor", "actor", "started_at"),
                        sa.Index("ix_rs_runs_status", "status", "started_at"))
 
-audit_events = sa.Table("rs_audit_events", metadata, *_columns(model.AUDIT_FIELDS, "id"),
-                        sa.UniqueConstraint("seq", name="uq_rs_audit_seq"),
-                        sa.Index("ix_rs_audit_at", "org_id", "at"),
-                        sa.Index("ix_rs_audit_action", "action", "at"),
-                        sa.Index("ix_rs_audit_actor", "actor", "at"))
+legacy_events = sa.Table("rs_audit_events", metadata, *_columns(model.AUDIT_FIELDS_V1, "id"),
+                         sa.UniqueConstraint("seq", name="uq_rs_audit_seq"),
+                         sa.Index("ix_rs_audit_at", "org_id", "at"),
+                         sa.Index("ix_rs_audit_action", "action", "at"),
+                         sa.Index("ix_rs_audit_actor", "actor", "at"))
+
+# schema v2: runs and audit_events (no prefix: the service has its own database)
+report_runs = sa.Table("runs", metadata, *_columns(model.RUN_FIELDS, "id"),
+                       sa.Index("ix_runs_started", "org_id", "started_at"),
+                       sa.Index("ix_runs_report", "report_id", "started_at"),
+                       sa.Index("ix_runs_actor", "actor", "started_at"),
+                       sa.Index("ix_runs_status", "status", "started_at"),
+                       sa.Index("ix_runs_type", "run_type", "started_at"),
+                       sa.Index("ix_runs_schedule", "schedule_id", "started_at"))
+
+audit_events = sa.Table("audit_events", metadata, *_columns(model.AUDIT_FIELDS, "id"),
+                        sa.UniqueConstraint("seq", name="uq_audit_events_seq"),
+                        sa.Index("ix_audit_events_at", "org_id", "at"),
+                        sa.Index("ix_audit_events_action", "action", "at"),
+                        sa.Index("ix_audit_events_actor", "actor", "at"),
+                        sa.Index("ix_audit_events_target", "target_type", "target_id"))
+
+
+request_log = sa.Table("request_log", metadata, *_columns(model.REQUEST_FIELDS, "id"),
+                        sa.Index("ix_request_log_at", "org_id", "requested_at"),
+                        sa.Index("ix_request_log_status", "http_status", "requested_at"),
+                        sa.Index("ix_request_log_caller", "caller", "requested_at"))
+
+api_calls = sa.Table("api_calls", metadata, *_columns(model.API_CALL_FIELDS, "id"),
+                     sa.Index("ix_api_calls_at", "org_id", "called_at"),
+                     sa.Index("ix_api_calls_key", "api_key_id", "called_at"),
+                     sa.Index("ix_api_calls_report", "report_id", "called_at"),
+                     sa.Index("ix_api_calls_run", "run_id"))
+
+KIND_TABLES = {"runs": report_runs, "events": audit_events, "requests": request_log, "api_calls": api_calls}
+
+
+def _copy_rows(connection: Any, source: sa.Table, target: sa.Table, batch: int = 1000) -> None:
+    """Every row of a version 1 table into its v2 table (new columns empty), in batches."""
+    if connection.execute(sa.select(sa.func.count()).select_from(target)).scalar():
+        return
+    names = [column.name for column in source.columns]
+    order = source.c.seq if "seq" in source.c else source.c.id
+    offset = 0
+    while True:
+        rows = connection.execute(sa.select(source).order_by(order).offset(offset).limit(batch)).fetchall()
+        if not rows:
+            break
+        connection.execute(target.insert(), [{name: row._mapping[name] for name in names} for row in rows])
+        offset += len(rows)
+
+
+def _schema_v2_records(connection: Any) -> None:
+    metadata.create_all(connection, tables=[legacy_runs, legacy_events, report_runs, audit_events], checkfirst=True)
+    _copy_rows(connection, legacy_runs, report_runs)
+    _copy_rows(connection, legacy_events, audit_events)
 
 # Numbered schema steps for the records component. Never change a step that has shipped; add a new one.
 MIGRATIONS: list[tuple[int, str, Any]] = [
     (1, "report runs and audit events", lambda connection: metadata.create_all(
-        connection, tables=[report_runs, audit_events], checkfirst=True)),
+        connection, tables=[legacy_runs, legacy_events], checkfirst=True)),
+    (2, "schema v2: runs and audit_events (copied from rs_report_runs and rs_audit_events)", _schema_v2_records),
+    (3, "schema v2: request_log and api_calls", lambda connection: metadata.create_all(
+        connection, tables=[request_log, api_calls], checkfirst=True)),
 ]
 
 def entity_table(entity: Any) -> sa.Table:
@@ -121,6 +176,8 @@ ENTITY_MIGRATIONS: list[tuple[int, str, Any]] = [
     (7, "schema v2: users, user_rights, user_groups, user_group_members, folder_permissions, password_resets, api_keys",
      _create_entities),
     (8, "schema v2: secrets", _create_entities),
+    (9, "schema v2: schedules, schedule_targets", _create_entities),
+    (10, "schema v2: run_files, run_deliveries", _create_entities),
 ]
 
 _ENGINES: dict[str, sa.Engine] = {}
@@ -216,12 +273,33 @@ class SqlRecords(RecordsBackend):
         with self.engine.begin() as connection:
             connection.execute(report_runs.insert().values(**self._to_row(run, model.RUN_FIELDS)))
 
+    def _upsert_run(self, run: dict[str, Any]) -> None:
+        values = self._to_row(run, model.RUN_FIELDS)
+        with self.engine.begin() as connection:
+            if not connection.execute(report_runs.update().where(report_runs.c.id == run["id"]).values(**values)).rowcount:
+                connection.execute(report_runs.insert().values(**values))
+
+    def _delete_run(self, run_id: str) -> None:
+        with self.engine.begin() as connection:
+            connection.execute(report_runs.delete().where(report_runs.c.id == run_id))
+
+    def _insert_many(self, kind: str, records: list[dict[str, Any]]) -> None:
+        fields = model.RECORD_KINDS[kind][0]
+        with self.engine.begin() as connection:
+            connection.execute(KIND_TABLES[kind].insert(), [self._to_row(record, fields) for record in records])
+
+    def _delete_before(self, kind: str, cutoff) -> int:
+        table = KIND_TABLES[kind]
+        column = table.c[_snake(model.RECORD_KINDS[kind][1])]
+        with self.engine.begin() as connection:
+            return connection.execute(table.delete().where(column < _db_time(cutoff))).rowcount or 0
+
     def _find(self, kind, filters, since, until, limit, newest_first=True):
-        table, fields, time_column = ((report_runs, model.RUN_FIELDS, "started_at") if kind == "runs"
-                                      else (audit_events, model.AUDIT_FIELDS, "at"))
+        fields, time_field = model.RECORD_KINDS[kind]
+        table, time_column = KIND_TABLES[kind], _snake(time_field)
         query = sa.select(table)
         for key, value in filters.items():
-            query = query.where(table.c[_snake(key)] == value)
+            query = query.where(table.c[_snake(key)] == (int(value) if fields.get(key, ("",))[0] == "int" else value))
         if since:
             query = query.where(table.c[time_column] >= _db_time(since))
         if until:

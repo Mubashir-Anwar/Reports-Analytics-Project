@@ -20,7 +20,7 @@ const CHANNEL = { runner: 'Run reports', server: 'Report Server', 'designer-prev
   schedule: 'Schedule', api: 'API', 'signed-link': 'Signed link' };
 const paramText = (values) => Object.entries(values || {}).map(([k, v]) => `${k}=${Array.isArray(v) ? v.join(',') : v}`).join(' · ');
 
-/** One row per report execution (system database: rs_report_runs). */
+/** One row per report execution (system database: runs). */
 function RunHistory({ records, search }) {
   const needle = search.trim().toLowerCase();
   const rows = records.filter((r) => !needle || JSON.stringify(r).toLowerCase().includes(needle));
@@ -45,7 +45,7 @@ function RunHistory({ records, search }) {
   );
 }
 
-/** Append-only audit trail (rs_audit_events): each event carries the hash of the one before it. */
+/** Append-only audit trail (audit_events): each event carries the hash of the one before it. */
 function AuditTrail({ events, search, verify }) {
   const needle = search.trim().toLowerCase();
   const rows = events.filter((e) => !needle || JSON.stringify(e).toLowerCase().includes(needle));

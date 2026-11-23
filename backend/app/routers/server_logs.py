@@ -4,6 +4,7 @@
     GET /api/server/logs/runs       report runs (who ran what, parameters, rows, time, status)
     GET /api/server/logs/service    the service log (errors, warnings, startup), newest last
     GET /api/server/logs/audit      the audit trail (sign-ins, rights, publishing, deletes…)
+    GET /api/server/logs/api-calls  every API call that took data out (key, report, rows, bytes, address)
     GET /api/server/logs/downloads  report files being made in the background right now (all callers), and capacity
 
 The same records as Admin → Logs, so they can be read where the reports are, even with the Admin page switched off.
@@ -67,6 +68,18 @@ def register(app: FastAPI, ctx: SimpleNamespace) -> None:
                                                    action=action, actor=actor, target=target)}
         except ValueError as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from None
+
+    @app.get("/api/server/logs/api-calls")
+    def server_api_calls(request: Request, limit: int = 200, apiKeyId: str = "", reportId: str = "", caller: str = "",  # noqa: N803
+                         since: str = "", until: str = "") -> dict[str, Any]:
+        admin(request)
+        try:
+            calls = get_records().api_calls(limit=max(1, min(limit, 2000)), since=since or None, until=until or None,
+                                            apiKeyId=apiKeyId, reportId=reportId, caller=caller)
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from None
+        return {"calls": calls, "totals": {"calls": len(calls), "rows": sum(c.get("rowsReturned") or 0 for c in calls),
+                                           "bytes": sum(c.get("bytesReturned") or 0 for c in calls)}}
 
     @app.get("/api/server/logs/downloads")
     def server_download_log(request: Request) -> dict[str, Any]:

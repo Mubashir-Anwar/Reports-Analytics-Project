@@ -1,12 +1,14 @@
 """The system database: the records the service keeps about its own work, the same in every backend.
 
-Two record types for now (more follow the same pattern):
+Two record types (schema v2 names; version 1 used rs_report_runs and rs_audit_events, kept for rollback):
 
-* report run   (rs_report_runs)   one row per execution: who, from where (channel), which report and data
-                                  source, masked parameters, result, rows, duration, output size and hash.
-* audit event  (rs_audit_events)  append-only: sign-ins, accounts, rights, API keys, publishing, deleting,
-                                  permissions, data sources. Each event stores the hash of the one before it,
-                                  so a changed or removed event is detected (verify_chain).
+* run          (runs)            one row per execution, from any channel: who, which report and data source,
+                                 masked parameters, result, rows, duration, output size and hash. A background,
+                                 scheduled or API job is the same row from queued to running to success/failed;
+                                 its file is in run_files and each send in run_deliveries (db/entities.py).
+* audit event  (audit_events)    append-only: sign-ins, accounts, rights, API keys, publishing, deleting,
+                                 permissions, data sources. Each event stores the hash of the one before it,
+                                 so a changed or removed event is detected (verify_chain).
 
 Rules that keep the backends interchangeable (files, PostgreSQL, MySQL, SQL Server, Oracle, SQLite, MongoDB):
 ids and timestamps are made here (not by the database), times are UTC, values are plain JSON types, and the
@@ -22,11 +24,12 @@ import time
 from datetime import datetime, timezone
 from typing import Any
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 3
 DEFAULT_ORG = "default"
 
 CHANNELS = ("runner", "server", "designer-preview", "designer-run", "schedule", "api", "signed-link", "embed", "analytics")
-STATUSES = ("success", "failed")
+STATUSES = ("success", "failed", "queued", "running")
+RUN_TYPES = ("interactive", "manual", "background", "scheduled", "api")   # interactive = ran while the caller waited
 ACTOR_TYPES = ("user", "api-key", "token", "schedule", "system", "anonymous")
 
 # field name -> (type, max length or None, required)
@@ -54,7 +57,15 @@ RUN_FIELDS: dict[str, tuple[str, int | None, bool]] = {
     "clientIp": ("str", 64, False),
     "requestPath": ("str", 500, False),
     "onBehalfOf": ("str", 128, False),      # the website's own user, when a website runs the report (GeneratedBy)
+    # schema v2
+    "runType": ("str", 16, False),          # RUN_TYPES (empty on older rows = interactive)
+    "scheduleId": ("str", 40, False),
+    "scheduleName": ("str", 120, False),
+    "queuedAt": ("time", None, False),
+    "removedAt": ("time", None, False),     # its file was removed and it left the Runs list (the row stays in the log)
 }
+RUN_FIELDS_V1 = {name: spec for name, spec in RUN_FIELDS.items()
+                 if name not in ("runType", "scheduleId", "scheduleName", "queuedAt", "removedAt")}
 
 AUDIT_FIELDS: dict[str, tuple[str, int | None, bool]] = {
     "id": ("str", 32, True),
@@ -69,11 +80,62 @@ AUDIT_FIELDS: dict[str, tuple[str, int | None, bool]] = {
     "clientIp": ("str", 64, False),
     "prevHash": ("str", 64, False),
     "hash": ("str", 64, True),
+    # schema v2 (only in the hash when set, so the older events keep their hashes)
+    "targetType": ("str", 32, False),       # report, folder, user, api_key, schedule, data_source…
+    "targetId": ("str", 240, False),
+}
+AUDIT_FIELDS_V1 = {name: spec for name, spec in AUDIT_FIELDS.items() if name not in ("targetType", "targetId")}
+
+# Every request that reached the server (Report Server -> Logs -> Requests), kept REPORTING_REQUEST_LOG_DAYS.
+REQUEST_FIELDS: dict[str, tuple[str, int | None, bool]] = {
+    "id": ("str", 32, True),
+    "orgId": ("str", 64, True),
+    "requestedAt": ("time", None, True),
+    "method": ("str", 8, True),
+    "path": ("str", 300, True),
+    "queryParamNames": ("json", None, False),   # names only, never the values (they can hold customer data)
+    "httpStatus": ("int", None, True),
+    "durationMs": ("int", None, False),
+    "bytesSent": ("int", None, False),
+    "caller": ("str", 128, False),
+    "callerType": ("str", 16, False),
+    "clientIp": ("str", 64, False),
+    "userAgent": ("str", 160, False),
+}
+
+# Every API call that takes data out of the service: which key, which report, how many rows and bytes, from where.
+API_CALL_FIELDS: dict[str, tuple[str, int | None, bool]] = {
+    "id": ("str", 32, True),
+    "orgId": ("str", 64, True),
+    "calledAt": ("time", None, True),
+    "apiKeyId": ("str", 32, False),             # empty when a signed-in user or a token called
+    "caller": ("str", 128, True),
+    "callerType": ("str", 16, True),
+    "channel": ("str", 32, True),               # api / embed / signed-link
+    "method": ("str", 8, False),
+    "endpoint": ("str", 300, False),            # /api/v1/…, /generate/…
+    "reportId": ("str", 80, False),
+    "folder": ("str", 240, False),
+    "runId": ("str", 40, False),
+    "format": ("str", 8, False),
+    "httpStatus": ("int", None, False),
+    "rowsReturned": ("int", None, False),
+    "bytesReturned": ("int", None, False),
+    "durationMs": ("int", None, False),
+    "clientIp": ("str", 64, False),
+}
+
+# kind -> (fields, time field)
+RECORD_KINDS: dict[str, tuple[dict[str, tuple[str, int | None, bool]], str]] = {
+    "runs": (RUN_FIELDS, "startedAt"), "events": (AUDIT_FIELDS, "at"),
+    "requests": (REQUEST_FIELDS, "requestedAt"), "api_calls": (API_CALL_FIELDS, "calledAt"),
 }
 
 # What may be filtered on when listing (all of them indexed in every backend).
-RUN_FILTERS = ("reportId", "actor", "channel", "status", "orgId")
-AUDIT_FILTERS = ("action", "actor", "target", "orgId")
+RUN_FILTERS = ("reportId", "actor", "channel", "status", "orgId", "id", "runType", "scheduleId")
+AUDIT_FILTERS = ("action", "actor", "target", "orgId", "targetType")
+REQUEST_FILTERS = ("method", "httpStatus", "caller", "orgId")
+API_CALL_FILTERS = ("apiKeyId", "caller", "reportId", "runId", "channel", "orgId")
 
 
 def now() -> datetime:
@@ -164,7 +226,8 @@ def masked_parameters(values: dict[str, Any], sensitive: set[str]) -> dict[str, 
 
 def event_hash(event: dict[str, Any]) -> str:
     """SHA-256 over the event's content and the previous hash (the chain link)."""
-    content = {name: event.get(name) for name in AUDIT_FIELDS if name not in ("id", "hash")}
+    content = {name: event.get(name) for name in AUDIT_FIELDS
+               if name not in ("id", "hash") and (name in AUDIT_FIELDS_V1 or event.get(name) is not None)}
     text = json.dumps(content, sort_keys=True, separators=(",", ":"), ensure_ascii=False, default=str)
     return hashlib.sha256(text.encode("utf-8")).hexdigest()
 

@@ -117,3 +117,25 @@ def test_report_data_as_json(site):
     assert site.post("/api/v1/reports/P1/data", headers=site.key_headers, json={"parameters": {"Branch": "ISB"}}).status_code == 422
     assert site.post("/api/v1/reports/P1/data", headers=site.key_headers, json={"parameters": {"Branch": "LHR"}, "limit": 0}).status_code == 422
     assert site.post("/api/v1/reports/HR1/data", headers=site.key_headers, json={}).status_code == 404
+
+
+def test_data_taken_through_the_api_is_in_api_calls(site):
+    """Schema v2: each API call that takes data out is a row of api_calls, linked to its key and its run."""
+    key_id = site.key["key"]["id"] if "key" in site.key else site.key["id"]
+    site.post("/api/v1/reports/P1/run", headers=site.key_headers, json={"format": "csv", "parameters": {"Branch": "LHR"}})
+    site.post("/api/v1/reports/P1/data", headers=site.key_headers, json={"parameters": {"Branch": "KHI"}, "limit": 1})
+    job = site.post("/api/v1/reports/P1/jobs", headers=site.key_headers, json={"format": "csv", "parameters": {"Branch": "KHI"}}).json()["job"]
+    file = site.get(f"/api/v1/jobs/{job['id']}/file", headers=site.key_headers)
+    calls = get_records().api_calls(apiKeyId=key_id)
+    by_endpoint = {call["endpoint"]: call for call in calls}
+    assert set(by_endpoint) >= {"/api/v1/reports/P1/run", "/api/v1/reports/P1/data", f"/api/v1/jobs/{job['id']}/file"}
+    download = by_endpoint[f"/api/v1/jobs/{job['id']}/file"]
+    assert download["runId"] == job["id"] and download["bytesReturned"] == len(file.content) and download["httpStatus"] == 200
+    run_now = by_endpoint["/api/v1/reports/P1/run"]
+    assert run_now["caller"] == "Portal" and run_now["reportId"] == "P1" and run_now["rowsReturned"] == 2 and run_now["runId"]
+    assert get_records().run(run_now["runId"])["channel"] == "api"
+    from test_access_rights import make_user, sign_in
+    make_user(site, "boss", ["admin", "server"])
+    sign_in(site, "boss")
+    listed = site.get("/api/server/logs/api-calls?apiKeyId=" + key_id).json()       # Report Server -> Logs
+    assert listed["totals"]["calls"] == len(calls) >= 3 and listed["totals"]["rows"] >= 4
