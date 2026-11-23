@@ -65,8 +65,12 @@ def build_url(form: dict[str, Any]) -> str:
             return f"mssql+pyodbc://{'@' if windows else credentials}{address}/{database}?{urlencode(query)}"
         return f"sqlserver://{credentials}{address}/{database}"
     if kind == "oracle":
-        service = str(form.get("service", "")).strip() or database or "XEPDB1"
-        return f"oracle://{credentials}{address}/?service_name={quote(service, safe='')}"
+        service = str(form.get("service", "")).strip() or "XEPDB1"
+        schema = (database or "REPORTING").upper()          # on Oracle the service's own "database" is a schema (user)
+        from backend.app.db.sql import ORACLE_SCHEMA  # noqa: PLC0415
+        if not ORACLE_SCHEMA.fullmatch(schema):
+            raise ValueError("The Oracle schema is a name of letters, digits, _ $ # (starting with a letter), e.g. REPORTING")
+        return f"oracle://{credentials}{address}/?{urlencode({'service_name': service, 'schema': schema})}"
     if kind == "mongodb":
         return f"mongodb://{credentials}{address}/{database}" + ("?authSource=admin" if credentials else "")
     return f"{kind}://{credentials}{address}/{database}"
@@ -125,8 +129,15 @@ def test(url: str) -> dict[str, Any]:
                        "Connected. This database already has data of the reporting service."}
 
 
+ORACLE_HELP = ("Create the schema first (as a DBA): CREATE USER REPORTING IDENTIFIED BY <password>; "
+               "GRANT CREATE SESSION, CREATE TABLE TO REPORTING; ALTER USER REPORTING QUOTA UNLIMITED ON USERS; "
+               "then connect as REPORTING.")
+
+
 def _clean_error(exc: Exception, url: str) -> str:
     text = str(exc).splitlines()[0][:400] if str(exc) else type(exc).__name__
+    if url.lower().startswith("oracle") and re.search(r"ORA-(01435|01918|01031|01950|01045|01017)", text):
+        text = f"{text} — {ORACLE_HELP}"
     password = re.search(r"//[^:/@]+:([^@]*)@", url)
     if password and password.group(1):
         text = text.replace(password.group(1), "***")

@@ -8,9 +8,11 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 import threading
 from datetime import datetime, timezone
 from typing import Any
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 import sqlalchemy as sa
 from sqlalchemy.dialects import mssql, mysql, oracle
@@ -184,16 +186,53 @@ _ENGINES: dict[str, sa.Engine] = {}
 _ENGINES_LOCK = threading.Lock()
 
 
+ORACLE_SCHEMA = re.compile(r"[A-Za-z][A-Za-z0-9_$#]{0,127}")
+
+
+def oracle_schema(url: str) -> tuple[str, str]:
+    """oracle://…/?service_name=X&schema=REPORTING -> (the URL without schema=, "REPORTING").
+
+    On Oracle a schema is a user: the service's tables go into the schema REPORTING (default when the Admin form
+    made the URL). The driver does not know schema=, so it is taken out here and set on every new connection with
+    ALTER SESSION SET CURRENT_SCHEMA. Connecting as the REPORTING user itself needs nothing more; another user
+    needs CREATE ANY TABLE (or the tables made by the DBA) to work in it."""
+    parts = urlsplit(url)
+    if not parts.scheme.lower().startswith("oracle"):
+        return url, ""
+    query = parse_qsl(parts.query, keep_blank_values=True)
+    schema = next((value for key, value in query if key.lower() == "schema"), "").strip()
+    if not schema:
+        return url, ""
+    if not ORACLE_SCHEMA.fullmatch(schema):
+        raise ValueError("The Oracle schema is a name of letters, digits, _ $ # (starting with a letter), e.g. REPORTING")
+    rest = urlencode([(key, value) for key, value in query if key.lower() != "schema"])
+    return urlunsplit((parts.scheme, parts.netloc, parts.path, rest, parts.fragment)), schema.upper()
+
+
 def engine_for(url: str) -> sa.Engine:
     """One pooled engine per URL for the whole process."""
-    full = sqlalchemy_url(url)
+    plain, schema = oracle_schema(url)
+    full = sqlalchemy_url(plain)
+    key = f"{full}#schema={schema}"
     with _ENGINES_LOCK:
-        if full not in _ENGINES:
+        if key not in _ENGINES:
             options: dict[str, Any] = {"pool_pre_ping": True}
             if full.startswith("sqlite"):
                 options["connect_args"] = {"check_same_thread": False}
-            _ENGINES[full] = sa.create_engine(full, **options)
-        return _ENGINES[full]
+            engine = sa.create_engine(full, **options)
+            if schema:
+                statement = f'ALTER SESSION SET CURRENT_SCHEMA = "{schema}"'
+
+                # insert=True: before SQLAlchemy's own first-connect step, so it reads REPORTING as the default schema
+                @sa.event.listens_for(engine, "connect", insert=True)
+                def _use_schema(dbapi_connection: Any, _record: Any) -> None:
+                    cursor = dbapi_connection.cursor()
+                    try:
+                        cursor.execute(statement)
+                    finally:
+                        cursor.close()
+            _ENGINES[key] = engine
+        return _ENGINES[key]
 
 
 def apply_migrations(engine: sa.Engine, component: str, steps: list[tuple[int, str, Any]]) -> int:

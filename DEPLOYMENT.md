@@ -324,16 +324,31 @@ are separate: they only read the client's business data.
 |---|---|---|
 | `files` (default) | — | The data folder. One instance. |
 | `sql` | `sqlserver://user:pw@host:1433/reporting` | SQL Server 2016+ |
-| `sql` | `oracle://user:pw@host:1521/?service_name=ORCLPDB1` | Oracle 12c+ |
+| `sql` | `oracle://REPORTING:pw@host:1521/?service_name=ORCLPDB1&schema=REPORTING` | Oracle 12c+; the tables go into the schema (user) `REPORTING` |
 | `sql` | `mysql://user:pw@host:3306/reporting` | MySQL 8 / MariaDB |
 | `sql` | `postgresql://user:pw@host:5432/reporting` | PostgreSQL 12+ |
 | `mongodb` | `mongodb://user:pw@host:27017/reporting_system` (or `mongodb+srv://…/db`) | MongoDB 5+; a single server is enough |
 | `postgresql` | `postgresql://…` | The older PostgreSQL tables (`reporting_documents`); still supported |
 
-Every table or collection starts with `rs_`, so they can share a database with other applications. The service
-creates them at start-up and records the schema version in `rs_schema_version` (later versions add numbered
-steps; nothing is ever dropped). The database account needs to create tables/collections once, then read and
-write them. `/admin → Overview` shows which storage is in use.
+The service gets **a database of its own** (default name `reporting`), so the tables have plain names without a
+prefix: `users`, `user_rights`, `folders`, `server_reports`, `workspace_reports`, `schedules`, `runs`, `api_calls`,
+`request_log`, `audit_events`, `secrets` and the others (schema v2). The service creates them at start-up and records
+the schema version in `rs_schema_version` (later versions add numbered steps; nothing is ever dropped, and the
+version 1 `rs_…` tables of an older installation are copied once and kept, so the previous version still works).
+The database account needs to create tables/collections once, then read and write them. `/admin → Overview` shows
+which storage is in use.
+
+**Oracle:** a schema is a user, so the service's place is the schema `REPORTING`. A DBA creates it once:
+
+```sql
+CREATE USER REPORTING IDENTIFIED BY "a-long-password";
+GRANT CREATE SESSION, CREATE TABLE TO REPORTING;
+ALTER USER REPORTING QUOTA UNLIMITED ON USERS;
+```
+
+Connect as `REPORTING`. `schema=REPORTING` in the URL (the Admin form adds it) sets
+`ALTER SESSION SET CURRENT_SCHEMA` on every connection, so the tables land in `REPORTING` even when another account
+is used (that account then needs the rights to create and use tables in `REPORTING`).
 
 What is kept (and what is not):
 

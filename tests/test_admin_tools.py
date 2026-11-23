@@ -29,10 +29,12 @@ def test_build_url_for_each_database():
                              "password": "x"}) == "sqlserver://u:x@sql1:1433/r"
     assert switch.build_url({"kind": "mongodb", "host": "m", "database": "reporting_system"}) == "mongodb://m/reporting_system"
     assert switch.build_url({"kind": "oracle", "host": "o", "port": "1521", "service": "XEPDB1", "username": "u", "password": "p"}) == (
-        "oracle://u:p@o:1521/?service_name=XEPDB1")
+        "oracle://u:p@o:1521/?service_name=XEPDB1&schema=REPORTING")                 # the service's own schema
+    assert switch.build_url({"kind": "oracle", "host": "o", "service": "ORCL", "database": "rpt_2", "username": "REPORTING"}) == (
+        "oracle://REPORTING@o/?service_name=ORCL&schema=RPT_2")
     assert switch.build_url({"kind": "sqlite", "database": "x.db"}) == "sqlite:///x.db"
     assert switch.build_url({"url": "mysql://u:p@h/db"}) == "mysql://u:p@h/db"
-    for bad in ({"kind": "excel"}, {"kind": "mysql", "host": "h"}, {"kind": "mysql", "host": "h; drop", "database": "d"},
+    for bad in ({"kind": "excel"}, {"kind": "mysql", "host": "h"}, {"kind": "oracle", "host": "o", "database": "x; drop"}, {"kind": "mysql", "host": "h; drop", "database": "d"},
                 {"url": "http://x"}):
         with pytest.raises(ValueError):
             switch.build_url(bad)
@@ -100,3 +102,33 @@ def test_unknown_report_id_suggests_the_right_one(client):
     assert response.status_code == 404 and "Did you mean LOAN_LETTER?" in response.json()["detail"]
     response = client.get("/generate/loan_leter.pdf", headers=ADMIN_HEADERS)
     assert "LOAN_LETTER" in response.json()["detail"]
+
+
+
+def test_oracle_tables_go_into_the_reporting_schema():
+    """schema= is taken out of the URL and set on every new connection (ALTER SESSION SET CURRENT_SCHEMA)."""
+    from backend.app.db import sql
+    assert sql.oracle_schema("oracle://u:p@o:1521/?service_name=X&schema=reporting") == ("oracle://u:p@o:1521/?service_name=X", "REPORTING")
+    assert sql.oracle_schema("postgresql://u@h/db?schema=x") == ("postgresql://u@h/db?schema=x", "")      # only Oracle
+    with pytest.raises(ValueError):
+        sql.oracle_schema("oracle://u@o/?service_name=X&schema=a;b")
+    engine = sql.engine_for("oracle://REPORTING:p@o.invalid:1521/?service_name=X&schema=REPORTING")   # no connection yet
+    assert "schema" not in str(engine.url) and engine.url.query == {"service_name": "X"}
+    ran = []
+
+    class Cursor:
+        def execute(self, text):
+            ran.append(text)
+
+        def close(self):
+            pass
+
+    class Connection:
+        def cursor(self):
+            return Cursor()
+
+    first = list(engine.pool.dispatch.connect)[0]                  # ours runs before SQLAlchemy's own steps
+    first(Connection(), None)
+    assert ran == ['ALTER SESSION SET CURRENT_SCHEMA = "REPORTING"']
+    message = switch._clean_error(RuntimeError("ORA-01017: invalid username/password"), "oracle://u:secret@o/?schema=REPORTING")
+    assert "CREATE USER REPORTING" in message and "secret" not in message
