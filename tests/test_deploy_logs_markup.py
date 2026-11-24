@@ -96,7 +96,6 @@ def test_short_designer_token_is_ignored(make_client):
 # ---------------------------------------------------------------- areas
 def test_runner_only_instance_hides_admin_designer_and_docs(make_client):
     client = make_client(REPORTING_ENABLED_AREAS="runner")
-    assert client.get("/ui").status_code == 200
     for path in ("/admin", "/designer", "/docs", "/openapi.json"):
         assert client.get(path).status_code == 404, path
     assert client.get("/api/admin/reports", headers=admin()).status_code == 404
@@ -117,7 +116,6 @@ def test_management_ip_allowlist(make_client):
     client = make_client(REPORTING_ADMIN_ALLOWED_IPS="10.0.0.0/8")
     assert client.get("/admin").status_code == 403            # TestClient peer is "testclient", not in the list
     assert client.get("/api/admin/reports", headers=admin()).status_code == 403
-    assert client.get("/ui").status_code == 200               # runner is not restricted
     assert client.get("/reports", headers=admin()).status_code == 200
 
 

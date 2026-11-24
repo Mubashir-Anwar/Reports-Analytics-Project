@@ -8,10 +8,10 @@ const RIGHT_HELP = {
   designer: 'Build, preview and publish reports',
   server: 'Report Server: folders, run, schedules (folder permissions apply)',
   analytics: 'Dashboards and models',
-  runner: 'Run reports page and running reports by URL',
+  runner: 'Running reports by URL (/generate, /reports, collections)',
 };
 const DEFAULT_RIGHTS = [{ id: 'admin', label: 'Admin' }, { id: 'designer', label: 'Designer' }, { id: 'server', label: 'Report Server' },
-  { id: 'analytics', label: 'Analytics' }, { id: 'runner', label: 'Run reports' }];
+  { id: 'analytics', label: 'Analytics' }, { id: 'runner', label: 'Run reports by URL' }];
 const LEVEL_LABEL = { none: 'None', run: 'Run', manage: 'Manage' };
 const EMPTY_FORM = { username: '', fullName: '', email: '', phone: '', password: '', rights: ['runner'], superAdmin: false };
 

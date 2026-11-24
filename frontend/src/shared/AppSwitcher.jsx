@@ -6,7 +6,6 @@ export const APPS = [
   { href: '/designer', right: 'designer', label: 'Designer', icon: '🎨', text: 'Build reports and publish them' },
   { href: '/server', right: 'server', label: 'Report Server', icon: '🗄', text: 'Folders, run, schedules, permissions' },
   { href: '/analytics', right: 'analytics', label: 'Analytics', icon: '📊', text: 'Dashboards and models' },
-  { href: '/ui', right: 'runner', label: 'Run reports', icon: '▶', text: 'The simple report runner page' },
   { href: '/admin', right: 'admin', label: 'Admin', icon: '⚙', text: 'Users, rights, API keys, data sources, logs' },
 ];
 

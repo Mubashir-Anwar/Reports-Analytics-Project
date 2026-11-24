@@ -86,6 +86,15 @@ export const api = {
   deleteConnection: (id) => request(`/api/admin/connections/${encodeURIComponent(id)}`, { method: 'DELETE' }),
   /** A .jrxml and the pictures it uses ({ 'logo.png': dataURL }): image elements get the matching file. */
   importJrxml: (xml, resources = {}) => request('/api/admin/jrxml/import', { method: 'POST', body: { xml, resources } }),
+  /** Query workspace (/query): browse a data adapter and run read-only queries. */
+  mongoCollections: (connectionId) => request('/api/query/mongo/collections', { method: 'POST', body: { connectionId } }),
+  mongoFind: (body) => request('/api/query/mongo/find', { method: 'POST', body }),
+  mongoAggregate: (body) => request('/api/query/mongo/aggregate', { method: 'POST', body }),
+  mongoFields: (connectionId, collection) => request('/api/query/mongo/fields', { method: 'POST', body: { connectionId, collection } }),
+  sqlSchema: (connectionId) => request('/api/query/sql/schema', { method: 'POST', body: { connectionId } }),
+  sqlRun: (body) => request('/api/query/sql/run', { method: 'POST', body }),
+  /** The report (+ design) as a Jaspersoft Studio .jrxml → { xml, fileName, warnings }. */
+  exportJrxml: (definition) => request('/api/admin/jrxml/export', { method: 'POST', body: definition }),
   /** An existing design (PDF, .ai, Word, PNG/JPEG as a data URL) → { page, background, elements, fields, notes, pageCount }. */
   importDesign: (file, name, mode, page, textOnTop) => request('/api/admin/designer/import-design', { method: 'POST', body: { file, name, mode, page, textOnTop } }),
   /** SQL "Read fields": the result columns from the database (LIMIT 0, no rows read). */

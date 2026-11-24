@@ -107,6 +107,19 @@ def register(app: FastAPI, ctx: SimpleNamespace) -> None:
         except ValueError as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from None
 
+    @app.post("/api/admin/jrxml/export")
+    async def admin_export_jrxml(request: Request) -> dict[str, Any]:
+        """The designer's report (+ design) as a Jaspersoft Studio .jrxml: {xml, fileName, warnings}. Nothing is saved."""
+        require_admin(request, "designer")
+        try:
+            payload = await request.json()
+            if not isinstance(payload, dict):
+                raise ValueError("Send the report definition as the JSON body")
+            from backend.app.exporters.jrxml_export import export_jrxml
+            return export_jrxml(payload)
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from None
+
     @app.post("/api/admin/designer/import-design")
     async def admin_import_design(request: Request) -> dict[str, Any]:
         """An existing design (PDF, Illustrator .ai, Word, PNG/JPEG) → page size, background picture and elements.

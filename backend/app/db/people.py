@@ -17,8 +17,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from backend.app.db import entities as ent
-from backend.app.db import model
+from backend.app.db import entities as ent, model
 
 ROOT = ""                       # the root folder: folder_id empty
 
@@ -317,8 +316,8 @@ def save_keys(keys: list[dict[str, Any]]) -> None:
 # ------------------------------------------------------------------ one-time copy from the previous version
 def upgrade_people(store: Any) -> dict[str, int]:
     """rs_users, rs_api_keys and rs_folder_permissions -> the step 2 tables, once (the old tables are kept)."""
-    from backend.app.storage.routed import UPGRADE_KEY  # noqa: PLC0415
     from backend.app.security.users import is_super_admin, user_rights  # noqa: PLC0415
+    from backend.app.storage.routed import UPGRADE_KEY  # noqa: PLC0415
     plain = store                                   # meta/schema-v2.json is a plain document
     state = plain.read_json(UPGRADE_KEY, None) or {}
     counts = {"users": 0, "rights": 0, "apiKeys": 0, "folderRules": 0}

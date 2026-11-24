@@ -17,8 +17,10 @@ import { setTeamPlace } from './shared/TeamBar.jsx';
 import TableEditor from './TableEditor.jsx';
 import NavBar from './shared/NavBar.jsx';
 import Ribbon from './Ribbon.jsx';
+import { PanelRail, ZoomPill } from './CanvasChrome.jsx';
 import './ribbon.css';
 import TemplateGallery from './TemplateGallery.jsx';
+import DataStart from './DataStart.jsx';
 import ImportDesignDialog from './ImportDesignDialog.jsx';
 import { DesignStart, DesignSteps, hasBands } from './DesignGuide.jsx';
 import { AdaptersPanel, Outline, Palette, ServerPanel, WorkspacePanel } from './panels.jsx';
@@ -27,6 +29,7 @@ import { ZOOM_LIMITS, bandWidth, clampZoom, emptyDesign, findElement, getBand, s
 import ComponentWizard from './ComponentWizard.jsx';
 import PublishDialog from './PublishDialog.jsx';
 import { buildMrd, downloadText, fileKind, parseMrd, splitReportFiles } from './mrd.js';
+import { takeHandoff } from './query/handoff.js';
 import { blankReport, initialState, reducer, reportPayload } from './store.js';
 import { readClipboard } from './arrange.js';
 
@@ -53,7 +56,7 @@ export default function App() {
   const [leftTab, setLeftTab] = useState('workspace');
   const [drawer, setDrawer] = useState(null); // small screens: 'left' | 'right' panel shown over the canvas
   // wide screens: each panel can be hidden on its own (Ribbon → View → Panels) for a bigger canvas; kept per browser
-  const [panels, setPanels] = useState(() => {
+  const [designPanels, setDesignPanels] = useState(() => {
     const all = { explorer: true, outline: true, palette: true, properties: true };
     try {
       const saved = JSON.parse(localStorage.getItem('designer-panels') || '{}');
@@ -63,7 +66,17 @@ export default function App() {
       return { ...all, ...saved };
     } catch { return all; }
   });
-  useEffect(() => { try { localStorage.setItem('designer-panels', JSON.stringify(panels)); } catch { /* ignore */ } }, [panels]);
+  useEffect(() => { try { localStorage.setItem('designer-panels', JSON.stringify(designPanels)); } catch { /* ignore */ } }, [designPanels]);
+  // Setup, Preview and Source are steps: a clean page with only that step. The panels stay closed there unless
+  // the user opens one from the rail on the left (remembered on their own, apart from the Design tab's panels).
+  const [stepPanels, setStepPanels] = useState(() => {
+    const none = { explorer: false, outline: false, palette: false, properties: false };
+    try { return { ...none, ...JSON.parse(localStorage.getItem('designer-panels-steps') || '{}') }; } catch { return none; }
+  });
+  useEffect(() => { try { localStorage.setItem('designer-panels-steps', JSON.stringify(stepPanels)); } catch { /* ignore */ } }, [stepPanels]);
+  const stepPage = tab !== 'design';
+  const panels = stepPage ? stepPanels : designPanels;
+  const setPanels = stepPage ? setStepPanels : setDesignPanels;
   const dock = useDockLayout();
   const narrow = useNarrow();
   const floatingNames = narrow ? [] : Object.keys(dock.layout.floating).filter((name) => panels[name]);
@@ -103,6 +116,7 @@ export default function App() {
   const actions = useMemo(() => makeActions({ get: () => stateRef.current, dispatch, notify, ui: uiRef }), [notify]);
   const [queryTab, setQueryTab] = useState(null); // Dataset and Query dialog: null = closed, else its tab
   const [templates, setTemplates] = useState(false);
+  const [dataStart, setDataStart] = useState(false); // step 1 of a new report: the data adapter screen
   const [importing, setImporting] = useState(false);
   const [menu, setMenu] = useState(null);
   const openMenu = useCallback((event, items) => setMenu({ x: event.clientX, y: event.clientY, items }), []);
@@ -279,6 +293,16 @@ export default function App() {
     notify(`Downloaded ${payload.id || 'report'}.mrd — open it again with “Open file…”, or upload it on /server (Add Resource)`, 'ok');
   };
 
+  /** Save as JRXML: the same report for Jaspersoft Studio. What Jasper has no match for is listed afterwards. */
+  const [exportInfo, setExportInfo] = useState(null);
+  const saveJrxml = async () => {
+    try {
+      const result = await api.exportJrxml(reportPayload(state));
+      downloadText(result.xml, result.fileName, 'application/xml');
+      setExportInfo(result);
+    } catch (error) { notify(`Could not make the .jrxml: ${error.message}`, 'error'); }
+  };
+
   // /designer?open=<ID>&folder=<folder> (from /server → "Open in Designer"): open that published report once connected
   useEffect(() => {
     if (!ready) return;
@@ -287,6 +311,18 @@ export default function App() {
     if (!id) return;
     window.history.replaceState(null, '', window.location.pathname);
     openFromServer({ id, folder: query.get('folder') || undefined });
+  }, [ready]); // eslint-disable-line react-hooks/exhaustive-deps -- only once, right after connecting
+
+  // /designer?fromQuery=1 (from /query → "New report from this"): a new report with that adapter and query
+  useEffect(() => {
+    if (!ready || !new URLSearchParams(window.location.search).get('fromQuery')) return;
+    window.history.replaceState(null, '', window.location.pathname);
+    const handed = takeHandoff();
+    if (!handed) return;
+    dispatch({ type: 'NEW' });
+    dispatch({ type: 'REPORT', patch: { connectionId: handed.connectionId || '', collection: handed.collection || '', queryLanguage: handed.queryLanguage, querySource: handed.querySource || '' } });
+    setTab('setup');
+    notify('New report with the query from the Query workspace — give it a name, then read the fields', 'ok');
   }, [ready]); // eslint-disable-line react-hooks/exhaustive-deps -- only once, right after connecting
 
   const importJrxml = async (text, name, images = {}) => {
@@ -401,7 +437,7 @@ export default function App() {
     if (state.dirty && !window.confirm('You have unsaved changes. Discard them?')) return;
     dispatch({ type: 'NEW', folder });
     setTab('setup');
-    setTemplates(true);
+    setDataStart(true); // then the layout gallery
   };
 
   const loadDemo = () => {
@@ -468,6 +504,7 @@ export default function App() {
     showSource: () => setTab('source'),
     preview: () => setTab('preview'),
     saveFile,
+    saveJrxml,
     editExpression,
   };
 
@@ -569,27 +606,23 @@ export default function App() {
         state={state} dispatch={dispatch} actions={actions} zoom={zoom} setZoom={setZoom} prefs={canvasPrefs} setPrefs={setCanvasPrefs}
         view={tab} setView={setTab} drawer={drawer} setDrawer={setDrawer} panels={panels} setPanels={setPanels}
         hasClipboard={Boolean(readClipboard()?.items?.length)}
-        onNew={() => newReport(state.report.folder)} onOpenFile={openFile} onSave={save} onSaveFile={saveFile} onPublish={startPublish}
+        onNew={() => newReport(state.report.folder)} onOpenFile={openFile} onSave={save} onSaveFile={saveFile} onSaveJrxml={saveJrxml} onPublish={startPublish}
         onDemo={loadDemo} onTemplates={() => setTemplates(true)} onImportDesign={() => setImporting(true)} onQuery={(which) => setQueryTab(which || 'query')}
         onAdapters={() => { setLeftTab('adapters'); setPanels((p) => ({ ...p, explorer: true })); setDrawer('left'); }}
-        onResetLayout={() => { dock.reset(); setPanels({ explorer: true, outline: true, palette: true, properties: true }); }}
+        onResetLayout={() => { dock.reset(); setDesignPanels({ explorer: true, outline: true, palette: true, properties: true }); setStepPanels({ explorer: false, outline: false, palette: false, properties: false }); }}
         panelSide={dock.sideOf} onEditExpression={editExpression} onGo={goToProblem}
       />
 
-      <div className={`workspace ${drawer ? `show-${drawer}` : ''} ${showLeft ? '' : 'hide-left'} ${showRight ? '' : 'hide-right'}`} style={widths}>
+      <div className={`workspace ${stepPage ? 'step-page' : ''} ${drawer ? `show-${drawer}` : ''} ${showLeft ? '' : 'hide-left'} ${showRight ? '' : 'hide-right'}`} style={widths}>
         {drawer && <button type="button" className="drawer-backdrop" aria-label="Close the panel" onClick={() => setDrawer(null)} />}
         <DockSide side="left" ops={dock} visible={panels} render={renderPanel} onHide={hidePanel} narrow={narrow} />
 
         <main className="center" {...floatDropProps(dock)}>
-          <div className="tabs">
-            {[['setup', 'Setup'], ['design', 'Design'], ['source', 'Source'], ['preview', 'Preview']].map(([id, label]) => (
-              <button key={id} className={tab === id ? 'on' : ''} onClick={() => setTab(id)}>{label}</button>
-            ))}
-          </div>
+          <PanelRail panels={panels} setPanels={setPanels} drawer={drawer} setDrawer={setDrawer} panelSide={dock.sideOf} />
           <div className="stage">
-            {tab === 'setup' && <SetupForm state={state} dispatch={dispatch} notify={notify} onTemplates={() => setTemplates(true)} refreshKey={refreshKey} focus={setupFocus} onFocus={goToProblem} onClearFocus={() => setSetupFocus(null)} />}
+            {tab === 'setup' && <SetupForm state={state} dispatch={dispatch} notify={notify} onTemplates={() => setTemplates(true)} refreshKey={refreshKey} focus={setupFocus} onFocus={goToProblem} onClearFocus={() => setSetupFocus(null)} onDataScreen={() => setDataStart(true)} />}
             {tab === 'design' && !hasBands(design) && <DesignStart report={report} dispatch={dispatch} notify={notify} onTemplates={() => setTemplates(true)} onImportDesign={() => setImporting(true)} onSetup={() => setTab('setup')} />}
-            {tab === 'design' && hasBands(design) && <div className="design-pane"><DesignSteps report={report} design={design} dispatch={dispatch} notify={notify} previewed={previewed} onPreview={() => setTab('preview')} onSetup={() => setTab('setup')} /><Canvas knownFields={report.columns.length ? knownFields(report, design) : null} design={design} selection={selection} tool={tool} zoom={zoom} setZoom={setZoom} dispatch={dispatch} actions={actions} openMenu={openMenu} onEditExpression={editExpression} onPercentage={onPercentage} onWizard={onWizard} onOpenTable={setTableId} prefs={canvasPrefs} setPrefs={setCanvasPrefs} hasClipboard={Boolean(readClipboard()?.items?.length)} onQuery={() => setQueryTab('query')} onTemplates={() => setTemplates(true)} showToolbar={false} /></div>}
+            {tab === 'design' && hasBands(design) && <div className="design-pane"><DesignSteps report={report} design={design} dispatch={dispatch} notify={notify} previewed={previewed} onPreview={() => setTab('preview')} onSetup={() => setTab('setup')} /><Canvas knownFields={report.columns.length ? knownFields(report, design) : null} design={design} selection={selection} tool={tool} zoom={zoom} setZoom={setZoom} dispatch={dispatch} actions={actions} openMenu={openMenu} onEditExpression={editExpression} onPercentage={onPercentage} onWizard={onWizard} onOpenTable={setTableId} prefs={canvasPrefs} setPrefs={setCanvasPrefs} hasClipboard={Boolean(readClipboard()?.items?.length)} onQuery={() => setQueryTab('query')} onTemplates={() => setTemplates(true)} showToolbar={false} /><ZoomPill zoom={zoom} setZoom={setZoom} prefs={canvasPrefs} setPrefs={setCanvasPrefs} /></div>}
             {tab === 'source' && <SourceView state={state} dispatch={dispatch} notify={notify} />}
             {tab === 'preview' && <Preview state={state} notify={notify} dispatch={dispatch} />}
           </div>
@@ -622,6 +655,7 @@ export default function App() {
       {tableId && <TableEditor state={state} dispatch={dispatch} elementId={tableId} onClose={() => setTableId(null)} onOpenDatasets={() => { setTableId(null); setQueryTab('datasets'); }} />}
       {queryTab && <DatasetQueryDialog state={state} dispatch={dispatch} notify={notify} refreshKey={refreshKey} initialTab={queryTab} onClose={() => setQueryTab(null)} />}
       {importing && <ImportDesignDialog design={design} purpose={typeof importing === 'string' ? importing : ''} onApply={applyImport} onClose={() => setImporting(false)} />}
+      {dataStart && <DataStart report={report} dispatch={dispatch} notify={notify} onClose={() => setDataStart(false)} onNext={() => { setDataStart(false); setRefreshKey((n) => n + 1); if (!hasBands(design)) setTemplates(true); }} />}
       {templates && <TemplateGallery report={report} design={design} onApply={applyLayout} onClose={() => setTemplates(false)} onImportDesign={(what) => { setTemplates(false); setImporting(what || true); }} />}
       {wizard && <ComponentWizard wizard={wizard} report={report} design={design} bandWidth={bandWidth(design)} onCancel={() => setWizard(null)} onDone={finishWizard} />}
       {exprId && findElement(design, exprId) && (
@@ -680,6 +714,7 @@ export default function App() {
           </form>
         </div>
       )}
+      {exportInfo && <ExportDialog info={exportInfo} onClose={() => setExportInfo(null)} />}
       {importInfo && <ImportDialog info={importInfo} onGo={(focus) => { setImportInfo(null); goToProblem(focus); }} onClose={() => setImportInfo(null)} />}
     </div>
   );
@@ -700,6 +735,30 @@ function demoDesign() {
   d.bands.pageFooter = { height: 24, elements: [text({ expression: 'Page $V{PAGE_NUMBER} of $V{PAGE_COUNT}', x: 335, y: 5, width: 200, align: 'right', fontSize: 8, color: '#475569' })] };
   d.bands.summary = { height: 230, elements: [text({ expression: 'Grand total: $V{GrandTotal}', pattern: '#,##0.00', width: 300, bold: true, fontSize: 11, y: 6, height: 18 }), { ...text({}), type: 'chart', x: 0, y: 34, width: 400, height: 180, chartType: 'bar', categoryField: 'Branch', valueField: 'Amount', aggregate: 'Sum', title: 'Amount by branch' }] };
   return d;
+}
+
+/** After Save as JRXML: where the file went, how to open it in Studio, and what did not carry over. */
+function ExportDialog({ info, onClose }) {
+  return (
+    <div className="modal-back" onClick={onClose}>
+      <div className="modal import-dialog" onClick={(e) => e.stopPropagation()}>
+        <h3>Saved as JRXML</h3>
+        <p><b>{info.fileName}</b> is in your Downloads folder.</p>
+        <ol className="import-next">
+          <li>In Jaspersoft Studio: <b>File → Open File…</b> and choose it (or copy it into a project).</li>
+          <li>Pick the data adapter at the top of the report, then Preview.</li>
+          {info.warnings.length > 0 && <li>Look at the {info.warnings.length} note{info.warnings.length > 1 ? 's' : ''} below.</li>}
+        </ol>
+        {info.warnings.length ? (
+          <ul className="import-warnings">
+            {info.warnings.map((w) => <li key={w} className="info"><p>{w}</p></li>)}
+          </ul>
+        ) : <p className="ok">Everything carried over.</p>}
+        <p className="muted">It reopens here too with “Open file…”. Keep the .mrd as the full copy.</p>
+        <button className="btn primary" onClick={onClose}>OK</button>
+      </div>
+    </div>
+  );
 }
 
 /** After a JRXML import: each warning in plain words — what happened, where, what to do — with a Go there button. */

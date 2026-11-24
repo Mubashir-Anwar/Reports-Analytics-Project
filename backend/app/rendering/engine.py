@@ -85,6 +85,23 @@ _BLOCK_TAGS = {"p", "div", "h1", "h2", "h3", "h4", "h5", "h6", "ul", "ol", "tr",
 _HEADING_SIZE = {"h1": 2.0, "h2": 1.5, "h3": 1.17, "h4": 1.0, "h5": 0.83, "h6": 0.67}
 
 
+_RGB = re.compile(r"^\s*rgba?\(\s*(\d{1,3})\s*,\s*(\d{1,3})\s*,\s*(\d{1,3})\s*(?:,\s*([\d.]+)\s*)?\)\s*$", re.I)
+
+
+def _css_color(value: str | None) -> str | None:
+    """A CSS colour the PDF understands: #rgb / #rrggbb / a name, and rgb(…) as browsers write it (an editor's
+    highlight). Transparent and fully see-through colours are no colour."""
+    text = (value or "").strip()
+    match = _RGB.match(text)
+    if match:
+        if match.group(4) is not None and float(match.group(4)) == 0:
+            return None
+        return "#%02x%02x%02x" % tuple(min(255, int(match.group(i))) for i in (1, 2, 3))
+    if not _CSS_COLOR.fullmatch(text) or text.lower() == "transparent":
+        return None
+    return text
+
+
 def _xml_escape(text: str) -> str:
     return text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
 
@@ -126,10 +143,13 @@ class _MarkupParser:
         if self.out and self.out[-1] not in ("<br/>", "\n"):
             self.out.append("\n" if self.plain else "<br/>")
 
-    def _font_tag(self, color: str | None = None, size: float | None = None, face: str | None = None) -> str:
+    def _font_tag(self, color: str | None = None, size: float | None = None, face: str | None = None, back: str | None = None) -> str:
         attrs = []
-        if color and _CSS_COLOR.fullmatch(color):
+        color, back = _css_color(color), _css_color(back)
+        if color:
             attrs.append(f'color="{color}"')
+        if back:
+            attrs.append(f'backColor="{back}"')
         if size:
             attrs.append(f'size="{size:g}"')
         if face and face in FONT_FAMILY:
@@ -146,8 +166,9 @@ class _MarkupParser:
             closings.insert(0, "</" + opening[1:].split(" ", 1)[0].rstrip(">") + ">")
         self.stack.append((tag, closings))
 
-    def _style_openings(self, color=None, size=None, face=None, bold=False, italic=False, underline=False, strike=False) -> list[str]:
-        openings = [self._font_tag(color, size, face)]
+    def _style_openings(self, color=None, size=None, face=None, bold=False, italic=False, underline=False, strike=False,
+                        back=None) -> list[str]:
+        openings = [self._font_tag(color, size, face, back)]
         openings += ["<b>"] if bold else []
         openings += ["<i>"] if italic else []
         openings += ["<u>"] if underline else []
@@ -178,6 +199,8 @@ class _MarkupParser:
             openings = ["<i>"]
         elif tag in ("u", "ins"):
             openings = ["<u>"]
+        elif tag == "mark":
+            openings = [self._font_tag(back=values.get("color") or "#ffff00")]
         elif tag in ("s", "strike", "del"):
             openings = ["<strike>"]
         elif tag in ("sup", "sub"):
@@ -209,6 +232,7 @@ class _MarkupParser:
                 openings = self._style_openings(
                     values.get("forecolor"), _css_size(values.get("size", ""), self.base_size) if values.get("size") else None,
                     values.get("fontname"), truthy("isBold"), truthy("isItalic"), truthy("isUnderline"), truthy("isStrikeThrough"),
+                    values.get("backcolor"),
                 )
             else:
                 css = {}
@@ -221,7 +245,7 @@ class _MarkupParser:
                 openings = self._style_openings(
                     css.get("color"), _css_size(css.get("font-size", ""), self.base_size) if css.get("font-size") else None, face,
                     css.get("font-weight", "") in ("bold", "bolder", "600", "700", "800", "900"), css.get("font-style") == "italic",
-                    "underline" in decoration, "line-through" in decoration,
+                    "underline" in decoration, "line-through" in decoration, css.get("background-color"),
                 )
         self._open(tag, openings)
 
@@ -507,10 +531,14 @@ def validate_design(design: Any, columns: list[str], parameter_names: set[str]) 
                 element[name] = _num(raw.get(name), name, -500 if name == "firstLineIndent" else 0, 500, 0)
             element["tabStopWidth"] = _num(raw.get("tabStopWidth"), "tabStopWidth", 1, 500, 40)
         if kind == "staticText":
-            element["text"] = str(raw.get("text", ""))[:2000]
+            element["text"] = str(raw.get("text", ""))[:20000]
         elif kind == "textField":
-            element["expression"] = str(raw.get("expression", ""))[:1000]
+            element["expression"] = str(raw.get("expression", ""))[:20000]
             element["pattern"] = str(raw.get("pattern", ""))[:60]
+            if not element["expression"].lstrip().startswith("="):
+                for kind_, part in template_parts(element["expression"], element["markup"] != "none"):
+                    if kind_ == "formula" and not jexpr.check_syntax(part):
+                        raise ValueError(f"{band_name}: the formula {{={part[:60]}}} in the text could not be understood")
             # Pattern Expression: a pattern that depends on the record, e.g. $F{Currency} == "USD" ? "$ #,##0.00" : "Rs #,##0"
             pattern_expression = str(raw.get("patternExpression", "") or "").strip()[:500]
             if pattern_expression:
@@ -743,6 +771,69 @@ def _to_number(value: Any) -> float | None:
         return float(str(value).replace(",", ""))
     except ValueError:
         return None
+
+
+def template_parts(text: str, formatted: bool = False) -> list[tuple[str, str]]:
+    """A text field's text with {= … } formulas inside it -> [("text", …), ("formula", …), …].
+
+    "Dear $F{Name}, you owe {=$F{Fee} * 1.17} by $P{Due}": the $F/$P/$V are filled in as they are, and each
+    {= … } is a Java-style expression (like after a leading "=") whose value is put in its place. Braces and quotes
+    inside the formula are allowed ({=$F{A} + "}"}). In formatted (HTML) text the formula is read without its tags
+    and entities (&gt; is >). A "{=" that is never closed stays plain text."""
+    parts: list[tuple[str, str]] = []
+    start = 0
+    while True:
+        open_at = text.find("{=", start)
+        if open_at < 0:
+            break
+        depth, quote, k = 0, "", open_at + 2
+        while k < len(text):
+            char = text[k]
+            if quote:
+                if char == "\\":
+                    k += 2
+                    continue
+                if char == quote:
+                    quote = ""
+            elif char in "\"'":
+                quote = char
+            elif char == "{":
+                depth += 1
+            elif char == "}":
+                if depth == 0:
+                    break
+                depth -= 1
+            k += 1
+        if k >= len(text):
+            break
+        formula = text[open_at + 2:k]
+        if formatted:
+            import html as _html  # noqa: PLC0415
+            formula = _html.unescape(re.sub(r"<[^>]*>", "", formula))
+        parts.append(("text", text[start:open_at]))
+        parts.append(("formula", formula.strip()))
+        start = k + 1
+    parts.append(("text", text[start:]))
+    return [part for part in parts if part[1] or part[0] == "formula"]
+
+
+def fill_template(text: str, resolve, pattern: str, formatted: bool) -> str:
+    """The text with each $F/$P/$V and {= … } replaced by its value. In formatted text (markup HTML / styled) the
+    values are escaped, so data from the database is printed as text and can never add tags to the document."""
+    import html as _html  # noqa: PLC0415
+
+    def shown(value: Any) -> str:
+        out = format_value(value, pattern)
+        return _html.escape(out, quote=False) if formatted else out
+
+    def token(match: re.Match) -> str:
+        name = _html.unescape(match.group(2)) if formatted else match.group(2)
+        return shown(resolve(match.group(1), name))
+
+    out = []
+    for kind, part in template_parts(text, formatted):
+        out.append(shown(eval_expression(part, resolve)) if kind == "formula" else TOKEN_RE.sub(token, part))
+    return "".join(out)
 
 
 def eval_expression(expression: str, resolve) -> Any:
@@ -1130,9 +1221,13 @@ class _Render:
             value: Any = eval_expression(expression.lstrip()[1:], resolve)
             text = format_value(value, pattern)
         elif found:
+            # one field alone: its value is the text (with markup HTML a value that is HTML prints formatted, like Jasper)
             text = format_value(resolve(found.group(1), found.group(2)), pattern)
+        elif element.get("markup", "none") in ("html", "styled"):
+            # words with data between them: the values are printed as text (escaped)
+            text = fill_template(expression, resolve, pattern, formatted=True)
         else:
-            text = TOKEN_RE.sub(lambda m: format_value(resolve(m.group(1), m.group(2)), pattern), expression)
+            text = fill_template(expression, resolve, pattern, formatted=False)
         if text == "" and not element.get("blankWhenNull", True):
             return "null"
         return text

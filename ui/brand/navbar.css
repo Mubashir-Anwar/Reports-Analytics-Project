@@ -118,7 +118,7 @@ details.fx-user > summary::-webkit-details-marker { display: none; }
 .fx-nav .lk-btn { display: inline-grid; place-items: center; width: 34px; height: 34px; border-radius: 9px; border: 1px solid var(--fx-line); background: transparent; color: var(--fx-text); cursor: pointer; }
 .fx-nav .lk-btn:hover { background: var(--fx-hover); }
 
-/* ---------- theme menu (React: shared/ThemeMenu.jsx; Run reports: runner.js) ---------- */
+/* ---------- theme menu (React: shared/ThemeMenu.jsx) ---------- */
 :root { --lk-accent: #4f46e5; }
 :root[data-accent="blue"] { --lk-accent: #2563eb; } :root[data-accent="green"] { --lk-accent: #15803d; } :root[data-accent="teal"] { --lk-accent: #0f766e; }
 :root[data-accent="orange"] { --lk-accent: #c2410c; } :root[data-accent="rose"] { --lk-accent: #e11d48; } :root[data-accent="violet"] { --lk-accent: #7c3aed; }

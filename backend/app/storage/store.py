@@ -248,7 +248,7 @@ class _PostgresDocuments:
             parts = key[len(base):].strip("/").split("/")
             parts = parts if kind == "dir" else parts[:-1]
             found.update("/".join(parts[:i]) for i in range(1, len(parts) + 1))
-        return sorted(found)
+        return sorted(item for item in found if item)
 
     def has_dir(self, key: str) -> bool:
         return self._execute("SELECT 1 FROM reporting_documents WHERE key = %s", (_clean_key(key) + "/",), "one") is not None

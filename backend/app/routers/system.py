@@ -95,7 +95,7 @@ def register(app: FastAPI, ctx: SimpleNamespace) -> None:
 
     @app.get("/reports/connections/{connection_id}/status")
     def report_connection_status(connection_id: str, request: Request) -> dict[str, Any]:
-        """Is the data adapter of the report the user picked reachable? Used by the /ui runner."""
+        """Is the data adapter of the report the user picked reachable?"""
         require_report_access(request)
         profile = next((item for item in load_connection_profiles() if item["id"] == connection_id), None)
         if profile is None:

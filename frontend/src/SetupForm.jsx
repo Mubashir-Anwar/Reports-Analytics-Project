@@ -37,7 +37,7 @@ const useAdapters = (notify, refreshKey) => {
  * tests: show the Test connection / Check query / Try with data tools (Setup only).
  * wrap(key, content, { summary, issues, tested }): puts the adapter, query and fields parts in their own segments.
  */
-export function QueryEditor({ state, dispatch, notify, refreshKey, markLine, markNote, tests = false, wrap, onFocus, onMeta }) {
+export function QueryEditor({ state, dispatch, notify, refreshKey, markLine, markNote, tests = false, wrap, onFocus, onMeta, onDataScreen }) {
   const { report } = state;
   const [busy, setBusy] = useState(false);
   const [adapters, loadAdapters] = useAdapters(notify, refreshKey);
@@ -180,6 +180,7 @@ export function QueryEditor({ state, dispatch, notify, refreshKey, markLine, mar
               <AdapterOptions adapters={adapters} describe={(a) => `${a.name}${a.database ? ` · ${a.database}` : ''}${a.configured ? '' : ' — not configured'}`} />
             </select>
             <button type="button" className="btn sm" onClick={loadAdapters} title="Reload the adapter list">↻</button>
+            {onDataScreen && <button type="button" className="btn sm" onClick={onDataScreen} title="Open the data screen: saved adapters by folder, or connect a new database">＋ Connect / browse</button>}
           </span>
           {!wrap && selected && !selected.configured && <small className="err">This adapter has no saved connection URL yet. Add it in the Data Adapters tab or on /admin → Data sources.</small>}
           {!wrap && adapters !== null && report.connectionId && !known && <small className="err">This adapter ID is not registered on this server. Choose one from the list.</small>}
@@ -610,16 +611,17 @@ function badgeText(issues, tested) {
 }
 
 /** One collapsible part of Setup: number, title, one-line summary and status; its problems first, then its form. */
-function Segment({ id, index, title, hint, summary, issues, tested, open, onToggle, onFocus, hiddenSeg, children }) {
-  const status = statusOf(issues, tested);
+function Segment({ id, index, title, hint, summary, issues: allIssues, tested, open, onToggle, onFocus, hiddenSeg, bare, children }) {
+  const status = statusOf(allIssues, tested);
+  const issues = bare ? allIssues.filter((p) => p.level === 'error' || p.level === 'warn') : allIssues;
   return (
-    <section hidden={hiddenSeg} className={`card seg ${status} ${open ? 'open' : ''}`} id={`seg-${id}`} data-focus={id === 'details' || id === 'parameters' ? id : undefined}>
-      <button type="button" className="seg-head" aria-expanded={open} onClick={onToggle}>
+    <section hidden={hiddenSeg} className={`card seg ${status} ${open ? 'open' : ''} ${bare ? 'bare' : ''}`} id={`seg-${id}`} data-focus={id === 'details' || id === 'parameters' ? id : undefined}>
+      {!bare && <button type="button" className="seg-head" aria-expanded={open} onClick={onToggle}>
         <span className={`step ${status}`}>{index + 1}</span>
         <span className="seg-title"><b>{title}</b><small>{open ? hint : summary}</small></span>
         <span className={`seg-badge ${status}`}>{badgeText(issues, tested)}</span>
         <span className="seg-chevron" aria-hidden="true">{open ? '▾' : '▸'}</span>
-      </button>
+      </button>}
       <div className="seg-body" hidden={!open}>
         {issues.length > 0 && (
           <ul className="seg-issues">
@@ -735,11 +737,11 @@ function Coach({ step, tasks, taskIndex, onTask, onBack, onNext, onShow, allDone
           </span>
         )}
       </div>
-      <div className={`coach-card ${task.done ? 'is-done' : ''}`}>
+      <div className={`coach-card ${task.done ? 'is-done' : ''}`} key={`${step}-${task.key}`}>
         <h3>{task.done && <span className="coach-ok">✓</span>}{task.ask}{task.optional && <small className="coach-opt">optional</small>}</h3>
         <p className="coach-why">{task.why}</p>
-        <div className="coach-example">
-          <span className="coach-example-label">Example</span>
+        <details className="coach-example" key={task.key}>
+          <summary className="coach-example-label">See an example</summary>
           {task.code ? <pre>{task.example}</pre> : <span className="coach-example-text">{task.example}</span>}
           {task.examples && (
             <span className="coach-chips">
@@ -747,8 +749,8 @@ function Coach({ step, tasks, taskIndex, onTask, onBack, onNext, onShow, allDone
             </span>
           )}
           {task.apply && <button type="button" className="btn sm primary-soft coach-apply" onClick={task.apply.run}>{task.apply.label}</button>}
-        </div>
-        <button type="button" className="coach-where" onClick={onShow}>👇 {task.done ? 'Done. You can still change it in the highlighted box below.' : 'Fill it in the highlighted box below'}</button>
+        </details>
+        <button type="button" className="coach-where" onClick={onShow}>👇 {task.done ? 'Done. You can still change it below.' : 'Fill it in below'}</button>
       </div>
       <div className="coach-buttons">
         <button type="button" className="btn" onClick={onBack} disabled={index === 0 && taskIndex === 0}>← Back</button>
@@ -764,7 +766,7 @@ function Coach({ step, tasks, taskIndex, onTask, onBack, onNext, onShow, allDone
   );
 }
 
-export default function SetupForm({ state, dispatch, notify, onTemplates, refreshKey, focus, onFocus, onClearFocus }) {
+export default function SetupForm({ state, dispatch, notify, onTemplates, refreshKey, focus, onFocus, onClearFocus, onDataScreen }) {
   const root = useRef(null);
   useFocusPlace(root, focus);
   const problems = checkSetup(state.report, state.design);
@@ -858,7 +860,7 @@ export default function SetupForm({ state, dispatch, notify, onTemplates, refres
     return (
       <Segment key={id} id={id} index={index} title={title} hint={hint} summary={extra.summary || summaries[id]} issues={issues}
         tested={extra.tested} open={guided ? id === current : open.has(id)} hiddenSeg={guided && id !== current}
-        onToggle={() => (guided ? undefined : toggle(id))} onFocus={onFocus}>{content}</Segment>
+        onToggle={() => (guided ? undefined : toggle(id))} onFocus={onFocus} bare={guided}>{content}</Segment>
     );
   };
 
@@ -892,7 +894,7 @@ export default function SetupForm({ state, dispatch, notify, onTemplates, refres
           <label className="wide" data-guide="description">Description<input value={report.description} onChange={(e) => set({ description: e.target.value })} placeholder="What this report shows and who uses it (optional)" /></label>
         </div>
       ))}
-      <QueryEditor state={state} dispatch={dispatch} notify={notify} refreshKey={refreshKey} tests wrap={segment} onFocus={onFocus} onMeta={setQueryMeta}
+      <QueryEditor state={state} dispatch={dispatch} notify={notify} refreshKey={refreshKey} tests wrap={segment} onFocus={onFocus} onMeta={setQueryMeta} onDataScreen={onDataScreen}
         markLine={focus?.target === 'query' ? focus.line : undefined} markNote={focus?.note} markFixed={Boolean(focus?.fixed)} />
       {segment('parameters', <ParametersEditor state={state} dispatch={dispatch} />)}
       {segment('layout', (
@@ -910,7 +912,7 @@ export default function SetupForm({ state, dispatch, notify, onTemplates, refres
   const allOpen = open.size === SEGMENTS.length;
 
   return (
-    <div className="setup" ref={root}>
+    <div className={`setup ${guided ? 'is-guided' : ''}`} ref={root}>
       <nav className="seg-nav" aria-label="Setup parts">
         <ol>
           {SEGMENTS.map(([id, title], i) => {
@@ -928,10 +930,10 @@ export default function SetupForm({ state, dispatch, notify, onTemplates, refres
           })}
         </ol>
         <div className="seg-overall">
-          <span className={errors ? 'err' : warns ? 'warn' : todos ? 'todo' : 'ok'}>
+          {guided ? <span className={`seg-short ${errors ? 'err' : warns ? 'warn' : todos ? 'todo' : 'ok'}`}>{errors ? `${plural(errors, 'thing')} to fix` : warns ? `${plural(warns, 'warning')}` : todos ? 'Grey steps are still empty' : 'All set ✓'}</span> : <span className={errors ? 'err' : warns ? 'warn' : todos ? 'todo' : 'ok'}>
             {errors ? `${plural(errors, 'thing')} to fix before the report can run` : warns ? `Ready to run · ${plural(warns, 'warning')} to look at`
               : todos ? 'Ready to preview · the grey parts are not filled in yet (without data it prints once, as fixed text)' : 'All parts look fine: the report is ready to run'}
-          </span>
+          </span>}
           <span className="seg-tools">
             {!guided && <button type="button" className="btn sm" onClick={() => setOpen(new Set(allOpen ? [] : SEGMENTS.map(([id]) => id)))}>{allOpen ? 'Collapse all' : 'Expand all'}</button>}
             <span className="seg-mode" role="group" aria-label="How to show the setup">
@@ -951,7 +953,7 @@ export default function SetupForm({ state, dispatch, notify, onTemplates, refres
         <Coach step={current} tasks={stepTasks} taskIndex={Math.min(taskIndex, stepTasks.length - 1)} onTask={setTaskIndex} allDone={errors === 0}
           onBack={prevTask} onNext={nextTask} onShow={() => showTarget(true)} />
       )}
-      {body}
+      <div className="setup-body" key={guided ? current : 'all'}>{body}</div>
     </div>
   );
 }

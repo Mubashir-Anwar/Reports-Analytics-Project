@@ -16,7 +16,7 @@ function ServiceLog({ entries }) {
 }
 
 const when = (iso) => String(iso || '').replace('T', ' ').slice(0, 19);
-const CHANNEL = { runner: 'Run reports', server: 'Report Server', 'designer-preview': 'Designer preview', 'designer-run': 'Designer run',
+const CHANNEL = { runner: 'Report URL', server: 'Report Server', 'designer-preview': 'Designer preview', 'designer-run': 'Designer run',
   schedule: 'Schedule', api: 'API', 'signed-link': 'Signed link' };
 const paramText = (values) => Object.entries(values || {}).map(([k, v]) => `${k}=${Array.isArray(v) ? v.join(',') : v}`).join(' · ');
 

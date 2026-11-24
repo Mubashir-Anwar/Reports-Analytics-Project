@@ -51,7 +51,7 @@ export default function AnalyticsRibbon({ info, view, go, onNewDashboard, onImpo
   const model = info.mayModel;
   const onDash = view.kind === 'dash' && dash.open;
   const onQuery = view.kind === 'q';
-  const tabs = [['home', 'Home'], ['insert', 'Insert'], ['query', 'Query'], ['data', 'Data'], ['view', 'View']];
+  const tabs = [['home', 'Home', 'b'], ['insert', 'Insert', 'g'], ['query', 'Query', 'v'], ['data', 'Data', 'c'], ['view', 'View', 'a']];
   const pick = (tab) => setUi((u) => ({ tab, collapsed: u.tab === tab ? !u.collapsed : false }));
 
   const body = {
@@ -161,8 +161,8 @@ export default function AnalyticsRibbon({ info, view, go, onNewDashboard, onImpo
       <div className="rb-bar">
         <span className="rb-doc"><RIcon name="layouts" size={16} /><b>Analytics</b><small className="hide-narrow">{info.user}</small></span>
         <div className="rb-tabs" role="tablist" aria-label="Ribbon">
-          {tabs.map(([id, label]) => (
-            <button key={id} type="button" role="tab" aria-selected={ui.tab === id} className={ui.tab === id ? 'on' : ''} onClick={() => pick(id)}>{label}</button>
+          {tabs.map(([id, label, tint]) => (
+            <button key={id} type="button" role="tab" aria-selected={ui.tab === id} className={`tint-${tint} ${ui.tab === id ? 'on' : ''}`} onClick={() => pick(id)}>{label}</button>
           ))}
         </div>
         <div className="rb-quickbar">
@@ -170,7 +170,7 @@ export default function AnalyticsRibbon({ info, view, go, onNewDashboard, onImpo
             onClick={() => setUi((u) => ({ ...u, collapsed: !u.collapsed }))}><RIcon name={ui.collapsed ? 'chevronDown' : 'chevronUp'} /></button>
         </div>
       </div>
-      {!ui.collapsed && <div className="rb-body" role="tabpanel">{body[ui.tab]}</div>}
+      {!ui.collapsed && <div className={`rb-body tint-${(tabs.find(([id]) => id === ui.tab) || tabs[0])[2]}`} role="tabpanel">{body[ui.tab]}</div>}
     </header>
   );
 }

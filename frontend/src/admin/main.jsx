@@ -4,6 +4,7 @@ import { createRoot } from 'react-dom/client';
 import AdminApp from './AdminApp.jsx';
 import '../shared/theme.css';
 import '../portal/portal.css';
+import './admin-new.css';
 
 createRoot(document.getElementById('root')).render(
   <StrictMode>

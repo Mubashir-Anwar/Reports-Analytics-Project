@@ -1,4 +1,4 @@
-// React pages use the same download panel as the plain-HTML Run reports page (ui/brand/downloads.js).
+// The download panel shared by the React pages (ui/brand/downloads.js).
 import '../../../ui/brand/downloads.js';
 
 /** Work that runs in this page (the page fetches the file) while the "still downloading" panel is shown. */

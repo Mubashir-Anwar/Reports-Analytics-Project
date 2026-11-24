@@ -573,7 +573,9 @@ def test_secrets_table(backend, monkeypatch):
     monkeypatch.setenv("REPORTING_SECRETS_KEY", "a-long-passphrase-for-the-tests-0123456789")
     assert secret_store._load_private_secrets()["admin_token"] == ADMIN                       # encrypts every row
     assert secret_store.secrets_encrypted()
-    assert all("pw" not in str(row["encryptedValue"]) for row in ent.get_entities().find(ent.SECRETS))
+    # whole secrets, not "pw": two letters can turn up in random ciphertext by chance (a flaky test)
+    plain = ("sftp-pw", "u:pw@main", ADMIN)
+    assert all(text not in str(row["encryptedValue"]) for row in ent.get_entities().find(ent.SECRETS) for text in plain)
     before = {row["secretId"]: row["encryptedValue"] for row in ent.get_entities().find(ent.SECRETS)}
     loaded = secret_store._load_private_secrets()
     loaded["delivery_secrets"] = {}                                                            # the schedule was deleted

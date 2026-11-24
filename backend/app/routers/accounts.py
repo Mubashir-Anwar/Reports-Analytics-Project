@@ -22,8 +22,7 @@ from typing import Any
 from fastapi import FastAPI, HTTPException, Request
 
 from backend.app.constants import USERNAME_PATTERN
-from backend.app.db import entities as ent
-from backend.app.db import model, people
+from backend.app.db import entities as ent, model, people
 from backend.app.logs import LOG
 from backend.app.security import permissions
 from backend.app.security.access import client_address

@@ -229,7 +229,9 @@ def _font(fontname: str) -> tuple[str, bool, bool]:
 
 
 def _text_segments(chars: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """Characters → runs on one line with one style; a wide gap (a column / tab) starts a new run."""
+    """Characters → pieces of one line; a wide gap (a column / tab) or a much bigger / smaller font starts a new
+    piece. Inside a piece every change of style (a bold word, a red word) is a run, so a sentence with a few bold
+    words stays one text with formatting instead of three boxes next to each other."""
     rows: list[list[dict[str, Any]]] = []
     for ch in sorted(chars, key=lambda c: (round(float(c["top"]), 1), float(c["x0"]))):
         size = float(ch.get("size") or 10)
@@ -247,17 +249,22 @@ def _text_segments(chars: list[dict[str, Any]]) -> list[dict[str, Any]]:
             size = float(ch.get("size") or 10)
             style = (ch.get("fontname"), round(size, 1), _color(ch.get("non_stroking_color")))
             gap = float(ch["x0"]) - current["x1"] if current else 0.0
-            if current and (style != current["style"] and ch["text"].strip() or gap > size * 1.2):
+            other_size = current is not None and abs(size - current["size"]) > max(1.0, current["size"] * 0.25)
+            if current and (gap > size * 1.2 or other_size and ch["text"].strip()):
                 segments.append(current)
                 current = None
             if current is None:
                 if not ch["text"].strip():
                     continue
                 current = {"text": "", "x0": float(ch["x0"]), "x1": float(ch["x1"]), "top": float(ch["top"]),
-                           "bottom": float(ch["bottom"]), "size": size, "style": style}
+                           "bottom": float(ch["bottom"]), "size": size, "style": style, "runs": [["", style]]}
             elif gap > size * 0.12 and not current["text"].endswith(" ") and ch["text"] != " ":
                 current["text"] += " "
+                current["runs"][-1][0] += " "
+            if ch["text"].strip() and style != current["runs"][-1][1]:
+                current["runs"].append(["", style])
             current["text"] += ch["text"]
+            current["runs"][-1][0] += ch["text"]
             current["x1"] = max(current["x1"], float(ch["x1"]))
             current["top"] = min(current["top"], float(ch["top"]))
             current["bottom"] = max(current["bottom"], float(ch["bottom"]))
@@ -265,6 +272,13 @@ def _text_segments(chars: list[dict[str, Any]]) -> list[dict[str, Any]]:
             segments.append(current)
     for s in segments:
         s["text"] = s["text"].rstrip()
+        s["runs"] = [run for run in s["runs"] if run[0]]
+        if s["runs"]:
+            s["runs"][-1][0] = s["runs"][-1][0].rstrip()
+            weight: dict[Any, int] = {}
+            for text, style in s["runs"]:
+                weight[style] = weight.get(style, 0) + len(text.strip())
+            s["style"] = max(weight, key=lambda style: weight[style])     # the box takes the style of most of its text
     return [s for s in segments if s["text"]]
 
 
@@ -277,6 +291,8 @@ def _paragraphs(segments: list[dict[str, Any]]) -> list[dict[str, Any]]:
             if (b["style"] == s["style"] and abs(b["x0"] - s["x0"]) < 1.5 and 0 < gap < s["size"] * 1.8
                     and not PLACEHOLDER_RE.search(s["text"]) and not PLACEHOLDER_RE.search(b["text"])):
                 b["text"] += "\n" + s["text"]
+                if "runs" in b and "runs" in s:
+                    b["runs"] = b["runs"] + [["\n", None]] + s["runs"]
                 b["gaps"].append(gap)
                 b["last_top"] = s["top"]
                 b["x1"] = max(b["x1"], s["x1"])
@@ -327,7 +343,56 @@ def _text_element(block: dict[str, Any], image: Any | None, page_width: float) -
         element["backColor"] = back
         if not color or block.get("ocr"):
             element["color"] = ink
+    runs = block.get("runs") or []
+    if any(style is not None and style != block["style"] for _text, style in runs):
+        return _formatted(element, runs, block["style"])
     return _with_placeholders(element)
+
+
+def _formatted(element: dict[str, Any], runs: list[list[Any]], base: tuple[Any, ...]) -> dict[str, Any]:
+    """A text with words in another style -> one HTML-formatted text (<b>, <i>, colour, size), placeholders -> $F{…}.
+    Bold and italic are given per run (the box itself is neither), so a bold box can still have plain words."""
+    import html  # noqa: PLC0415
+
+    fields: list[str] = []
+
+    def to_token(match: re.Match[str]) -> str:
+        field = next(g for g in match.groups() if g)
+        fields.append(field)
+        return f"$F{{{field}}}"
+
+    parts = []
+    for piece, style in runs:
+        if style is None:
+            parts.append("<br>")
+            continue
+        body = html.escape(PLACEHOLDER_RE.sub(to_token, piece), quote=False)
+        core = body.strip()
+        if not core:
+            parts.append(body)
+            continue
+        _family, bold, italic = _font(style[0] or "")
+        css = []
+        if style[2] and base[2] and style[2] != base[2]:
+            css.append(f"color:{style[2]}")
+        if abs(float(style[1]) - float(base[1])) >= 0.5:
+            css.append(f"font-size:{round(float(style[1]) * 2) / 2:g}px")
+        if css:
+            core = f'<span style="{";".join(css)}">{core}</span>'
+        if italic:
+            core = f"<i>{core}</i>"
+        if bold:
+            core = f"<b>{core}</b>"
+        lead, trail = body[: len(body) - len(body.lstrip())], body[len(body.rstrip()):]
+        parts.append(lead + core + trail)
+    markup = "".join(parts)
+    element = {**element, "markup": "html", "bold": False, "italic": False}
+    if not fields:
+        return {**element, "text": markup}
+    element = {k: v for k, v in element.items() if k != "text"}
+    element.update({"type": "textField", "expression": markup, "pattern": "", "blankWhenNull": True, "stretch": False,
+                    "fields": fields})
+    return element
 
 
 def _with_placeholders(element: dict[str, Any]) -> dict[str, Any]:

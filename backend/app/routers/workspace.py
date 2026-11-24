@@ -6,9 +6,8 @@ from typing import Any
 
 from fastapi import FastAPI, HTTPException, Request
 
-from backend.app.db import model
-
 from backend.app.constants import REPORT_ID_PATTERN, WORKSPACE_META
+from backend.app.db import model
 from backend.app.definitions import _dynamic_report, clean_folder
 from backend.app.logs import LOG
 from backend.app.storage.files import add_saved_folder, normalize_folder_path

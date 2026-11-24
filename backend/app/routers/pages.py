@@ -1,4 +1,4 @@
-"""HTML pages: /, /ui, /admin, /designer, /server, /analytics.
+"""HTML pages: /, /admin, /designer, /query, /server, /analytics (/ui, the old Run reports page, now goes to /).
 
 Each page needs a signed-in user with the matching right. Signed out: the browser is sent to the /login
 sign-in page, which comes back to the page afterwards (?next=). Signed in without the right: a short
@@ -10,14 +10,14 @@ import html
 from types import SimpleNamespace
 from urllib.parse import quote
 
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, Request
 from fastapi.responses import HTMLResponse, RedirectResponse, Response
 
 from backend.app.branding import brand_name
 from backend.app.constants import RIGHT_LABELS
 
 # Which page each right opens, in the order the home page picks the first one.
-APP_PAGES = (("designer", "/designer"), ("server", "/server"), ("analytics", "/analytics"), ("runner", "/ui"), ("admin", "/admin"))
+APP_PAGES = (("designer", "/designer"), ("server", "/server"), ("analytics", "/analytics"), ("admin", "/admin"))
 
 _STYLE = """
 :root{color-scheme:light dark;--bg:#f6f7fb;--card:#fff;--ink:#14161f;--muted:#5b6173;--line:#e3e6ef;--accent:#4f46e5}
@@ -45,7 +45,6 @@ def _page(title: str, body: str, status: int = 200) -> HTMLResponse:
 def register(app: FastAPI, ctx: SimpleNamespace) -> None:
     """Add the pages endpoints to the app."""
     react_page = ctx.react_page
-    ui_directory = ctx.ui_directory
     current_session = ctx.current_session
 
     def no_access(session: dict, right: str) -> HTMLResponse:
@@ -74,17 +73,10 @@ def register(app: FastAPI, ctx: SimpleNamespace) -> None:
         return RedirectResponse(url=first, status_code=303)
 
     @app.get("/ui", include_in_schema=False)
-    def report_ui(request: Request) -> Response:
-        page = HTMLResponse((ui_directory / "index.html").read_text(encoding="utf-8"), headers={"Cache-Control": "no-cache"})
-        if current_session(request) is None and (request.headers.get("X-Report-Token") or request.headers.get("X-API-Key")):
-            # A website's server proxies the runner (e.g. Grizzly) and adds its key: the page opens for its visitors,
-            # and every /reports and /generate call through that proxy is checked against the same key.
-            try:
-                ctx.require_report_access(request)
-                return page
-            except HTTPException:
-                pass
-        return guarded(request, "runner", page)
+    def old_runner_page() -> RedirectResponse:
+        """The Run reports page is gone; old links land on the first page the user may open.
+        Running reports by URL (/reports, /generate, /api/v1) still works with the runner right or a key."""
+        return RedirectResponse(url="/", status_code=303)
 
     @app.get("/admin", include_in_schema=False)
     def admin_ui(request: Request) -> Response:
@@ -93,6 +85,11 @@ def register(app: FastAPI, ctx: SimpleNamespace) -> None:
     @app.get("/designer", include_in_schema=False)
     def designer_ui(request: Request) -> Response:
         return guarded(request, "designer", react_page("index.html"))
+
+    @app.get("/query", include_in_schema=False)
+    def query_ui(request: Request) -> Response:
+        """The Query workspace: browse the data adapters and try queries (Designer right)."""
+        return guarded(request, "designer", react_page("query.html"))
 
     @app.get("/analytics", include_in_schema=False)
     def analytics_ui(request: Request) -> Response:

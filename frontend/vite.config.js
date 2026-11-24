@@ -17,6 +17,7 @@ export default defineConfig({
         server: resolve(__dirname, 'server.html'),
         admin: resolve(__dirname, 'admin.html'),
         analytics: resolve(__dirname, 'analytics.html'),
+        query: resolve(__dirname, 'query.html'),
       },
     },
   },

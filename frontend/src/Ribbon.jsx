@@ -1,13 +1,15 @@
-// The Designer's ribbon (like Excel / Word): tabs File, Home, Format, Insert, Page Layout, Formulas, Data, Arrange, Review,
-// Share, View and Help with grouped buttons, a quick-access row (report name, Undo, Redo, Save, Publish) and a collapse button. Every
-// button calls the same actions as the menus and shortcuts (outlineActions.js), so nothing here has its own logic.
+// The Designer's ribbon: a header (report name with the File menu, Saved / Draft status, Design · Setup · Preview · Source,
+// Ctrl K search, Undo, Redo, Check, light / dark, Help, Save, Publish), seven slim tabs (Home, Insert, Format, Arrange, Page,
+// Data & Formulas, Review & Share) with one row of grouped buttons each, and a collapse button. Every button calls the same
+// actions as the menus and shortcuts (outlineActions.js), so nothing here has its own logic. Ctrl K reads these buttons.
 import { useEffect, useRef, useState } from 'react';
 import { selectedIds } from './arrange.js';
 import { FONT_NAMES, PAGE_PRESETS, PALETTE_GROUPS, ZOOM_LIMITS, clampZoom, contentRight, findElement, mapElements, pagePreset } from './designModel.js';
 import HelpDialog from './HelpDialogs.jsx';
 import { MRD_WITH_IMAGES_ACCEPT } from './mrd.js';
 import { publishState } from './panels.jsx';
-import { LookPanel } from './shared/ThemeMenu.jsx';
+import { LookPanel, useLook } from './shared/ThemeMenu.jsx';
+import CommandPalette from './CommandPalette.jsx';
 import FunctionsDialog from './FunctionsDialog.jsx';
 
 const KEY = 'designer-ribbon';
@@ -144,13 +146,20 @@ const Group = ({ label, children, className = '' }) => (
 const Stack = ({ children }) => <div className="rb-stack">{children}</div>;
 const Row = ({ children }) => <div className="rb-row">{children}</div>;
 
-const TABS = [['file', 'File'], ['home', 'Home'], ['format', 'Format'], ['insert', 'Insert'], ['page', 'Page Layout'], ['formulas', 'Formulas'], ['data', 'Data'],
-  ['arrange', 'Arrange'], ['review', 'Review'], ['share', 'Share'], ['view', 'View'], ['help', 'Help']];
+// [id, label, tint] — the tint colours the chosen tab (see --tint-* in shared/theme.css)
+const TABS = [['home', 'Home', 'b'], ['insert', 'Insert', 'g'], ['format', 'Format', 'v'], ['arrange', 'Arrange', 'a'], ['page', 'Page', 'c'],
+  ['data', 'Data & Formulas', 'b'], ['share', 'Review & Share', 'g']];
+const VIEWS = [['design', 'Design'], ['setup', 'Setup'], ['preview', 'Preview'], ['source', 'Source']];
+const HELP_ITEMS = [['help', 'help', 'Help: making a report step by step'], ['keyboard', 'shortcuts', 'Keyboard Shortcuts'], ['book', 'functions', 'Function List'],
+  ['star', 'whatsnew', "What's New"], ['chat', 'feedback', 'Feedback'], ['support', 'support', 'Contact Support']];
 const plural = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`;
 const MARGINS = [['Normal', 30], ['Narrow', 15], ['Wide', 50], ['None', 0]];
 
 function readPrefs() {
-  try { return { tab: 'home', collapsed: false, ...JSON.parse(localStorage.getItem(KEY) || '{}') }; } catch { return { tab: 'home', collapsed: false }; }
+  try {
+    const saved = { tab: 'home', collapsed: false, ...JSON.parse(localStorage.getItem(KEY) || '{}') };
+    return TABS.some(([id]) => id === saved.tab) ? saved : { ...saved, tab: 'home' };   // tabs of the old ribbon (File, View…) are gone
+  } catch { return { tab: 'home', collapsed: false }; }
 }
 
 /**
@@ -159,14 +168,20 @@ function readPrefs() {
  */
 export default function Ribbon({
   state, dispatch, actions, zoom, setZoom, prefs, setPrefs, view, setView, drawer, setDrawer, panels, setPanels, hasClipboard,
-  onNew, onOpenFile, onImportDesign, onSave, onSaveFile, onPublish, onDemo, onTemplates, onQuery, onAdapters, onResetLayout, panelSide, onEditExpression, onGo,
+  onNew, onOpenFile, onImportDesign, onSave, onSaveFile, onSaveJrxml, onPublish, onDemo, onTemplates, onQuery, onAdapters, onResetLayout, panelSide, onEditExpression, onGo,
 }) {
   const [ui, setUi] = useState(readPrefs);
   const [dialog, setDialog] = useState(null);
   const [linkCopied, setLinkCopied] = useState(false);
-  const [look, setLook] = useState(false);
+  const [lookOpen, setLook] = useState(false);
   const [borderWidth, setBorderWidth] = useState(0.5);
   const lookBox = useRef(null);
+  const [menu, setMenu] = useState(null);          // 'file' | 'help' | null
+  const [searching, setSearching] = useState(false);
+  const menuBox = useRef(null);
+  const searchSource = useRef(null);
+  const [look, saveLook] = useLook();
+  const darkNow = look.mode === 'dark' || (look.mode === 'system' && window.ReportingLook?.isDark());
   // Wide screens: show or hide the docked panel. Tablet/phone: the panel slides in over the report.
   const narrow = () => typeof window !== 'undefined' && window.matchMedia('(max-width: 1100px)').matches;
   const DEFAULT_SIDE = { explorer: 'left', outline: 'left', palette: 'right', properties: 'right' };
@@ -186,15 +201,32 @@ export default function Ribbon({
       width, maxHeight: `calc(100vh - ${Math.round(box.bottom + 16)}px)`, overflowY: 'auto', zIndex: 60 };
   };
   useEffect(() => { try { localStorage.setItem(KEY, JSON.stringify(ui)); } catch { /* private mode */ } }, [ui]);
+  // the File and Help menus close on a click outside them
+  useEffect(() => {
+    if (!menu) return undefined;
+    const close = (event) => { if (!menuBox.current?.contains(event.target)) setMenu(null); };
+    const esc = (event) => { if (event.key === 'Escape') setMenu(null); };
+    document.addEventListener('mousedown', close);
+    document.addEventListener('keydown', esc);
+    return () => { document.removeEventListener('mousedown', close); document.removeEventListener('keydown', esc); };
+  }, [menu]);
+  // Ctrl+K (or Ctrl+/ ) opens the action search from anywhere in the Designer
+  useEffect(() => {
+    const onKey = (event) => {
+      if ((event.ctrlKey || event.metaKey) && (event.key.toLowerCase() === 'k' || event.key === '/')) { event.preventDefault(); setMenu(null); setSearching(true); }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, []);
   // the chosen tab is always in view when the tab row scrolls sideways (phones, narrow windows)
   const tabsRow = useRef(null);
   useEffect(() => { tabsRow.current?.querySelector('[aria-selected="true"]')?.scrollIntoView?.({ block: 'nearest', inline: 'nearest' }); }, [ui.tab]);
   useEffect(() => {
-    if (!look) return undefined;
+    if (!lookOpen) return undefined;
     const close = (event) => { if (!lookBox.current?.contains(event.target)) setLook(false); };
     document.addEventListener('mousedown', close);
     return () => document.removeEventListener('mousedown', close);
-  }, [look]);
+  }, [lookOpen]);
 
   const { report, design, selection, tool, past, future, dirty } = state;
   const ids = selectedIds(selection);
@@ -231,26 +263,6 @@ export default function Ribbon({
   const runLink = `${window.location.origin}${runPath}`;
 
   const body = {
-    file: (
-      <>
-        <Group label="Report">
-          <Big icon="newDoc" label="New" title="New report (starts with the layout gallery)" onClick={onNew} />
-          <label className="rb-big" title="Open a .mrd report file, or import a Jaspersoft Studio .jrxml — choose its PNG/JPEG pictures together with it (Ctrl+click) and they are put in the image elements"><RIcon name="open" size={24} /><span>Open file</span>
-            <input type="file" accept={MRD_WITH_IMAGES_ACCEPT} multiple hidden onChange={(e) => { const files = Array.from(e.target.files || []); e.target.value = ''; onOpenFile(files); }} />
-          </label>
-          <Big icon="save" label="Save" title="Save in your designer workspace (Ctrl+S). The server is not changed." onClick={onSave} />
-          <Big icon="download" label="Save as file" title="Download this report as one .mrd file (query, parameters, adapter, design, images)" onClick={onSaveFile} />
-        </Group>
-        <Group label="Server">
-          <Big icon="publish" label="Publish" title="Copy this report to a folder on the report server" onClick={onPublish} primary />
-        </Group>
-        <Group label="Start from">
-          <Big icon="layouts" label="Layouts" title="Apply a layout template (blank page, letter, table, form, certificate)" onClick={onTemplates} />
-          <Big icon="importDesign" label="Import design" title="Rebuild an existing design — PDF, Illustrator .ai, Word, or a PNG/JPEG scan — as this report's layout, then turn its text into fields" onClick={onImportDesign} />
-          <Big icon="demo" label="Demo design" title="A demo design with sample fields" onClick={onDemo} />
-        </Group>
-      </>
-    ),
     home: (
       <>
         <Group label="Clipboard">
@@ -311,10 +323,6 @@ export default function Ribbon({
             <Small icon={lockedAll ? 'unlock' : 'lock'} label={lockedAll ? 'Unlock' : 'Lock'} title="Lock: cannot be moved or resized (Ctrl+L)" onClick={() => actions.toggleLock()} disabled={none} on={lockedAll} />
             <Small icon="trash" label="Delete" title="Delete (Del)" onClick={() => actions.removeSelected()} disabled={none} />
           </Stack>
-        </Group>
-        <Group label="Report">
-          <Big icon="save" label="Save" title="Save in your workspace (Ctrl+S)" onClick={onSave} />
-          <Big icon="publish" label="Publish" title="Copy this report to a folder on the report server" onClick={onPublish} primary />
         </Group>
       </>
     ),
@@ -432,11 +440,6 @@ export default function Ribbon({
           <Big icon="datasets" label="Datasets" title="Extra datasets for Tables, Crosstabs and Lists" onClick={() => onQuery('datasets')} />
           <Big icon="plug" label="Data adapters" title="The databases this report can read" onClick={onAdapters} />
         </Group>
-        <Group label="Look at it">
-          <Big icon="setup" label="Setup" title="ID, title, folder, adapter, query language, formats" on={view === 'setup'} onClick={() => setView('setup')} />
-          <Big icon="eye" label="Preview" title="Run the report with real records" on={view === 'preview'} onClick={() => setView('preview')} />
-          <Big icon="code" label="Source" title="The report definition as text" on={view === 'source'} onClick={() => setView('source')} />
-        </Group>
       </>
     ),
     view: (
@@ -477,8 +480,8 @@ export default function Ribbon({
         </Group>
         <Group label="Look">
           <div className="rb-look" ref={lookBox}>
-            <Big icon="palette" label="Theme" title="Colours, light or dark, title bar, spacing" on={look} onClick={() => setLook(!look)} />
-            {look && <LookPanel onDone={() => setLook(false)} style={lookPlace()} />}
+            <Big icon="palette" label="Theme" title="Colours, light or dark, title bar, spacing" on={lookOpen} onClick={() => setLook(!lookOpen)} />
+            {lookOpen && <LookPanel onDone={() => setLook(false)} style={lookPlace()} />}
           </div>
           <Big icon={ui.collapsed ? 'chevronDown' : 'chevronUp'} label={ui.collapsed ? 'Show ribbon' : 'Hide ribbon'} onClick={() => setUi((u) => ({ ...u, collapsed: !u.collapsed }))} />
         </Group>
@@ -601,6 +604,7 @@ export default function Ribbon({
         <Group label="Share">
           <Big icon="publish" label="Publish" title="Copy this report to a folder on the report server" onClick={onPublish} primary />
           <Big icon="download" label="Save as file" title="Download one .mrd file to send to someone" onClick={onSaveFile} />
+          <Big icon="download" label="Save as JRXML" title="Download a .jrxml to open in Jaspersoft Studio" onClick={onSaveJrxml} />
         </Group>
         <Group label="Link">
           <Big icon="link" label={linkCopied ? 'Copied' : 'Copy link'} title={report.isNew ? 'Save and publish the report first' : `Copy ${runLink}`} disabled={report.isNew} onClick={() => { navigator.clipboard?.writeText(runLink).then(() => setLinkCopied(true), () => {}); setTimeout(() => setLinkCopied(false), 2000); }} />
@@ -611,50 +615,93 @@ export default function Ribbon({
         </Group>
       </>
     ),
-    help: (
-      <>
-        <Group label="Help">
-          <Big icon="help" label="Help" title="Making a report, step by step" onClick={() => setDialog('help')} />
-          <Big icon="keyboard" label="Keyboard Shortcuts" onClick={() => setDialog('shortcuts')} />
-          <Big icon="book" label="Function List" onClick={() => setDialog('functions')} />
-        </Group>
-        <Group label="What's New">
-          <Big icon="star" label="What's New" onClick={() => setDialog('whatsnew')} />
-        </Group>
-        <Group label="Support & Feedback">
-          <Big icon="chat" label="Feedback" onClick={() => setDialog('feedback')} />
-          <Big icon="support" label="Contact Support" onClick={() => setDialog('support')} />
-        </Group>
-      </>
-    ),
   };
 
+  const tabBody = {
+    home: body.home, insert: body.insert, format: body.format, arrange: body.arrange, page: body.page,
+    data: <>{body.data}{body.formulas}</>,
+    share: <>{body.review}{body.share}{body.view}</>,
+  };
+  const fileItems = (
+    <>
+      <button type="button" role="menuitem" onClick={() => { setMenu(null); onNew(); }} title="New report (starts with the layout gallery)"><RIcon name="newDoc" /><span>New report</span></button>
+      <label className="rb-menuitem" role="menuitem" title="Open a .mrd report file, or import a Jaspersoft Studio .jrxml — choose its PNG/JPEG pictures together with it (Ctrl+click)"><RIcon name="open" /><span>Open file (.mrd, .jrxml)</span>
+        <input type="file" accept={MRD_WITH_IMAGES_ACCEPT} multiple hidden onChange={(e) => { const files = Array.from(e.target.files || []); e.target.value = ''; setMenu(null); onOpenFile(files); }} />
+      </label>
+      <button type="button" role="menuitem" onClick={() => { setMenu(null); onSave(); }} title="Save in your designer workspace. The server is not changed."><RIcon name="save" /><span>Save</span><kbd>Ctrl S</kbd></button>
+      <button type="button" role="menuitem" onClick={() => { setMenu(null); onSaveFile(); }} title="Download this report as one .mrd file (query, parameters, adapter, design, images)"><RIcon name="download" /><span>Save as file (.mrd)</span></button>
+      <button type="button" role="menuitem" onClick={() => { setMenu(null); onSaveJrxml?.(); }} title="Download a Jaspersoft Studio .jrxml of this report, to open and edit in Studio"><RIcon name="download" /><span>Save as JRXML (Jaspersoft)</span></button>
+      <button type="button" role="menuitem" onClick={() => { setMenu(null); onPublish(); }} title="Copy this report to a folder on the report server"><RIcon name="publish" /><span>Publish to the server</span></button>
+      <hr />
+      <button type="button" role="menuitem" onClick={() => { setMenu(null); onTemplates(); }} title="Apply a layout template"><RIcon name="layouts" /><span>Layouts</span></button>
+      <button type="button" role="menuitem" onClick={() => { setMenu(null); onImportDesign(); }} title="Rebuild an existing design — PDF, Illustrator .ai, Word, or a PNG/JPEG scan — as this report's layout"><RIcon name="importDesign" /><span>Import design (PDF, AI, Word, scan)</span></button>
+      <button type="button" role="menuitem" onClick={() => { setMenu(null); onDemo(); }} title="A demo design with sample fields"><RIcon name="demo" /><span>Demo design</span></button>
+    </>
+  );
+  const helpItems = HELP_ITEMS.map(([icon, id, label]) => (
+    <button key={id} type="button" role="menuitem" onClick={() => { setMenu(null); setDialog(id); }}><RIcon name={icon} /><span>{label}</span></button>
+  ));
+  const tint = TABS.find(([id]) => id === ui.tab)?.[2] || 'b';
+
   return (
-    <header className={`ribbon ${ui.collapsed ? 'collapsed' : ''}`}>
-      <div className="rb-bar">
+    <header className={`ribbon ${ui.collapsed ? 'collapsed' : ''} ${view !== 'design' ? 'step-view' : ''}`}>
+      <div className="rb-bar" ref={menuBox}>
         <button type="button" className="rb-quick drawer-btn" aria-label="Repository explorer and outline" aria-expanded={drawer === 'left'} onClick={() => setDrawer(drawer === 'left' ? null : 'left')}><RIcon name="panelL" /></button>
-        <span className="rb-doc" title={`${report.title || 'Untitled'}${report.folder ? ` — ${report.folder}` : ''}`}>
-          <RIcon name="table" size={16} /><b>{report.title || 'Untitled'}</b>{dirty && <span className="rb-dirty" title="Not saved">●</span>}
-          {report.folder && <small className="hide-narrow">in {report.folder}</small>}
-        </span>
-        <div className="rb-tabs" role="tablist" aria-label="Ribbon" ref={tabsRow}>
-          {TABS.map(([id, label]) => (
-            <button key={id} type="button" role="tab" aria-selected={ui.tab === id} className={`${ui.tab === id ? 'on' : ''} ${id === 'file' ? 'file' : ''}`}
-              onClick={() => pick(id)} onDoubleClick={() => setUi((u) => ({ ...u, collapsed: !u.collapsed }))}>{label}</button>
+        <div className="rb-filewrap">
+          <button type="button" className="rb-doc" aria-haspopup="menu" aria-expanded={menu === 'file'} onClick={() => setMenu(menu === 'file' ? null : 'file')}
+            title={`File menu — ${report.title || 'Untitled'}${report.folder ? ` in ${report.folder}` : ''}`}>
+            <b>{report.title || 'Untitled'}</b>{dirty && <span className="rb-dirty" title="Not saved">●</span>}
+            {report.folder && <small className="hide-narrow">in {report.folder}</small>}<span className="rb-caret" aria-hidden="true">▾</span>
+          </button>
+          {menu === 'file' && <div className="rb-menu" role="menu" aria-label="File">{fileItems}</div>}
+        </div>
+        <span className={`pub-chip ${status.cls}`} title={status.text}>{status.text}</span>
+        <div className="rb-views" role="tablist" aria-label="View">
+          {VIEWS.map(([id, label]) => (
+            <button key={id} type="button" role="tab" aria-selected={view === id} className={view === id ? 'on' : ''} onClick={() => setView(id)}>{label}</button>
           ))}
         </div>
+        <button type="button" className="rb-search" onClick={() => { setMenu(null); setSearching(true); }} title="Find any action by name (Ctrl+K)">
+          <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7" /><path d="m20 20-3.5-3.5" /></svg>
+          <span className="lbl">Search any action</span><kbd>Ctrl K</kbd>
+        </button>
         <div className="rb-quickbar">
           <button type="button" className="rb-quick rb-undo" title="Undo (Ctrl+Z)" aria-label="Undo" disabled={!past.length} onClick={() => dispatch({ type: 'UNDO' })}><RIcon name="undo" /></button>
           <button type="button" className="rb-quick rb-undo" title="Redo (Ctrl+Y)" aria-label="Redo" disabled={!future.length} onClick={() => dispatch({ type: 'REDO' })}><RIcon name="redo" /></button>
-          <span className={`pub-chip ${status.cls}`} title={status.text}>{status.text}</span>
+          <button type="button" className="rb-check" title="Check report: list every problem the designer can find" onClick={() => setDialog('check')}><RIcon name="check" size={15} /><span className="lbl">Check</span></button>
+          <button type="button" className="rb-quick" title={darkNow ? 'Switch to light mode' : 'Switch to dark mode'} aria-label={darkNow ? 'Switch to light mode' : 'Switch to dark mode'}
+            onClick={() => saveLook({ mode: darkNow ? 'light' : 'dark' })}><span className="rb-moon" aria-hidden="true">{darkNow ? '☀' : '☾'}</span></button>
+          <div className="rb-helpwrap">
+            <button type="button" className="rb-quick" title="Help" aria-label="Help" aria-haspopup="menu" aria-expanded={menu === 'help'} onClick={() => setMenu(menu === 'help' ? null : 'help')}><RIcon name="help" /></button>
+            {menu === 'help' && <div className="rb-menu right" role="menu" aria-label="Help">{helpItems}</div>}
+          </div>
           <button type="button" className="rb-quick" title="Save (Ctrl+S)" aria-label="Save" onClick={onSave}><RIcon name="save" /></button>
           <button type="button" className="btn primary rb-publish" title="Copy this report to a folder on the report server" onClick={onPublish}><RIcon name="publish" size={16} /><span className="lbl">Publish</span></button>
-          <button type="button" className="rb-quick" title={ui.collapsed ? 'Show the ribbon' : 'Hide the ribbon (double-click a tab does the same)'} aria-label={ui.collapsed ? 'Show the ribbon' : 'Hide the ribbon'}
-            onClick={() => setUi((u) => ({ ...u, collapsed: !u.collapsed }))}><RIcon name={ui.collapsed ? 'chevronDown' : 'chevronUp'} /></button>
           <button type="button" className="rb-quick drawer-btn" aria-label="Palette and properties" aria-expanded={drawer === 'right'} onClick={() => setDrawer(drawer === 'right' ? null : 'right')}><RIcon name="panelR" /></button>
         </div>
       </div>
-      {!ui.collapsed && <div key={ui.tab} className="rb-body" role="tabpanel" aria-label={TABS.find(([id]) => id === ui.tab)?.[1]}>{body[ui.tab] || body.home}</div>}
+      <div className="rb-tabrow">
+        <div className="rb-tabs" role="tablist" aria-label="Ribbon" ref={tabsRow}>
+          {TABS.map(([id, label, t]) => (
+            <button key={id} type="button" role="tab" aria-selected={ui.tab === id} className={`tint-${t} ${ui.tab === id ? 'on' : ''}`}
+              onClick={() => pick(id)} onDoubleClick={() => setUi((u) => ({ ...u, collapsed: !u.collapsed }))}>{label}</button>
+          ))}
+        </div>
+        <button type="button" className="rb-quick rb-collapse" title={ui.collapsed ? 'Show the ribbon' : 'Hide the ribbon (double-click a tab does the same)'} aria-label={ui.collapsed ? 'Show the ribbon' : 'Hide the ribbon'}
+          onClick={() => setUi((u) => ({ ...u, collapsed: !u.collapsed }))}><RIcon name={ui.collapsed ? 'chevronDown' : 'chevronUp'} /></button>
+      </div>
+      {!ui.collapsed && <div key={ui.tab} className={`rb-body tint-${tint}`} role="tabpanel" aria-label={TABS.find(([id]) => id === ui.tab)?.[1]}>{tabBody[ui.tab] || tabBody.home}</div>}
+      {searching && (
+        <>
+          <div ref={searchSource} hidden>
+            {TABS.map(([id, label]) => <div key={id} data-cmd-tab={label}>{tabBody[id]}</div>)}
+            <div data-cmd-tab="File">{fileItems}</div>
+            <div data-cmd-tab="Help">{helpItems}</div>
+            <div data-cmd-tab="View">{VIEWS.map(([id, label]) => <button key={id} type="button" onClick={() => setView(id)} title={`Show the ${label} view`}><span>{label}</span></button>)}</div>
+          </div>
+          <CommandPalette sourceRef={searchSource} onClose={() => setSearching(false)} />
+        </>
+      )}
       {dialog === 'customFunctions' && (
         <FunctionsDialog functions={design.functions || []} onClose={() => setDialog(null)}
           onSave={(functions) => { dispatch({ type: 'DESIGN', update: (d) => ({ ...d, functions }) }); setDialog(null); }} />

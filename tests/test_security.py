@@ -1,6 +1,5 @@
 """Security checks: nothing is open without credentials, uploads cannot attack the XML parser, report pipelines
 cannot read server internals, secrets are encrypted at rest, passwords use a strong hash, old outputs go away."""
-import json
 import re
 import sys
 from datetime import datetime, timedelta, timezone
@@ -25,7 +24,7 @@ from test_workspace_and_server import ADMIN, client, login  # noqa: E402,F401
 # pages are public HTML shells (their data comes from protected APIs); login/logout and probes are public by design
 # (signed out, the pages only redirect to /login; see test_access_rights.py)
 PUBLIC = {("GET", "/"), ("GET", "/ui"), ("GET", "/designer"), ("GET", "/server"), ("GET", "/admin"), ("GET", "/ready"),
-          ("GET", "/analytics"), ("GET", "/login"),
+          ("GET", "/analytics"), ("GET", "/query"), ("GET", "/login"),
           ("GET", "/api/v1/openapi.json"),                       # describes the public API; no data
           ("GET", "/api/branding"),                              # product name and tagline for the sign-in page; no data
           ("GET", "/health"), ("POST", "/api/server/logout"), ("GET", "/docs"), ("GET", "/redoc"),

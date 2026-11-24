@@ -1,7 +1,9 @@
 import { useMemo, useRef, useState } from 'react';
-import { BUILTIN_VARIABLES } from './designModel.js';
+import { BUILTIN_VARIABLES, safeMarkupHtml } from './designModel.js';
 import { missingFields, similarFields, knownFields } from './fieldCheck.js';
 import HighlightArea, { knownNames } from './ExprHighlight.jsx';
+import RichTextEditor from './RichTextEditor.jsx';
+import { HAS_DATA, htmlToPlain, isJavaExpression, plainToHtml } from './richText.js';
 
 const TOKEN = /\$[FPV]\{[^{}]+\}/;
 
@@ -29,6 +31,9 @@ const FUNCTIONS = [
 export default function ExpressionEditor({ element, report, design, onSave, onClose, onAddField }) {
   const isStatic = element.type === 'staticText';
   const [text, setText] = useState(isStatic ? element.text || '' : element.expression || '');
+  // Formatted text: some words bold / coloured, data as chips between the words (markup HTML)
+  const [formatted, setFormatted] = useState(element.markup === 'html' && !isJavaExpression(isStatic ? element.text : element.expression));
+  const rich = useRef(null);
   const [category, setCategory] = useState('fields');
   const [filter, setFilter] = useState('');
   const [picked, setPicked] = useState(null);
@@ -54,7 +59,7 @@ export default function ExpressionEditor({ element, report, design, onSave, onCl
   }), [report, design]);
 
   const items = groups[category].items.filter((item) => !filter || item.name.toLowerCase().includes(filter.toLowerCase()));
-  const willConvert = isStatic && TOKEN.test(text);
+  const willConvert = isStatic && (formatted ? HAS_DATA.test(text) : TOKEN.test(text));
   const missing = missingFields(text, report, design);
   const typed = filter.trim().replace(/^\$F\{|\}$/g, '');
   const filterSimilar = category === 'fields' && typed && !items.length ? similarFields(typed, knownFields(report, design)) : [];
@@ -64,6 +69,10 @@ export default function ExpressionEditor({ element, report, design, onSave, onCl
   const known = useMemo(() => knownNames(report, design, BUILTIN_VARIABLES), [report, design]);
 
   const insert = (item) => {
+    if (formatted) {
+      rich.current?.insertToken(item.java ? `{=${item.insert}}` : item.insert);
+      return;
+    }
     const node = area.current;
     let value = item.insert;
     let current = text;
@@ -84,9 +93,20 @@ export default function ExpressionEditor({ element, report, design, onSave, onCl
   };
 
   const save = () => {
-    if (isStatic && willConvert) onSave({ type: 'textField', expression: text, pattern: element.pattern || '', blankWhenNull: true, text: undefined });
-    else if (isStatic) onSave({ text });
-    else onSave({ expression: text });
+    const markup = formatted ? { markup: 'html' } : element.markup === 'html' ? { markup: 'none' } : {};
+    if (isStatic && willConvert) onSave({ type: 'textField', expression: text, pattern: element.pattern || '', blankWhenNull: true, text: undefined, ...markup });
+    else if (isStatic) onSave({ text, ...markup });
+    else onSave({ expression: text, ...markup });
+  };
+  const switchMode = (on) => {
+    if (on === formatted) return;
+    if (on) {
+      setText(element.markup === 'styled' ? safeMarkupHtml(text, 'styled') : plainToHtml(text));
+    } else {
+      if (!window.confirm('Back to plain text? The bold, italic, colours and sizes of the words are removed; the text stays.')) return;
+      setText(htmlToPlain(text));
+    }
+    setFormatted(on);
   };
 
   return (
@@ -100,12 +120,27 @@ export default function ExpressionEditor({ element, report, design, onSave, onCl
               : 'Text with $F{…} / $P{…} / $V{…} is filled in as written (e.g. “Branch: $F{Branch}”). Start with = for a Java-style expression (e.g. =$F{A} + " " + $F{B}).'}
           </p>
         </div>
-        <HighlightArea ref={area} className="expr-text" rows={5} autoFocus value={text} known={known} onChange={(e) => setText(e.target.value)} />
-        <p className="hl-legend">
+        <div className="expr-mode" role="tablist" aria-label="How the text is written">
+          <button type="button" role="tab" aria-selected={!formatted} className={!formatted ? 'on' : ''} onClick={() => switchMode(false)}>
+            {isStatic ? 'Plain text' : 'Text / expression'}
+          </button>
+          <button type="button" role="tab" aria-selected={formatted} className={formatted ? 'on' : ''} disabled={!formatted && javaMode}
+            title={javaMode ? 'A Java expression (starting with =) makes its own text. Remove the = to format words, and put formulas in ƒx.' : 'Bold, italic, colour on some words; data between the words'}
+            onClick={() => switchMode(true)}><b>B</b> <i>I</i> <u>U</u> Formatted text</button>
+        </div>
+        {formatted ? (
+          <RichTextEditor ref={rich} value={text} onChange={setText} autoFocus rows={6} label="Formatted text" />
+        ) : (
+          <HighlightArea ref={area} className="expr-text" rows={5} autoFocus value={text} known={known} onChange={(e) => setText(e.target.value)} />
+        )}
+        {formatted ? (
+          <p className="hl-legend"><span className="rt-chip rt-F">field</span><span className="rt-chip rt-P">parameter</span><span className="rt-chip rt-V">variable</span><span className="rt-chip rt-fx">ƒx formula</span>
+            <span className="hl-plain">Double-click on the left to put one where the cursor is. Functions go in as ƒx formulas.</span></p>
+        ) : <p className="hl-legend">
           <span className="tk-field">$F&#123;field&#125;</span><span className="tk-param">$P&#123;parameter&#125;</span><span className="tk-var">$V&#123;variable&#125;</span>
           <span className="hl-plain">plain text</span>{javaMode && <><span className="tk-string">"text"</span><span className="tk-number">123</span><span className="tk-call">method()</span></>}
           <span className="tk-field tk-missing">not in the report</span>
-        </p>
+        </p>}
         <div className="expr-browser">
           <ul className="expr-cats">
             {Object.entries(groups).map(([key, group]) => (
