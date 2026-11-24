@@ -25,8 +25,8 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 COPY backend ./backend
-# the report runner page (/ui), the embed viewer and the brand files; the React pages come from stage 1
-COPY ui/index.html ui/runner.css ui/runner.js ui/styles.css ui/signout.js ./ui/
+# sign-out helper, the embed viewer and the brand files; the React pages come from stage 1
+COPY ui/signout.js ./ui/
 COPY ui/embed ./ui/embed
 COPY ui/brand ./ui/brand
 COPY --from=frontend /src/ui/app ./ui/app
