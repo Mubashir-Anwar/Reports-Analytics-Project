@@ -270,7 +270,9 @@ def register(app: FastAPI, ctx: SimpleNamespace) -> None:
         session = modeller(request)
         ctx.require_json_request(request)
         item = find_dataset(dataset_id)
-        users_of = [d["name"] for d in store.dashboards() if any(t.get("dataset") == dataset_id for t in d.get("tiles") or [])]
+        # a dataset counts as used wherever a dashboard names it: a visual's own dataset, its group-by / values /
+        # filters (a related dataset) or a page filter, the same check as the Admin delete
+        users_of = [d["name"] for d in store.dashboards() if dataset_id in bundle.used_datasets(d)]
         if users_of and not force:
             raise HTTPException(status_code=409, detail=f"Used by the dashboard(s) {', '.join(users_of[:5])}: "
                                                         "remove those visuals first, or delete with force=true")

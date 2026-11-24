@@ -49,6 +49,23 @@ JRXML = """<?xml version="1.0" encoding="UTF-8"?>
   <detail><band height="20"><textField><reportElement x="0" y="0" width="200" height="16"/><textFieldExpression><![CDATA[$F{Name}]]></textFieldExpression></textField></band></detail>
 </jasperReport>"""
 
+def blank_png(width: int = 200, height: int = 280) -> str:
+    """A white page as a PNG data URL (no imaging library needed); the importer wants at least 50 x 50 pixels."""
+    import struct
+    import zlib
+
+    def chunk(kind: bytes, data: bytes) -> bytes:
+        return struct.pack(">I", len(data)) + kind + data + struct.pack(">I", zlib.crc32(kind + data) & 0xFFFFFFFF)
+    rows = b"".join(b"\x00" + b"\xff" * width * 3 for _ in range(height))
+    raw = (b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", struct.pack(">IIBBBBB", width, height, 8, 2, 0, 0, 0))
+           + chunk(b"IDAT", zlib.compress(rows, 9)) + chunk(b"IEND", b""))
+    return "data:image/png;base64," + base64.b64encode(raw).decode("ascii")
+
+
+PAGE_PNG = blank_png()
+RUNNER_PASSWORD = "Postman-pass-2026"
+RUNNER_NEW_PASSWORD = "Postman-pass-2026-new"
+
 ITEMS: list[dict] = []
 FOLDER: list = []
 
@@ -104,6 +121,8 @@ req("Sign-in page", "GET", "/login", auth="none")
 req("Designer page sends a signed-out user to sign-in", "GET", "/designer", auth="none", expect=(303,), redirects=False,
     checks="pm.test('redirects to /login', function () { pm.expect(pm.response.headers.get('Location')).to.include('/login'); });")
 req("Admin API refuses without sign-in", "GET", "/api/admin/users", auth="none", expect=(401,))
+req("Forgot password: which ways the sign-in page offers", "GET", "/api/server/password-help", auth="none",
+    checks="pm.test('admin approval is offered', function () { pm.expect(pm.response.json().adminApproval).to.eql(true); });")
 req("Public API refuses without a key", "GET", "/api/v1/reports", auth="none", expect=(401,))
 
 folder("02 Sign in", "Signs in with {{username}} / {{password}}; Postman keeps the session cookie for the next requests.")
@@ -111,8 +130,10 @@ req("Sign in", "POST", "/api/server/login", body={"username": "{{username}}", "p
     checks="pm.test('has rights', function () { pm.expect(pm.response.json().rights).to.be.an('array'); });")
 req("Who am I (session)", "GET", "/api/server/me")
 req("Home sends to the first allowed page", "GET", "/", expect=(303,), redirects=False)
-for page in ("/designer", "/server", "/admin", "/ui", "/analytics"):
+for page in ("/designer", "/query", "/server", "/admin", "/analytics"):
     req(f"Page {page}", "GET", page)
+req("The old Run reports page (/ui) goes home", "GET", "/ui", expect=(303,), redirects=False,
+    checks="pm.test('redirects to /', function () { pm.expect(pm.response.headers.get('Location')).to.eql('/'); });")
 req("Admin whoami", "GET", "/api/admin/whoami")
 req("System status and production checklist", "GET", "/api/admin/system/status")
 
@@ -139,17 +160,58 @@ req("Validate a definition", "POST", "/api/admin/designer/validate", body={"defi
 req("Render a design to PDF", "POST", "/api/admin/designer/render",
     body={"design": DESIGN, "columns": ["Name", "Amount"], "rows": [{"Name": "Ali", "Amount": 1}], "parameters": {}, "title": "Render", "format": "pdf"})
 req("Import a JRXML (Jaspersoft Studio)", "POST", "/api/admin/jrxml/import", body={"xml": JRXML})
+req("Save as JRXML (for Jaspersoft Studio)", "POST", "/api/admin/jrxml/export", body=definition(),
+    checks="pm.test('a jasperReport file', function () { const b = pm.response.json(); pm.expect(b.xml).to.include('<jasperReport'); "
+           "pm.expect(b.fileName).to.include('.jrxml'); });")
+req("Import an existing design (PNG, PDF, Word, .ai)", "POST", "/api/admin/designer/import-design",
+    body={"file": PAGE_PNG, "name": "page.png", "mode": "elements", "page": 1, "textOnTop": True},
+    description="Nothing is saved: the answer is the page size, a background picture and the elements found.")
+req("Custom function: try it", "POST", "/api/admin/designer/functions/try",
+    body={"functions": [{"name": "FullName", "params": ["first", "last"], "body": "first + \" \" + last"}],
+          "expression": "FullName($F{First}, \"Khan\")", "values": {"First": "Ali"}},
+    checks="pm.test('Ali Khan', function () { pm.expect(pm.response.json().value).to.eql('Ali Khan'); });")
+req("Custom function: a wrong one is refused", "POST", "/api/admin/designer/functions/try",
+    body={"functions": [{"name": "Bad", "params": [], "body": "1 +"}], "expression": "Bad()"}, expect=(422,))
 req("Create workspace folder", "POST", "/api/admin/workspace-folders", body={"path": "Postman"})
 req("Remove a draft left by an earlier run", "DELETE", f"/api/admin/workspace/{REPORT}", expect=(200, 404))
 req("Save draft PM_ORDERS", "PUT", f"/api/admin/workspace/{REPORT}?create=true", body=definition())
 req("List drafts", "GET", "/api/admin/workspace")
 req("Get draft", "GET", f"/api/admin/workspace/{REPORT}")
+req("Mark the draft as open in the designer", "POST", f"/api/admin/workspace/{REPORT}/editing", body={"open": True},
+    description="The designer sends this every 30 s while the draft is open; the answer says who else is editing it.")
+req("Mark the draft as closed", "POST", f"/api/admin/workspace/{REPORT}/editing", body={"open": False})
+req("Workspace folder contents (what deleting it would touch)", "GET", "/api/admin/workspace-folders/contents?path=Postman",
+    checks="pm.test('lists the draft', function () { pm.expect(pm.response.json().reports.length).to.be.above(0); });")
 req("Preview draft (20 rows)", "POST", "/api/admin/drafts/preview",
     body={"definition": definition(), "parameters": {"Branch": "LHR"}, "connectionId": "pm_mongo"},
     checks="pm.test('two LHR rows', function () { pm.expect(pm.response.json().rowCount).to.eql(2); });")
 req("Run draft to CSV", "POST", "/api/admin/drafts/run",
     body={"definition": definition(), "parameters": {"Branch": "LHR"}, "connectionId": "pm_mongo", "format": "csv"})
 req("Publish draft to the server", "POST", f"/api/admin/workspace/{REPORT}/publish", body={"folder": "Postman", "replace": True})
+
+folder("05b Query workspace (/query)",
+       "Browse a data adapter and try queries without making a report: MongoDB find / aggregate / fields, and SQL. "
+       "Everything is read-only ($out, $merge, $where and $function are refused; SQL runs one read-only statement).")
+req("MongoDB: collections of pm_mongo", "POST", "/api/query/mongo/collections", body={"connectionId": "pm_mongo"},
+    checks="pm.test('has orders', function () { pm.expect(pm.response.json().collections.map(c => c.name)).to.include('orders'); });")
+req("MongoDB: find with filter, projection and sort", "POST", "/api/query/mongo/find",
+    body={"connectionId": "pm_mongo", "collection": "orders", "filter": '{ Branch: "LHR" }', "projection": "{ _id: 0, Name: 1, Amount: 1 }",
+          "sort": "{ Amount: -1 }", "skip": 0, "limit": 50},
+    checks="pm.test('two LHR orders', function () { const b = pm.response.json(); pm.expect(b.total).to.eql(2); pm.expect(b.documents.length).to.eql(2); });")
+req("MongoDB: aggregate (stages as shell text) and the code", "POST", "/api/query/mongo/aggregate",
+    body={"connectionId": "pm_mongo", "collection": "orders", "limit": 50,
+          "stages": ['{ $group: { _id: "$Branch", total: { $sum: "$Amount" } } }', "{ $sort: { total: -1 } }"]},
+    checks="pm.test('rows and code', function () { const b = pm.response.json(); pm.expect(b.documents.length).to.be.above(0); "
+           "pm.expect(b.code).to.include('aggregate'); });")
+req("MongoDB: a writing stage is refused", "POST", "/api/query/mongo/aggregate",
+    body={"connectionId": "pm_mongo", "collection": "orders", "stages": ['{ $out: "copy" }']}, expect=(422,))
+req("MongoDB: fields in a sample", "POST", "/api/query/mongo/fields", body={"connectionId": "pm_mongo", "collection": "orders"},
+    checks="pm.test('has Amount', function () { pm.expect(pm.response.json().fields.map(f => f.path)).to.include('Amount'); });")
+req("SQL: schema (needs a SQL adapter: refused for MongoDB)", "POST", "/api/query/sql/schema", body={"connectionId": "pm_mongo"},
+    expect=(422,), description="With a SQL adapter the answer has schemas, tables, columns, primary and foreign keys.")
+req("SQL: run a SELECT (needs a SQL adapter: refused for MongoDB)", "POST", "/api/query/sql/run",
+    body={"connectionId": "pm_mongo", "sql": "SELECT 1 AS one", "parameters": {}, "limit": 200}, expect=(422,),
+    description="With a SQL adapter: one read-only statement, rolled back; $P{Name} values come from parameters.")
 
 folder("06 Published reports (Admin)")
 req("List published reports", "GET", "/api/admin/reports")
@@ -163,9 +225,47 @@ req("Import .mrd", "POST", "/api/admin/reports/import",
     raw_body='{"xml": {{mrdXml}}, "folder": "Postman", "replace": true, "connectionId": "pm_mongo"}')
 
 folder("07 Users and rights (Admin)")
-req("Create user pm_runner", "POST", "/api/admin/users", body={"username": "pm_runner", "password": "Postman-pass-2026", "rights": ["runner"]})
+req("New user: is the name or e-mail already taken?", "GET", "/api/admin/users/available?username=pm_runner&email=pm_runner%40example.com",
+    checks="pm.test('answers per field', function () { pm.expect(pm.response.json().username).to.have.property('taken'); });")
+req("Remove pm_runner left by an earlier run", "DELETE", "/api/admin/users/pm_runner", expect=(200, 404))
+req("Create user pm_runner", "POST", "/api/admin/users",
+    body={"username": "pm_runner", "password": RUNNER_PASSWORD, "rights": ["runner"], "fullName": "Postman Runner",
+          "email": "pm_runner@example.com"})
 req("List users", "GET", "/api/admin/users")
 req("Change rights", "PUT", "/api/admin/users/pm_runner", body={"rights": ["runner", "server"]})
+req("Create team PM team", "POST", "/api/admin/user-groups", body={"name": "PM team", "description": "Made by Postman", "members": ["pm_runner"]},
+    save={"groupId": "pm.response.json().group.groupId"})
+req("Teams", "GET", "/api/admin/user-groups")
+req("Change the team", "PUT", "/api/admin/user-groups/{{groupId}}", body={"name": "PM team", "description": "Edited", "members": ["pm_runner"]})
+
+folder("07b My account and forgotten passwords",
+       "Signs in as pm_runner for My account, asks for a password reset as a visitor, approves it as {{username}} and uses "
+       "the one-time link. Ends signed in as {{username}} again.")
+req("Sign in as pm_runner", "POST", "/api/server/login", body={"username": "pm_runner", "password": RUNNER_PASSWORD})
+req("My account", "GET", "/api/server/account",
+    checks="pm.test('is pm_runner', function () { pm.expect(pm.response.json().username).to.eql('pm_runner'); });")
+req("Change my name and phone", "PUT", "/api/server/account", body={"fullName": "Postman Runner (edited)", "email": "pm_runner@example.com"})
+req("Change my password: a wrong current password is refused", "POST", "/api/server/account/password",
+    body={"currentPassword": "not-it", "newPassword": RUNNER_NEW_PASSWORD}, expect=(403,))
+req("Team chat: who is online (heartbeat)", "POST", "/api/team/heartbeat", body={"tab": "postman", "app": "server", "place": "", "title": "Postman"})
+req("Team chat: people I can write to", "GET", "/api/team/users")
+req("Team chat: send a message", "POST", "/api/team/messages", body={"text": "Hello from Postman", "to": None, "place": ""})
+req("Team chat: messages", "GET", "/api/team/messages?after=0",
+    checks="pm.test('has the message', function () { pm.expect(pm.response.json().messages.map(m => m.text)).to.include('Hello from Postman'); });")
+req("Team chat: leave", "DELETE", "/api/team/heartbeat?tab=postman", body={})
+req("Sign out pm_runner", "POST", "/api/server/logout", body={})
+req("Forgot password (a visitor asks; the answer never says whether the account exists)", "POST", "/api/server/forgot-password",
+    auth="none", body={"username": "pm_runner", "method": "admin_approval"})
+req("Sign in again as {{username}}", "POST", "/api/server/login", body={"username": "{{username}}", "password": "{{password}}"})
+req("Password reset requests", "GET", "/api/admin/password-resets",
+    save={"resetId": "pm.response.json().requests.find(r => r.username === 'pm_runner' && r.status === 'waiting').resetId"})
+req("Approve it: a one-time link to pass on", "POST", "/api/admin/password-resets/{{resetId}}/approve", body={},
+    save={"resetToken": "pm.response.json().link.split('reset=')[1]"})
+req("The link sets a new password", "POST", "/api/server/reset-password", auth="none",
+    raw_body='{"token": "{{resetToken}}", "password": "' + RUNNER_NEW_PASSWORD + '"}')
+req("The link works once", "POST", "/api/server/reset-password", auth="none",
+    raw_body='{"token": "{{resetToken}}", "password": "' + RUNNER_NEW_PASSWORD + '-2"}', expect=(400,))
+req("A decided request cannot be decided again", "POST", "/api/admin/password-resets/{{resetId}}/reject", body={}, expect=(409,))
 
 folder("08 Report Server")
 req("Repository", "GET", "/api/server/repository")
@@ -193,6 +293,9 @@ req("Data adapters (server)", "GET", "/api/server/connections")
 req("Test adapter (server)", "POST", "/api/server/connections/pm_mongo/test")
 req("Folder permissions", "GET", "/api/server/permissions?path=Postman")
 req("Set folder permissions", "PUT", "/api/server/permissions", body={"path": "Postman", "rules": {"users": {"pm_runner": "run"}, "roles": {}}})
+req("Who can see what (every user on every folder with a rule)", "GET", "/api/admin/access-report",
+    checks="pm.test('pm_runner may run in Postman', function () { pm.expect(pm.response.json().rows.some(r => "
+           "r.username === 'pm_runner' && r.folder === 'Postman')).to.eql(true); });")
 
 folder("09 Schedules")
 req("Schedule options", "GET", "/api/server/schedules/info")
@@ -201,6 +304,9 @@ req("Create schedule", "POST", "/api/server/schedules",
           "recurrence": {"type": "daily", "time": "08:00"}, "timezone": "Asia/Karachi", "keep": 5},
     save={"scheduleId": "pm.response.json().schedule.id"})
 req("List schedules", "GET", "/api/server/schedules")
+req("Try a delivery target: an unknown type is refused", "POST", "/api/server/schedules/delivery/test",
+    body={"target": {"type": "ftp", "host": "example.com"}}, expect=(422,),
+    description="SFTP: logs in and opens the folder; HTTP: checks the address; folder: checks it can write. Nothing is uploaded.")
 req("Edit schedule", "PUT", "/api/server/schedules/{{scheduleId}}",
     body={"label": "PM daily (edited)", "reportId": REPORT, "format": "pdf", "parameters": {"Branch": "KHI"},
           "recurrence": {"type": "weekly", "time": "09:30", "weekdays": [0, 2]}, "timezone": "Asia/Karachi", "keep": 3})
@@ -351,6 +457,10 @@ req("Relate orders.Branch to branches.Code", "POST", "/api/analytics/relationshi
     body={"fromDataset": "{{dsOrders}}", "fromColumn": "Branch", "toDataset": "{{dsBranches}}", "toColumn": "Code"},
     save={"relationshipId": "pm.response.json().relationship.id"})
 req("Relationships", "GET", "/api/analytics/relationships")
+req("How two columns join, before saving", "POST", "/api/analytics/relationships/check",
+    body={"fromDataset": "{{dsOrders}}", "fromColumn": "Branch", "toDataset": "{{dsBranches}}", "toColumn": "Code"})
+req("Suggested relationships", "GET", "/api/analytics/relationships/suggest")
+req("Change the relationship", "PUT", "/api/analytics/relationships/{{relationshipId}}", body={"active": True})
 req("One visual: amount by branch", "POST", "/api/analytics/query", body=SUM_BY_BRANCH,
     checks="pm.test('rows by branch', function () { pm.expect(pm.response.json().rows.length).to.be.above(0); });")
 req("A wrong column is refused", "POST", "/api/analytics/query",
@@ -488,6 +598,8 @@ req("Report Server logs: only the errors", "GET", "/api/server/logs/requests?sta
 req("Report Server logs: report runs", "GET", "/api/server/logs/runs?limit=50")
 req("Report Server logs: service log", "GET", "/api/server/logs/service?lines=50&level=WARNING")
 req("Report Server logs: audit trail", "GET", "/api/server/logs/audit?limit=50")
+req("Report Server logs: data taken out through API calls", "GET", "/api/server/logs/api-calls?limit=50",
+    checks="pm.test('API calls are recorded', function () { pm.expect(pm.response.json().totals.calls).to.be.above(0); });")
 req("Report Server logs: downloads and capacity right now", "GET", "/api/server/logs/downloads")
 req("Service log", "GET", "/api/admin/logs?lines=50")
 req("Download service log", "GET", "/api/admin/logs/download")
@@ -508,6 +620,7 @@ req("Move the data adapter out of the folder", "PUT", "/api/admin/connections/pm
 req("Delete server folder with its reports", "DELETE", "/api/server/folders", body={"path": "Postman", "recursive": True})
 req("Delete admin folder (already gone)", "DELETE", "/api/admin/folders", body={"path": "Postman", "recursive": True}, expect=(200, 404))
 req("Delete API key", "DELETE", "/api/admin/api-keys/{{apiKeyId}}")
+req("Delete team", "DELETE", "/api/admin/user-groups/{{groupId}}")
 req("Delete user", "DELETE", "/api/admin/users/pm_runner")
 req("Delete data adapter", "DELETE", "/api/admin/connections/pm_mongo")
 req("Sign out", "POST", "/api/server/logout", body={})
