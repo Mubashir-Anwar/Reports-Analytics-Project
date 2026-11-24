@@ -144,8 +144,10 @@ def _save_private_secrets(payload: dict[str, Any], *, by: str = "") -> None:
     """Make the secrets table equal to this dict: one row per secret, encrypted when REPORTING_SECRETS_KEY is set
     (recommended: then a copy of the data folder or of the storage database alone reveals no password).
     Files backend: records/tables/secrets.json, mode 0600 on Unix."""
-    from backend.app.db import entities as ent  # noqa: PLC0415
-    from backend.app.db import model  # noqa: PLC0415
+    from backend.app.db import (
+        entities as ent,  # noqa: PLC0415
+        model,  # noqa: PLC0415
+    )
     cipher = _cipher()
     db = ent.get_entities()
     current = {row["secretId"]: row for row in db.find(ent.SECRETS)}

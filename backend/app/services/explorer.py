@@ -15,7 +15,7 @@ import time
 from typing import Any
 
 from bson import json_util
-from bson.json_util import JSONOptions, JSONMode
+from bson.json_util import JSONMode, JSONOptions
 
 from backend.app.queries import mongo_query as mq
 
@@ -149,6 +149,7 @@ def _walk(value: Any, path: str, found: dict[str, dict[str, Any]], depth: int = 
 
 def _bson_type(value: Any) -> str:
     from datetime import datetime
+
     from bson import Decimal128, ObjectId
     if value is None:
         return "null"

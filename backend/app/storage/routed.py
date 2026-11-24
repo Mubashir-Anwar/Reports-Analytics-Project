@@ -26,8 +26,7 @@ import re
 from datetime import datetime
 from typing import Any, Iterable
 
-from backend.app.db import entities as ent
-from backend.app.db import model
+from backend.app.db import entities as ent, model
 
 _DEFINITION_KEY = re.compile(r"^(reports|workspace)/(.+)/([^/]+)\.json$")
 _AREA = {"reports": "server", "workspace": "workspace"}                    # key prefix -> folders.area

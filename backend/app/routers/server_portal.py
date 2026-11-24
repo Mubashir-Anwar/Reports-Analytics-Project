@@ -31,7 +31,6 @@ from backend.app.security.users import (
     make_session_cookie,
     password_needs_upgrade,
     read_session_cookie,
-    save_users,
     session_lifetime_seconds,
     set_user_password,
     user_rights,

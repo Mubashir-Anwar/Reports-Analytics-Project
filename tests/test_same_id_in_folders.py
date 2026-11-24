@@ -98,7 +98,7 @@ def test_report_server_keeps_them_apart(client):
     assert {v["folder"] for v in gl_versions} == {"cascade/KMBLGL/Reports"}
     first = gl_versions[-1]["version"]
     assert sorted(v["version"] for v in gl_versions) == [1, 2] and kmbl_versions[0]["version"] == 1    # numbered per report
-    assert client.get(f"/api/server/reports/AR/versions/3?folder=cascade/KMBLGL/Reports").status_code == 404
+    assert client.get("/api/server/reports/AR/versions/3?folder=cascade/KMBLGL/Reports").status_code == 404
     restored = client.post(f"/api/server/reports/AR/versions/{first}/restore?folder=cascade/KMBLGL/Reports", json={})
     assert restored.status_code == 200 and restored.json()["report"]["title"] == "KMBLGL approved"
     assert client.get("/api/server/reports/AR?folder=cascade/KMBL/Reports").json()["title"] == "KMBL approved"

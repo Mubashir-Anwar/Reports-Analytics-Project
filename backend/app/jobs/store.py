@@ -21,9 +21,7 @@ import threading
 from pathlib import Path
 from typing import Any
 
-from backend.app.db import entities as ent
-from backend.app.db import get_records, model
-from backend.app.db import schedules as schedule_tables
+from backend.app.db import entities as ent, get_records, model, schedules as schedule_tables
 from backend.app.db.entities import get_entities
 from backend.app.storage.store import get_store
 

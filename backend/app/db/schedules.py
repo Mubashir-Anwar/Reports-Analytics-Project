@@ -16,8 +16,7 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from backend.app.db import entities as ent
-from backend.app.db import model
+from backend.app.db import entities as ent, model
 
 EMAIL_TARGET = "email"
 _TYPE_IN_TABLE = {"http": "api"}                 # the table says "api"; the service keeps its "http"

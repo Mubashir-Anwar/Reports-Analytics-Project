@@ -1,6 +1,5 @@
 """Security checks: nothing is open without credentials, uploads cannot attack the XML parser, report pipelines
 cannot read server internals, secrets are encrypted at rest, passwords use a strong hash, old outputs go away."""
-import json
 import re
 import sys
 from datetime import datetime, timedelta, timezone
