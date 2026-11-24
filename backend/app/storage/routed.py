@@ -104,7 +104,7 @@ class RoutedStore:
         parent_id: str | None = None
         done: list[str] = []
         row = None
-        for name in path.split("/"):
+        for name in (part for part in path.split("/") if part):     # a stray "" or "//" never becomes a folder
             done.append(name)
             full = "/".join(done)
             row = self._folder(area, full)
