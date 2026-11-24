@@ -356,7 +356,7 @@ export const CSS_FONT = {
 /** Jasper "Markup": none = text as-is, html = <b>, <i>, <u>, <br>, <font>, <span style>, lists…, styled = Jasper <style> tags. */
 export const MARKUPS = [['none', 'None (plain text)'], ['html', 'HTML'], ['styled', 'Styled (Jasper <style>)']];
 
-const ALLOWED_TAGS = new Set(['B', 'STRONG', 'I', 'EM', 'U', 'S', 'STRIKE', 'DEL', 'BR', 'P', 'DIV', 'SPAN', 'FONT', 'SUP', 'SUB', 'UL', 'OL', 'LI', 'H1', 'H2', 'H3', 'H4', 'H5', 'H6']);
+const ALLOWED_TAGS = new Set(['B', 'STRONG', 'I', 'EM', 'U', 'S', 'STRIKE', 'DEL', 'BR', 'P', 'DIV', 'SPAN', 'FONT', 'SUP', 'SUB', 'UL', 'OL', 'LI', 'H1', 'H2', 'H3', 'H4', 'H5', 'H6', 'MARK']);
 const DROPPED_TAGS = new Set(['SCRIPT', 'STYLE', 'IFRAME', 'OBJECT', 'EMBED', 'TEMPLATE', 'NOSCRIPT', 'SVG', 'MATH', 'TITLE', 'HEAD']);
 const ALLOWED_STYLE =/^(color|background-color|font-size|font-weight|font-style|font-family|text-decoration)$/i;
 

@@ -11,6 +11,7 @@ import ResourcePanel from './ResourcePanel.jsx';
 import { RunsList, SchedulesList } from './Schedules.jsx';
 import LogsView from './LogsView.jsx';
 import UploadDialog from './UploadDialog.jsx';
+import { DashboardCard, KIND_FILTERS, KindChips, ReportCard, RunningStrip, reportFacts, useActivity } from './ReportCard.jsx';
 
 const DashboardViewer = lazy(() => import('./DashboardViewer.jsx'));     // charts load only when a dashboard is opened
 import { safeNext } from '../shared/session.js';
@@ -138,7 +139,7 @@ function LoginForm({ onSignedIn, message }) {
     <div className="login-wrap">
       <form className="card login" onSubmit={submit} autoComplete="on">
         <Logo size={52} className="login-logo" />
-        <div><p className="eyebrow">{BRAND.name}</p><h1>Sign in</h1><p className="muted">One sign-in for the Designer, Report Server, Analytics, Run reports and Admin. You see the parts your account has rights for.</p></div>
+        <div><p className="eyebrow">{BRAND.name}</p><h1>Sign in</h1><p className="muted">One sign-in for the Designer, Query, Report Server, Analytics and Admin. You see the parts your account has rights for.</p></div>
         <label className="field"><span>Username</span><input name="username" autoComplete="username" value={username} onChange={(e) => setUsername(e.target.value)} required autoFocus /></label>
         <label className="field"><span>Password</span><PasswordInput name="password" autoComplete="current-password" value={password} onChange={(e) => setPassword(e.target.value)} required /></label>
         <Notice message={error} />
@@ -175,6 +176,8 @@ function Repository({ user, onUser }) {
   const [runsVersion, setRunsVersion] = useState(0);
   const [newFolder, setNewFolder] = useState(null); // parent path while the New folder dialog is open
   const [guideHidden, setGuideHidden] = useState(readGuideHidden);
+  const [kind, setKind] = useState('all'); // the filter chips over the cards
+  const activity = useActivity(`${runsVersion}-${version}-${view}`);
   useEffect(() => { serverApi.scheduleInfo().then(setScheduleInfo).catch(() => setScheduleInfo(null)); }, []);
   const showMessage = useCallback((m) => setMessage(m), []);
   const designer = roleAtLeast(user, 'designer');
@@ -207,6 +210,13 @@ function Repository({ user, onUser }) {
     const needle = search.trim().toLowerCase();
     return dashboards.filter((d) => (!folder || (needle ? inFolder(d, folder) : d.folder === folder)) && (!needle || `${d.name} ${d.description}`.toLowerCase().includes(needle)));
   }, [dashboards, folder, search]);
+
+  const items = useMemo(() => [
+    ...visible.map((r) => ({ kind: 'report', r, facts: reportFacts(activity, r) })),
+    ...visibleDashboards.map((d) => ({ kind: 'dashboard', d })),
+  ], [visible, visibleDashboards, activity]);
+  const kindTest = (KIND_FILTERS.find(([id]) => id === kind) || KIND_FILTERS[0])[2];
+  const shownItems = items.filter(kindTest);
 
   const done = async (text, select) => {
     await load();
@@ -333,7 +343,7 @@ function Repository({ user, onUser }) {
   });
 
   return (
-    <main className="page">
+    <main className="page srv-new">
       <div className="page-head">
         <div><p className="eyebrow">Report server</p><h1>{{ repository: 'Reports and dashboards', schedules: 'Schedules', runs: 'Runs and outputs', logs: 'Logs' }[view]}</h1>
           <p className="muted">{{ repository: 'Right-click a report, a dashboard or a folder for its actions. Reports are published from the Designer, dashboards are made in Analytics; both can be uploaded as files.', schedules: 'Reports that run by themselves at set times. Create one from a report → Schedules.', runs: 'Background runs and scheduled outputs. Files are kept on the server until they are replaced or deleted.', logs: 'Every request that reached the server (kept in the system database), report runs, the service log and the audit trail.' }[view]}</p></div>
@@ -350,6 +360,7 @@ function Repository({ user, onUser }) {
       </div>
       {user.bootstrap && <Notice message={{ kind: 'warn', text: 'You are signed in with the first-setup admin login. Create a real admin user in Admin → Users; this login then stops working.' }} />}
       {message && <div style={{ marginTop: 10 }}><Notice message={message} /></div>}
+      {view === 'repository' && <RunningStrip running={activity.running} onOpen={() => setView('runs')} />}
       {clipboard && <div className="clip-bar">📋 {clipboard.mode === 'cut' ? 'Cut' : 'Copied'}: <b>{clipboard.title}</b> — right-click a folder → Paste <button className="btn quiet sm" onClick={() => setClipboard(null)}>✕</button></div>}
       {view === 'repository' && !openDash && !loading && !guideHidden && (
         <ServerGuide folders={folders} reports={reports} designer={designer} admin={admin} onHide={() => setGuideHidden(true)}
@@ -382,7 +393,8 @@ function Repository({ user, onUser }) {
             </div>
           </div>
           {!search.trim() && <SubfolderTiles folders={folders} parent={folder} count={countIn} itemWord="item" onOpen={setFolder} onMenu={(event, path) => showMenu(folderMenu(path))(event)} />}
-          <div className="stack">
+          {!loading && items.length > 0 && <KindChips items={items} value={kind} onChange={setKind} />}
+          <div className="stack srv-cards">
             {loading && <div className="empty">Loading…</div>}
             {!loading && !visible.length && !visibleDashboards.length && (
               <div className="empty">
@@ -396,27 +408,16 @@ function Repository({ user, onUser }) {
                 )}
               </div>
             )}
-            {visible.map((r) => (
-              <button
-                key={r.ref}
-                className={`report-card ${r.ref === selectedId ? 'on' : ''} ${clipboard?.mode === 'cut' && clipboard.id === r.ref ? 'cut' : ''}`}
-                onClick={() => open(r.ref, tab)}
-                onDoubleClick={() => open(r.ref, 'run')}
-                onContextMenu={(e) => { setSelectedId(r.ref); showMenu(reportMenu(r))(e); }}
-              >
-                <strong>{r.title}</strong>
-                <small>{!r.folder || r.folder === 'General' ? 'Top level' : r.folder} · {r.formats.map((f) => f.toUpperCase()).join(', ')}{r.parameters.length ? ` · ${r.parameters.length} question${r.parameters.length > 1 ? 's' : ''}` : ''}</small>
-                {r.description && <small>{r.description}</small>}
-              </button>
-            ))}
-            {visibleDashboards.map((d) => (
-              <button key={d.id} className={`report-card dashboard-card ${clipboard?.mode === 'cut' && clipboard.id === d.id ? 'cut' : ''}`}
-                onClick={() => setOpenDash(d)} onContextMenu={showMenu(dashboardMenu(d))}>
-                <strong><span className="kind-badge" aria-hidden="true">📊</span> {d.name}</strong>
-                <small>{!d.folder || d.folder === 'General' ? 'Top level' : d.folder} · dashboard · {d.tiles} visual{d.tiles === 1 ? '' : 's'}{d.owner ? ` · by ${d.owner}` : ''}</small>
-                {d.description && <small>{d.description}</small>}
-              </button>
-            ))}
+            {shownItems.map((item, index) => (item.kind === 'report' ? (
+              <ReportCard key={item.r.ref} r={item.r} facts={item.facts} index={index} selected={item.r.ref === selectedId}
+                cut={clipboard?.mode === 'cut' && clipboard.id === item.r.ref}
+                onClick={() => open(item.r.ref, tab)} onDoubleClick={() => open(item.r.ref, 'run')}
+                onContextMenu={(e) => { setSelectedId(item.r.ref); showMenu(reportMenu(item.r))(e); }} />
+            ) : (
+              <DashboardCard key={item.d.id} d={item.d} index={index} cut={clipboard?.mode === 'cut' && clipboard.id === item.d.id}
+                onClick={() => setOpenDash(item.d)} onContextMenu={showMenu(dashboardMenu(item.d))} />
+            )))}
+            {!loading && items.length > 0 && !shownItems.length && <div className="empty">Nothing here is {kind === 'failed' ? 'failing' : kind}. <button type="button" className="linkish" onClick={() => setKind('all')}>Show all</button></div>}
           </div>
         </section>
         {selectedId

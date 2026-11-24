@@ -1,5 +1,6 @@
 import { fieldRefs } from './fieldCheck.js';
 import { Highlighted } from './ExprHighlight.jsx';
+import { isJavaExpression, toEditorHtml } from './richText.js';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   CSS_FONT, PAGE_LIMITS, ZOOM_LIMITS, bandKeys, bandLabel, bandWidth, clampZoom, contentBottom, contentRight, defaultElement,
@@ -186,6 +187,10 @@ function ElementView({ element, selected, primary, zoom, onPointerDown, onResize
   } else if (element.type === 'staticText' && element.markup && element.markup !== 'none') {
     // eslint-disable-next-line react/no-danger -- sanitised by safeMarkupHtml (allow-list of formatting tags only)
     body = <span className="el-text el-markup" dangerouslySetInnerHTML={{ __html: safeMarkupHtml(element.text, element.markup) }} />;
+  } else if (element.type === 'textField' && (element.markup === 'html' || element.markup === 'styled') && !isJavaExpression(element.expression)) {
+    // formatted text with data: the words as they print, the data as chips (sanitised, see richText.js)
+    // eslint-disable-next-line react/no-danger
+    body = <span className={`el-text el-markup ${lost.length ? 'missing-field' : ''}`} dangerouslySetInnerHTML={{ __html: toEditorHtml(element.expression, element.markup) }} />;
   } else if (element.type !== 'rectangle') {
     body = (
       <span className={`el-text ${element.type === 'textField' ? 'is-field' : ''} ${lost.length ? 'missing-field' : ''}`}>
@@ -795,7 +800,7 @@ export default function Canvas({ knownFields: knownList, design, selection, tool
                       onCommitText={(text) => { setEditingText(null); dispatch({ type: 'DESIGN', update: (d) => patchElements(d, { [element.id]: { text } }) }); }}
                       onCancelText={() => setEditingText(null)}
                       onMoreText={() => { setEditingText(null); onEditExpression(element.id); }}
-                      onDoubleClick={element.type === 'staticText' && !element.locked ? (e) => { e.stopPropagation(); select({ kind: 'element', id: element.id }); setEditingText(element.id); }
+                      onDoubleClick={element.type === 'staticText' && !element.locked && (!element.markup || element.markup === 'none') ? (e) => { e.stopPropagation(); select({ kind: 'element', id: element.id }); setEditingText(element.id); }
                         : ['staticText', 'textField'].includes(element.type) ? (e) => { e.stopPropagation(); onEditExpression(element.id); }
                         : element.type === 'table' && onOpenTable ? (e) => { e.stopPropagation(); onOpenTable(element.id); } : undefined}
                     />

@@ -1,11 +1,12 @@
 /* The look of every page: mode (system / light / dark), accent colour, top bar (dark or in the accent colour),
    high contrast and density, plus named presets. Kept per browser (localStorage "reporting-look").
    A plain script on purpose: the Run reports page loads it in <head> (no flash of the wrong theme) and the React
-   pages import it. It sets attributes on <html>; the colours are in theme.css (React) and runner-dark.css. */
+   pages import it. It sets attributes on <html>; the colours are in theme.css (React). */
 (function () {
   var KEY = 'reporting-look';
   var OLD_KEY = 'reporting-theme';
   var ACCENTS = [
+    { id: 'bright', label: 'Bright blue', color: '#3355ff' },
     { id: 'indigo', label: 'Indigo', color: '#4f46e5' },
     { id: 'blue', label: 'Blue', color: '#2563eb' },
     { id: 'green', label: 'Green', color: '#15803d' },
@@ -15,6 +16,7 @@
     { id: 'violet', label: 'Violet', color: '#7c3aed' },
   ];
   var PRESETS = [
+    { id: 'bright', label: 'Light and bright', text: 'White, bright blue, soft tints (new look)', look: { mode: 'light', accent: 'bright', bar: 'dark', contrast: 'normal' } },
     { id: 'classic', label: 'Classic', text: 'Light, indigo', look: { mode: 'light', accent: 'indigo', bar: 'dark', contrast: 'normal' } },
     { id: 'office', label: 'Office', text: 'Light, blue title bar', look: { mode: 'light', accent: 'blue', bar: 'accent', contrast: 'normal' } },
     { id: 'sheets', label: 'Sheets', text: 'Light, green title bar', look: { mode: 'light', accent: 'green', bar: 'accent', contrast: 'normal' } },
@@ -24,7 +26,7 @@
     { id: 'contrast', label: 'High contrast', text: 'Dark, strongest lines and text', look: { mode: 'dark', accent: 'indigo', bar: 'dark', contrast: 'high' } },
     { id: 'system', label: 'Follow my computer', text: 'Light or dark like Windows / macOS', look: { mode: 'system', accent: 'indigo', bar: 'dark', contrast: 'normal' } },
   ];
-  var DEFAULT = { mode: 'system', accent: 'indigo', bar: 'dark', contrast: 'normal', density: 'comfortable' };
+  var DEFAULT = { mode: 'light', accent: 'bright', bar: 'dark', contrast: 'normal', density: 'comfortable' };
   var MODES = ['system', 'light', 'dark'];
 
   function clean(look) {

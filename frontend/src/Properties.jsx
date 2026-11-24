@@ -1,12 +1,14 @@
 import { useState } from 'react';
 import {
   ELEMENT_LABELS, FONT_NAMES, MARKUPS, PAGE_LIMITS, PAGE_PRESETS, bandLabel, bandPresent, bandPurpose, contentBottom, contentRight, findElement, getBand, pagePreset,
-  mapElements, resizeElement, setBand,
+  mapElements, resizeElement, safeMarkupHtml, setBand,
 } from './designModel.js';
 import { selectedIds } from './arrange.js';
 import { CrosstabProps, DatasetProps, ListProps, NoteProps, SubreportProps, TableProps } from './ComponentProps.jsx';
 import { componentFields } from './DatasetsEditor.jsx';
 import PatternDialog, { patternSample } from './PatternDialog.jsx';
+import RichTextEditor from './RichTextEditor.jsx';
+import { HAS_DATA, htmlToPlain, isJavaExpression, plainToHtml, tokenGroups } from './richText.js';
 
 /** Properties every element type has: with a multi-selection they are applied to all selected elements. */
 const COMMON_KEYS = new Set(['x', 'y', 'height', 'color', 'backColor', 'borderColor', 'borderWidth', 'lineStyle', 'borders', 'printWhenExpression',
@@ -91,6 +93,34 @@ function TextFormat({ element, patch }) {
       </div>
       {['AtLeast', 'Fixed', 'Proportional'].includes(spacing) ? null : <p className="hint">Line Spacing Size is used by At Least, Fixed and Proportional.</p>}
     </>
+  );
+}
+
+/** "Format words": the text becomes formatted text (markup HTML), edited with the B / I / U editor. */
+function FormatWords({ onClick }) {
+  return (
+    <div className="format-words">
+      <button type="button" className="btn sm" onClick={onClick} title="Bold, italic, underline, colour or highlight on some words, and fields between the words — all in this one box">
+        <b>B</b> <i>I</i> <u>U</u> Format some words
+      </button>
+      <small className="muted">Instead of several boxes next to each other.</small>
+    </div>
+  );
+}
+
+/** The formatted text of a Static Text / Text Field, edited in place. */
+function RichField({ label, value, groups, onChange, onEditor, onPlain }) {
+  return (
+    <div className="prop-rich">
+      <div className="prop-rich-head">
+        <span>{label}</span>
+        <button type="button" className="link-btn" onClick={onEditor} title="The big editor, with every field, parameter, variable and function">Open big editor</button>
+        <button type="button" className="link-btn" title="Back to plain text: the formatting of the words is removed"
+          onClick={() => { if (window.confirm('Remove the bold, italic, colours and sizes of the words? The text stays.')) onPlain(); }}>Plain text</button>
+      </div>
+      <RichTextEditor value={value} groups={groups} onChange={onChange} label={label} />
+      <p className="hint">Select words, then <b>B</b> <i>I</i> <u>U</u>, a colour or a size. <b>＋ Field</b> puts the data where the cursor is; <b>ƒx</b> a formula, e.g. <code>$F&#123;Fee&#125; * 1.17</code>. Values from the database are printed as text.</p>
+    </div>
   );
 }
 
@@ -344,7 +374,18 @@ export default function Properties({ state, dispatch, notify, actions, onEditExp
 
         {tab === 'specific' && element.type === 'staticText' && (
           <>
-            <Row label="Text"><span className="expr-row"><textarea rows={4} value={element.text} onChange={(e) => patch({ text: e.target.value })} /><button type="button" className="btn sm" title="Open the editor (or double-click the element)" onClick={() => onEditExpression(element.id)}>…</button></span></Row>
+            {element.markup === 'html' ? (
+              <RichField label="Text" value={element.text} groups={tokenGroups(report, design)} onEditor={() => onEditExpression(element.id)}
+                onPlain={() => patch({ markup: 'none', text: htmlToPlain(element.text) })}
+                onChange={(html) => (HAS_DATA.test(html)
+                  ? patch({ type: 'textField', expression: html, pattern: '', blankWhenNull: true, text: undefined }, `rich-${element.id}`)
+                  : patch({ text: html }, `rich-${element.id}`))} />
+            ) : (
+              <>
+                <Row label="Text"><span className="expr-row"><textarea rows={4} value={element.text} onChange={(e) => patch({ text: e.target.value })} /><button type="button" className="btn sm" title="Open the editor (or double-click the element)" onClick={() => onEditExpression(element.id)}>…</button></span></Row>
+                <FormatWords onClick={() => patch({ markup: 'html', text: element.markup === 'styled' ? safeMarkupHtml(element.text, 'styled') : plainToHtml(element.text) })} />
+              </>
+            )}
             {actions?.makeField && <Row label=""><span className="row-buttons">
               <button type="button" className="btn sm" title="Becomes a Text Field with this text as its expression; then add $F{…}, $P{…} or a formula" onClick={() => actions.convertText([element.id], 'textField')}>ƒx Convert to Text Field</button>
               <button type="button" className="btn sm" title="This text is filled from the data instead: it becomes a Text Field of a field, same place and style" onClick={() => actions.makeField(element.id)}>$F Make it a field…</button>
@@ -354,7 +395,18 @@ export default function Properties({ state, dispatch, notify, actions, onEditExp
         )}
         {tab === 'specific' && element.type === 'textField' && (
           <>
-            {expressionRow('Expression', 'expression', '$F{Name}  or  =$F{A} * 2')}
+            {element.markup === 'html' && !isJavaExpression(element.expression) ? (
+              <RichField label="Text with data" value={element.expression} groups={tokenGroups(report, design)} onEditor={() => onEditExpression(element.id)}
+                onPlain={() => patch({ markup: 'none', expression: htmlToPlain(element.expression) })}
+                onChange={(html) => patch({ expression: html }, `rich-${element.id}`)} />
+            ) : (
+              <>
+                {expressionRow('Expression', 'expression', '$F{Name}  or  =$F{A} * 2')}
+                {isJavaExpression(element.expression)
+                  ? null
+                  : <FormatWords onClick={() => patch({ markup: 'html', expression: element.markup === 'styled' ? safeMarkupHtml(element.expression, 'styled') : plainToHtml(element.expression) })} />}
+              </>
+            )}
             <ExpressionExamples fields={report.columns} params={report.parameters} onPick={(value) => patch({ expression: value })} />
             {actions?.convertText && <Row label=""><button type="button" className="btn sm" title="Back to fixed text: the expression is printed as written" onClick={() => actions.convertText([element.id], 'staticText')}>T Convert to Static Text</button></Row>}
             <div className="prop-grid">

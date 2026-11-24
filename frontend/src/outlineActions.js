@@ -8,6 +8,7 @@ import {
   alignElements, copyToClipboard, distributeElements, matchSize as matchSizeOf, nudgeElements, pasteElements, readClipboard,
   removeElements, selectedElements, selectedIds, selectionOf, setLocked,
 } from './arrange.js';
+import { joinTexts } from './richText.js';
 
 export const ELEMENT_TYPES = [
   ['staticText', 'T', 'Static Text'],
@@ -337,6 +338,21 @@ export function makeActions({ get, dispatch, notify, ui = { current: {} } }) {
       : `${hits.length === 1 ? 'Now a Static Text' : `${hits.length} Text Fields are now Static Texts`} — it prints the text as written`, 'ok');
   };
 
+  /**
+   * Several texts → one paragraph (e.g. an imported "Your fee of" + bold "Rs 5,000" + "is due"): one box with
+   * formatted words, each part keeping its bold / italic / colour / size, fields as data between the words.
+   */
+  const joinSelected = (targetIds) => {
+    const items = selectedElements(get().design, targetIds).filter(({ element }) => ['staticText', 'textField'].includes(element.type));
+    if (items.length < 2) { notify('Select 2 or more Static Texts / Text Fields to join them into one paragraph', 'error'); return; }
+    if (new Set(items.map((item) => item.bandKey)).size > 1) { notify('The texts to join must be in the same band', 'error'); return; }
+    const joined = joinTexts(items.map((item) => item.element));
+    const drop = items.map((item) => item.element.id).filter((one) => one !== joined.id);
+    design$((d) => mapElements(removeElements(d, drop), (el) => (el.id === joined.id ? joined : el)));
+    select({ kind: 'element', id: joined.id });
+    notify(`${items.length} texts are now one paragraph with formatted words — select words in Properties to change them (Ctrl+Z to undo)`, 'ok');
+  };
+
   /** Imported design: a Static Text (e.g. "Muhammad Ali") becomes a Text Field of a field, same place and style. */
   const makeField = (id) => {
     const { report, design } = get();
@@ -411,6 +427,7 @@ export function makeActions({ get, dispatch, notify, ui = { current: {} } }) {
     { label: 'Show Source', icon: '</>', onClick: callUi('showSource') },
     { label: 'Preview', icon: '▶', onClick: callUi('preview') },
     { label: 'Save as file (.mrd)', icon: '💾', onClick: callUi('saveFile') },
+    { label: 'Save as JRXML (Jaspersoft)', icon: '⬇', onClick: callUi('saveJrxml') },
   ];
 
   const bandMenu = (key) => {
@@ -475,6 +492,7 @@ export function makeActions({ get, dispatch, notify, ui = { current: {} } }) {
           return [
             ...(statics ? [{ label: `Convert ${statics} Static Text${statics > 1 ? 's' : ''} to Text Field${statics > 1 ? 's' : ''}`, icon: 'ƒx', onClick: () => convertText(chosen, 'textField') }] : []),
             ...(fields ? [{ label: `Convert ${fields} Text Field${fields > 1 ? 's' : ''} to Static Text`, icon: 'T', onClick: () => convertText(chosen, 'staticText') }] : []),
+            ...(statics + fields > 1 ? [{ label: `Join ${statics + fields} texts into one paragraph`, icon: '¶', onClick: () => joinSelected(chosen) }] : []),
           ];
         })(),
         '-',
@@ -570,7 +588,7 @@ export function makeActions({ get, dispatch, notify, ui = { current: {} } }) {
   ];
 
   return {
-    makeField, convertText, rename, deleteSelection, createBandAt, createGroup, createParameter, createVariable, createCalc,
+    makeField, convertText, joinSelected, rename, deleteSelection, createBandAt, createGroup, createParameter, createVariable, createCalc,
     align, distribute, matchSize, nudge, order, toggleLock, patchSelected, copy, cut, paste, duplicateSelected, selectAll, removeSelected,
     selectColumn, selectSimilar, setBorders, toggleHidden, toggleStretch, matchFormat,
     reportMenu, bandMenu, elementMenu, parametersMenu, parameterMenu, fieldsMenu, fieldMenu,

@@ -312,6 +312,99 @@ def describe(kind: str, url: str, prepared: PreparedSql, values: dict[str, Any] 
     return names
 
 
+def run_table(kind: str, url: str, prepared: PreparedSql, values: dict[str, Any], *, max_rows: int,
+              timeout_ms: int) -> tuple[list[str], list[list[Any]]]:
+    """Like run_query, but the column names as the database gives them (repeats too) and each row as a list:
+    what the Query workspace shows. At most max_rows + 1 rows."""
+    sql, params = _bind(kind, prepared, values)
+    with _Session(kind, url, timeout_ms) as session:
+        cursor = session.execute(sql, params, "The SQL query failed")
+        try:
+            if cursor.description is None:
+                raise ConnectorQueryError("The query returned no result set (it must be a SELECT)")
+            names = _names(cursor)
+            rows = cursor.fetchmany(max_rows + 1)
+        except ConnectorQueryError:
+            raise
+        except Exception as exc:  # noqa: BLE001
+            raise ConnectorQueryError(f"The SQL query failed: {safe_error(exc, url)}") from None
+        finally:
+            cursor.close()
+    return names, [[_plain(value) for value in row] for row in rows]
+
+
+# The schema of a database from its catalog views (fixed text: nothing from a request is put in). Each query gives
+# columns: (schema, table, table type, column, data type, nullable, position); primary keys: (schema, table, column);
+# foreign keys: (schema, table, column, referenced schema, referenced table, referenced column).
+_INFO_COLUMNS = """SELECT c.table_schema, c.table_name, t.table_type, c.column_name, c.data_type, c.is_nullable, c.ordinal_position
+FROM information_schema.columns c JOIN information_schema.tables t ON t.table_schema = c.table_schema AND t.table_name = c.table_name
+WHERE {where} ORDER BY c.table_schema, c.table_name, c.ordinal_position"""
+_INFO_PKS = """SELECT k.table_schema, k.table_name, k.column_name FROM information_schema.table_constraints tc
+JOIN information_schema.key_column_usage k ON k.constraint_name = tc.constraint_name AND k.table_schema = tc.table_schema AND k.table_name = tc.table_name
+WHERE tc.constraint_type = 'PRIMARY KEY' AND {where}"""
+SCHEMA_SQL: dict[str, dict[str, str]] = {
+    "postgresql": {
+        "columns": _INFO_COLUMNS.format(where="c.table_schema NOT IN ('pg_catalog', 'information_schema') AND c.table_schema NOT LIKE 'pg_toast%'"),
+        "primaryKeys": _INFO_PKS.format(where="k.table_schema NOT IN ('pg_catalog', 'information_schema')"),
+        "foreignKeys": """SELECT k1.table_schema, k1.table_name, k1.column_name, k2.table_schema, k2.table_name, k2.column_name
+FROM information_schema.referential_constraints rc
+JOIN information_schema.key_column_usage k1 ON k1.constraint_name = rc.constraint_name AND k1.constraint_schema = rc.constraint_schema
+JOIN information_schema.key_column_usage k2 ON k2.constraint_name = rc.unique_constraint_name AND k2.constraint_schema = rc.unique_constraint_schema
+ AND k2.ordinal_position = k1.position_in_unique_constraint""",
+    },
+    "mysql": {
+        "columns": _INFO_COLUMNS.format(where="c.table_schema = DATABASE()"),
+        "primaryKeys": _INFO_PKS.format(where="k.table_schema = DATABASE()"),
+        "foreignKeys": """SELECT table_schema, table_name, column_name, referenced_table_schema, referenced_table_name, referenced_column_name
+FROM information_schema.key_column_usage WHERE table_schema = DATABASE() AND referenced_table_name IS NOT NULL""",
+    },
+    "sqlserver": {
+        "columns": _INFO_COLUMNS.format(where="c.table_schema NOT IN ('sys', 'INFORMATION_SCHEMA')"),
+        "primaryKeys": _INFO_PKS.format(where="1 = 1"),
+        "foreignKeys": """SELECT k1.TABLE_SCHEMA, k1.TABLE_NAME, k1.COLUMN_NAME, k2.TABLE_SCHEMA, k2.TABLE_NAME, k2.COLUMN_NAME
+FROM INFORMATION_SCHEMA.REFERENTIAL_CONSTRAINTS rc
+JOIN INFORMATION_SCHEMA.KEY_COLUMN_USAGE k1 ON k1.CONSTRAINT_NAME = rc.CONSTRAINT_NAME AND k1.CONSTRAINT_SCHEMA = rc.CONSTRAINT_SCHEMA
+JOIN INFORMATION_SCHEMA.KEY_COLUMN_USAGE k2 ON k2.CONSTRAINT_NAME = rc.UNIQUE_CONSTRAINT_NAME AND k2.CONSTRAINT_SCHEMA = rc.UNIQUE_CONSTRAINT_SCHEMA
+ AND k2.ORDINAL_POSITION = k1.ORDINAL_POSITION""",
+    },
+    "oracle": {
+        "columns": """SELECT USER, c.table_name, CASE WHEN v.view_name IS NULL THEN 'BASE TABLE' ELSE 'VIEW' END, c.column_name, c.data_type,
+ c.nullable, c.column_id FROM user_tab_columns c LEFT JOIN user_views v ON v.view_name = c.table_name ORDER BY c.table_name, c.column_id""",
+        "primaryKeys": """SELECT USER, cc.table_name, cc.column_name FROM user_constraints uc
+JOIN user_cons_columns cc ON cc.constraint_name = uc.constraint_name WHERE uc.constraint_type = 'P'""",
+        "foreignKeys": """SELECT USER, a.table_name, a.column_name, USER, b.table_name, b.column_name FROM user_constraints c
+JOIN user_cons_columns a ON a.constraint_name = c.constraint_name
+JOIN user_cons_columns b ON b.constraint_name = c.r_constraint_name AND b.position = a.position WHERE c.constraint_type = 'R'""",
+    },
+}
+SCHEMA_MAX_COLUMNS = 50_000
+
+
+def read_schema(kind: str, url: str) -> dict[str, Any]:
+    """Tables, views, columns, primary and foreign keys the adapter's user can see (read-only, 30 s)."""
+    queries = SCHEMA_SQL[dialect(kind).kind]
+    out: dict[str, Any] = {"truncated": False}
+    with _Session(kind, url, 30_000) as session:
+        for part in ("columns", "primaryKeys", "foreignKeys"):
+            try:
+                cursor = session.execute(queries[part], {}, "The schema could not be read")
+            except ConnectorQueryError:
+                if part == "columns":
+                    raise
+                session.connection.rollback()   # keys are a bonus: a user without the right still sees the tables
+                out[part] = []
+                continue
+            try:
+                rows = cursor.fetchmany(SCHEMA_MAX_COLUMNS + 1)
+            finally:
+                cursor.close()
+            if len(rows) > SCHEMA_MAX_COLUMNS:
+                out["truncated"] = True
+                rows = rows[:SCHEMA_MAX_COLUMNS]
+            out[part] = [tuple(row) for row in rows]
+    return out
+
+
 def url_hint(kind: str) -> str:
     spec = dialect(kind)
     return f"Give a {spec.label} URL: {spec.prefixes[0]}user:password@host:{spec.default_port}/{'service_name' if kind == 'oracle' else 'database'}"

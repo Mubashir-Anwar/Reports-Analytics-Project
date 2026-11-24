@@ -24,12 +24,12 @@ def enabled_areas() -> set[str]:
 
 def path_area(path: str) -> str | None:
     """Which switchable area a request path belongs to (None = always available)."""
-    if path == "/ui" or path.startswith("/ui/"):
-        return "runner"
     if path == "/admin" or path.startswith("/admin/"):
         return "admin"
     if path == "/designer" or path.startswith("/designer/"):
         return "designer"
+    if path == "/query" or path.startswith(("/query/", "/api/query/")):
+        return "designer"                  # the Query workspace belongs to the Designer
     if path in ("/login", "/api/server/login", "/api/server/logout", "/api/server/me"):
         return None                     # sign-in works whichever areas are switched on
     if path == "/server" or path.startswith("/server/") or path.startswith("/api/server/"):

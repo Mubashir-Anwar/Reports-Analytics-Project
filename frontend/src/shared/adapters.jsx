@@ -58,14 +58,14 @@ export const ADAPTER_TYPES = [
 ];
 
 /** Per SQL type: URL scheme, default port, what the database field is called, the SSL choices. */
-const SQL_KINDS = {
+export const SQL_KINDS = {
   postgresql: { scheme: 'postgresql', port: '5432', database: 'Database', ssl: [['prefer', 'prefer (default)'], ['require', 'require'], ['verify-full', 'verify-full'], ['disable', 'disable']] },
   mysql: { scheme: 'mysql', port: '3306', database: 'Database', ssl: [['prefer', 'off (default)'], ['require', 'require TLS']] },
   sqlserver: { scheme: 'sqlserver', port: '1433', database: 'Database', ssl: null },
   oracle: { scheme: 'oracle', port: '1521', database: 'Service name', ssl: null },
 };
 
-const adapterId = (name) => name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 39);
+export const adapterId = (name) => name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 39);
 
 /** SQL connection fields → scheme://user:password@host:port/database (+ ?sslmode=… / ?ssl=true) */
 export function sqlUrl(type, { host, port, database, user, password, sslmode }) {

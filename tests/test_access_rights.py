@@ -40,7 +40,7 @@ def publish(client, report_id, folder, parameters=()):
 # ------------------------------------------------------------------ pages
 def test_signed_out_pages_go_to_sign_in(client):
     client.cookies.clear()
-    for page in ("/designer", "/admin", "/ui", "/analytics"):
+    for page in ("/designer", "/admin", "/query", "/analytics"):
         response = client.get(page, follow_redirects=False)
         assert response.status_code == 303 and response.headers["location"] == f"/login?next=%2F{page[1:]}"
     assert client.get("/login").status_code == 200
@@ -51,7 +51,7 @@ def test_designer_only_user_sees_only_the_designer(client):
     assert make_user(client, "dina", ["designer"]).status_code == 200
     sign_in(client, "dina")
     assert client.get("/designer").status_code == 200
-    for page in ("/admin", "/server", "/ui", "/analytics"):
+    for page in ("/admin", "/server", "/analytics"):
         response = client.get(page)
         assert response.status_code == 403 and "No access" in response.text and "/designer" in response.text
     assert client.get("/", follow_redirects=False).headers["location"] == "/designer"
@@ -78,9 +78,8 @@ def test_each_right_opens_its_own_part(client):
     make_user(client, "adam", ["admin"])
     sign_in(client, "sam")
     assert client.get("/server").status_code == 200 and client.get("/api/server/repository").status_code == 200
-    assert client.get("/api/admin/workspace").status_code == 403 and client.get("/ui").status_code == 403
+    assert client.get("/api/admin/workspace").status_code == 403
     sign_in(client, "rana")
-    assert client.get("/ui").status_code == 200
     assert client.get("/reports").status_code == 200
     assert client.get("/generate/R1.csv").status_code == 200
     assert client.get("/server").status_code == 403 and client.get("/api/server/repository").status_code == 403
@@ -232,9 +231,10 @@ def test_only_admins_manage_api_keys(client):
     assert client.post("/api/admin/api-keys", json={"name": "x site"}).status_code == 403
 
 
-def test_a_website_proxy_with_its_key_opens_the_runner_page(client, key):
-    """Grizzly-style proxy: the website's server adds X-API-Key; its visitors are not signed in here."""
+def test_the_old_run_reports_page_goes_home_and_urls_still_run(client, key):
+    """The /ui page is gone: old links go to /. Report URLs keep working with a key (collections, environments)."""
     client.cookies.clear()
-    assert client.get("/ui", headers={"X-API-Key": key["secret"]}, follow_redirects=False).status_code == 200
-    assert client.get("/ui", headers={"X-API-Key": "mrk_000000000000_" + "x" * 40}, follow_redirects=False).status_code == 303
-    assert client.get("/ui", follow_redirects=False).status_code == 303
+    response = client.get("/ui", follow_redirects=False)
+    assert response.status_code == 303 and response.headers["location"] == "/"
+    assert client.get("/reports", headers={"X-API-Key": key["secret"]}).status_code == 200
+    assert client.get("/reports", headers={"X-API-Key": "mrk_000000000000_" + "x" * 40}).status_code in (401, 403)

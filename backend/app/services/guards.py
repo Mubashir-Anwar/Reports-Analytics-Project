@@ -72,7 +72,7 @@ def require_report_access(ctx: SimpleNamespace, request: Request, report_file: s
     """Who may list and run reports (/reports, /generate). Returns how access was granted (stored in the audit record).
 
     REPORTING_ACCESS_MODE=required (default) accepts any one of:
-      * a signed-in user with the "Run reports" right (the /ui runner; folder permissions still apply),
+      * a signed-in user with the "Run reports" right (report URLs such as /generate; folder permissions still apply),
       * an API key in X-API-Key or "Authorization: Bearer mrk_..." (a client website's server; its folder limits apply),
       * a signed /generate link: Expires + Signature made with REPORTING_ACCESS_SECRET, or issued to an API key (KeyId),
       * X-Report-Token header equal to REPORTING_ACCESS_SECRET, or X-Admin-Token (automation).

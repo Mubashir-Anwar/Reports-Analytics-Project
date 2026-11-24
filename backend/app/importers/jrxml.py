@@ -484,8 +484,8 @@ def _extract_query(query_text: str) -> tuple[str, str]:
         start = text.index("[", text.index('"pipeline"'))
     elif re.search(r"""['"]?findQuery['"]?\s*:""", text) or re.search(r"""['"]?collectionName['"]?\s*:""", text):
         # JasperReports Mongo find style: { collectionName: 'x', findQuery: {...}, sort/limit/fields optional }
-        name = re.search(r"""['"]?collectionName['"]?\s*:\s*['"]([^'"]+)['"]""", text)
-        collection = name.group(1) if name else ""
+        name = re.search(r"""['"]?collectionName['"]?\s*:\s*(?:['"]([^'"]+)['"]|(\$P\{\w+\}))""", text)
+        collection = (name.group(1) or name.group(2)) if name else ""
         # Jaspersoft's aggregate form: { collectionName: 'x', aggregate: [ ...stages... ] }
         aggregate = re.search(r"""['"]?aggregate['"]?\s*:\s*\[""", text)
         if aggregate:
@@ -689,6 +689,11 @@ def import_jrxml(xml_text: str, resources: dict[str, str] | None = None) -> dict
             continue
         calc = CALC_MAP.get(var.get("calculation", "Nothing"))
         expr, _p = translate_expression(_text(_kid(var, "variableExpression")), aliases, warnings, f"variable {vname}")
+        # our own "Save as JRXML" wraps the field for Jasper's number/comparable classes; read it back as the field
+        wrapped = re.fullmatch(r"\s*(\$F\{[^{}]+\})\s*==\s*null\s*\?\s*null\s*:\s*Double\.valueOf\(\s*String\.valueOf\(\s*\1\s*\)\s*\)\s*"
+                               r"|\s*\(\s*java\.lang\.Comparable\s*\)\s*(\$F\{[^{}]+\})\s*", (expr or "").lstrip("="))
+        if wrapped:
+            expr = wrapped.group(1) or wrapped.group(2)
         token = TOKEN.fullmatch(expr) if expr else None
         if not calc or (calc != "Count" and not token):
             warnings.append(f"Variable {vname}: the calculation/expression is not supported (skipped)")
@@ -723,6 +728,11 @@ def import_jrxml(xml_text: str, resources: dict[str, str] | None = None) -> dict
                 for kind, name in TOKEN.findall(el.get("expression", "")):
                     if kind == "F":
                         used.add(name)
+    if columns_from_design:
+        # the query does not say its columns ($project): the report's declared <field>s are them, used or not
+        for field in _kids(dataset, "field"):
+            if field.get("name") and field.get("name") not in columns:
+                columns.append(field.get("name"))
     query_columns = set(columns)
     for name in sorted(used - query_columns):
         columns.append(name)

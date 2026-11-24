@@ -1,5 +1,5 @@
 // The navigation bar of every React page (Designer, Server, Admin): logo, the parts this account may open,
-// the page's own buttons, theme and the account menu. The Run reports page has the same bar in plain HTML.
+// the page's own buttons, theme and the account menu.
 import { useEffect, useRef, useState } from 'react';
 import '../../../ui/brand/navbar.css';
 import { useBrand } from './brand.js';
@@ -15,6 +15,7 @@ const ICONS = {
   runner: 'M7 4.5v15l12-7.5z',
   admin: 'M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6zM19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z',
   api: 'M8 9l-4 3 4 3M16 9l4 3-4 3M13.5 6l-3 12',
+  query: 'M4 6c0-1.7 3.6-3 8-3s8 1.3 8 3-3.6 3-8 3-8-1.3-8-3zM4 6v6c0 1.7 3.6 3 8 3M20 6v4M4 12v6c0 1.7 3.6 3 8 3M15 18l2 2 4-4',
   out: 'M15 4h3a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2h-3M10 16l4-4-4-4M14 12H4',
   brand: 'M4 20V10M10 20V4M16 20v-7M3 3h18',
   key: 'M15 7a4 4 0 1 1-3.9 4.9L4 19v2h3v-2h2v-2h2l1.1-1.1A4 4 0 0 1 15 7z',
@@ -44,7 +45,7 @@ export function Logo({ size = 30, className = 'fx-logo' }) {
 export const NAV_APPS = [
   { href: '/designer', right: 'designer', label: 'Designer', icon: 'designer', text: 'Build reports and publish them' },
   { href: '/server', right: 'server', label: 'Server', icon: 'server', text: 'Folders, run, schedules, permissions' },
-  { href: '/ui', right: 'runner', label: 'Run reports', icon: 'runner', text: 'Pick a report, fill in, download' },
+  { href: '/query', right: 'designer', label: 'Query', icon: 'query', text: 'Browse data sources and try queries' },
   { href: '/analytics', right: 'analytics', label: 'Analytics', icon: 'analytics', text: 'Dashboards and models' },
   { href: '/admin', right: 'admin', label: 'Admin', icon: 'admin', text: 'Users, API keys, data sources, system DB' },
 ];

@@ -135,46 +135,46 @@ Type the ID of the data adapter to use: ${info.adapters.map((a) => a.id).join(',
       <Topbar current="/analytics" />
       <AnalyticsRibbon info={info} view={view} go={go} onNewDashboard={newDashboard} onImport={() => picker.current?.click()}
         onRefreshAll={refreshAll} onReload={reload} readyCount={datasets.filter((d) => d.status === 'ready').length} />
-      <div className="bi">
+      <div className="bi bi-new">
         <aside className="bi-side" aria-label="Analytics contents">
           <div className="bi-group">
-            <div className="bi-group-head"><span>Dashboards</span><span className="row tight">
+            <div className="bi-group-head"><span>Dashboards <em className="bi-count">{dashboards.length}</em></span><span className="row tight">
               {info.mayModel && <button type="button" className="btn small" onClick={() => picker.current?.click()} title="Import a dashboard file (.mdash) or a Power BI report (.pbix) or template (.pbit)">Import</button>}
               <button type="button" className="btn small" onClick={newDashboard} title="New dashboard">+ New</button></span>
               <input ref={picker} type="file" accept=".mdash,.pbit,.pbix" hidden onChange={(e) => { importFile(e.target.files[0]); e.target.value = ''; }} />
             </div>
             {dashboards.length === 0 && <p className="muted small">No dashboards yet.</p>}
-            {dashboards.map((d) => (
-              <a key={d.id} href={`#dash/${d.id}`} className={`bi-link ${current('dash', d.id) ? 'on' : ''}`}>
-                <span>{d.name}</span><small className="muted">{d.tiles} visual{d.tiles === 1 ? '' : 's'}</small>
+            {dashboards.map((d, i) => (
+              <a key={d.id} href={`#dash/${d.id}`} className={`bi-link ${current('dash', d.id) ? 'on' : ''}`} style={{ '--i': i }}>
+                <span><i className="bi-mark tint-c" aria-hidden="true">▦</i>{d.name}</span><small className="muted">{d.tiles} visual{d.tiles === 1 ? '' : 's'}</small>
               </a>
             ))}
           </div>
           <div className="bi-group">
-            <div className="bi-group-head"><span>Datasets</span>{info.mayModel && <a className="btn small" href="#ds/new">+ New</a>}</div>
+            <div className="bi-group-head"><span>Datasets <em className="bi-count">{datasets.length}</em></span>{info.mayModel && <a className="btn small" href="#ds/new">+ New</a>}</div>
             {datasets.length === 0 && <p className="muted small">No datasets yet.</p>}
-            {datasets.map((d) => (
-              <a key={d.id} href={`#ds/${d.id}`} className={`bi-link ${current('ds', d.id) ? 'on' : ''}`}>
-                <span><i className={`dot ${d.status}`} aria-hidden="true" />{d.name}</span>
+            {datasets.map((d, i) => (
+              <a key={d.id} href={`#ds/${d.id}`} className={`bi-link ${current('ds', d.id) ? 'on' : ''}`} style={{ '--i': i }}>
+                <span><i className="bi-mark tint-g" aria-hidden="true">⛁<i className={`dot ${d.status}`} /></i>{d.name}</span>
                 <small className="muted">{d.status === 'ready' ? `${(d.rowCount || 0).toLocaleString()} rows · ${describeBytes(d.sizeBytes)}` : d.status}</small>
               </a>
             ))}
           </div>
           <div className="bi-group">
-            <div className="bi-group-head"><span>Queries (DAX · SQL · MongoDB)</span>{info.mayModel && <a className="btn small" href="#q/new">+ New</a>}</div>
+            <div className="bi-group-head"><span title="DAX · SQL · MongoDB">Queries <em className="bi-count">{savedQueries.length}</em></span>{info.mayModel && <a className="btn small" href="#q/new">+ New</a>}</div>
             {savedQueries.length === 0 && <p className="muted small">{info.mayModel ? 'Write DAX / SQL over the datasets, or a MongoDB / SQL query on a data adapter, and keep it here.' : 'No saved queries.'}</p>}
-            {savedQueries.map((q) => (
-              <a key={q.id} href={`#q/${q.id}`} className={`bi-link ${current('q', q.id) ? 'on' : ''}`}>
-                <span>{q.name}</span><small className="muted" title={modeLabel(q)}>{q.language === 'source' ? (q.queryLanguage === 'sql' ? 'DB SQL' : 'Mongo') : q.language.toUpperCase()}</small>
+            {savedQueries.map((q, i) => (
+              <a key={q.id} href={`#q/${q.id}`} className={`bi-link ${current('q', q.id) ? 'on' : ''}`} style={{ '--i': i }}>
+                <span><i className="bi-mark tint-b" aria-hidden="true">ƒ</i>{q.name}</span><small className="muted" title={modeLabel(q)}>{q.language === 'source' ? (q.queryLanguage === 'sql' ? 'DB SQL' : 'Mongo') : q.language.toUpperCase()}</small>
               </a>
             ))}
           </div>
-          <a href="#model" className={`bi-link model ${view.kind === 'model' ? 'on' : ''}`}><span>Model (relationships)</span><small className="muted">{relationships.length}</small></a>
+          <a href="#model" className={`bi-link model ${view.kind === 'model' ? 'on' : ''}`}><span><i className="bi-mark tint-v" aria-hidden="true">⇄</i>Model (relationships)</span><small className="muted">{relationships.length}</small></a>
         </aside>
 
         <main className="bi-main">
           {message && <div style={{ marginBottom: 12 }}><Notice message={message} /></div>}
-          {view.kind === 'home' && <Home info={info} datasets={datasets} dashboards={dashboards} onNew={newDashboard} />}
+          {view.kind === 'home' && <Home info={info} datasets={datasets} dashboards={dashboards} queries={savedQueries} relationships={relationships} onNew={newDashboard} />}
           {view.kind === 'dash' && (
             <Dashboard key={view.id} dashboardId={view.id} datasets={datasets} relationships={relationships} notify={notify}
               onSaved={reload} onDeleted={() => { reload(); go(''); }}
@@ -203,18 +203,55 @@ Type the ID of the data adapter to use: ${info.adapters.map((a) => a.id).join(',
   );
 }
 
-function Home({ info, datasets, dashboards, onNew }) {
-  const ready = datasets.filter((d) => d.status === 'ready').length;
+function Home({ info, datasets, dashboards, queries, relationships, onNew }) {
+  const ready = datasets.filter((d) => d.status === 'ready');
+  const rows = ready.reduce((n, d) => n + (d.rowCount || 0), 0);
+  const busy = datasets.filter((d) => d.status === 'queued' || d.status === 'refreshing').length;
+  const failed = datasets.filter((d) => d.status === 'failed').length;
+  const kpis = [
+    ['Dashboards', dashboards.length, dashboards.length ? `${dashboards.reduce((n, d) => n + (d.tiles || 0), 0)} visuals in all` : 'None yet', 'c'],
+    ['Datasets ready', `${ready.length}/${datasets.length}`, busy ? `${busy} importing now` : failed ? `${failed} failed to import` : datasets.length ? 'All imported' : 'None yet', failed ? 'a' : 'g'],
+    ['Rows imported', rows.toLocaleString(), ready.length ? describeBytes(ready.reduce((n, d) => n + (d.sizeBytes || 0), 0)) : 'Nothing imported yet', 'b'],
+    ['Queries & links', `${queries.length} · ${relationships.length}`, 'Saved queries · relationships in the model', 'v'],
+  ];
+  const steps = [
+    { done: datasets.length > 0, title: 'Datasets', tint: 'g', text: datasets.length ? `${datasets.length} dataset(s), ${ready.length} ready` : 'Choose a data adapter and a query; its records are imported for fast analysis.',
+      action: info.mayModel ? <a className="btn small" href="#ds/new">New dataset</a> : <small className="muted">Made by people with the Designer or Admin right.</small> },
+    { done: datasets.length > 1 && relationships.length > 0, title: 'Model', tint: 'v', text: 'Relate datasets on a shared column to use them together (optional).', action: <a className="btn small" href="#model">Open the model</a> },
+    { done: dashboards.length > 0, title: 'Dashboards', tint: 'c', text: dashboards.length ? `${dashboards.length} dashboard(s)` : 'Add visuals and arrange them on the grid.', action: <button type="button" className="btn small primary" onClick={onNew}>New dashboard</button> },
+  ];
   return (
-    <div className="stack">
-      <div className="page-head"><div><p className="eyebrow">Analytics</p><h1>Dashboards from your data</h1>
-        <p className="muted">Import data from any data adapter into a dataset, relate datasets in the model, then build dashboards with charts, cards, tables and slicers. Clicking a bar or a slice filters the rest of the dashboard.</p></div></div>
+    <div className="stack bi-home">
+      <div className="page-head bi-hero"><div><p className="eyebrow">Analytics</p><h1>Dashboards from your data</h1>
+        <p className="muted">Import data from any data adapter into a dataset, relate datasets in the model, then build dashboards with charts, cards, tables and slicers. Clicking a bar or a slice filters the rest of the dashboard.</p></div>
+        <span className="bi-hero-art" aria-hidden="true">{[38, 62, 48, 84, 56, 72].map((h, i) => <i key={i} style={{ height: `${h}%`, animationDelay: `${0.15 + i * 0.07}s` }} />)}</span>
+      </div>
+      <div className="bi-kpis">
+        {kpis.map(([label, value, note, tint], i) => (
+          <div key={label} className={`bi-kpi tint-${tint}`} style={{ '--i': i }}><small>{label}</small><strong>{value}</strong><span>{note}</span></div>
+        ))}
+      </div>
       <ol className="bi-steps">
-        <li className={datasets.length ? 'done' : ''}><b>1. Datasets</b><span>{datasets.length ? `${datasets.length} dataset(s), ${ready} ready` : 'Choose a data adapter and a query; its records are imported for fast analysis.'}</span>
-          {info.mayModel ? <a className="btn small" href="#ds/new">New dataset</a> : <small className="muted">Made by people with the Designer or Admin right.</small>}</li>
-        <li className={datasets.length > 1 ? 'done' : ''}><b>2. Model</b><span>Relate datasets on a shared column to use them together (optional).</span><a className="btn small" href="#model">Open the model</a></li>
-        <li className={dashboards.length ? 'done' : ''}><b>3. Dashboards</b><span>{dashboards.length ? `${dashboards.length} dashboard(s)` : 'Add visuals and arrange them on the grid.'}</span><button type="button" className="btn small primary" onClick={onNew}>New dashboard</button></li>
+        {steps.map((step, i) => (
+          <li key={step.title} className={`tint-${step.tint} ${step.done ? 'done' : ''}`} style={{ '--i': i }}>
+            <span className="bi-step-num" aria-hidden="true">{step.done ? '✓' : i + 1}</span>
+            <b>{step.title}</b><span>{step.text}</span>{step.action}
+          </li>
+        ))}
       </ol>
+      {dashboards.length > 0 && (
+        <section className="bi-recent">
+          <h2>Your dashboards</h2>
+          <div className="bi-recent-grid">
+            {dashboards.slice(0, 8).map((d, i) => (
+              <a key={d.id} href={`#dash/${d.id}`} className="bi-dash-card" style={{ '--i': i }}>
+                <span className="bi-dash-art" aria-hidden="true">{Array.from({ length: Math.max(1, Math.min(d.tiles || 1, 6)) }, (_, k) => <i key={k} />)}</span>
+                <b>{d.name}</b><small className="muted">{d.tiles} visual{d.tiles === 1 ? '' : 's'}{d.folder ? ` · ${d.folder}` : ''}</small>
+              </a>
+            ))}
+          </div>
+        </section>
+      )}
       <p className="muted small">Limits on this server: imports up to {info.limits.importMaxRows.toLocaleString()} records per dataset; a visual returns up to {info.limits.queryMaxRows.toLocaleString()} rows and stops after {info.limits.queryTimeoutSeconds} s.</p>
     </div>
   );

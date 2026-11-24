@@ -4,8 +4,8 @@ import { useEffect, useRef, useState } from 'react';
 import '../../../ui/brand/theme.js';
 
 const LOOK = window.ReportingLook;
-const BAR = { indigo: '#312e81', blue: '#1a4fb4', green: '#107c41', teal: '#0f5e58', orange: '#b23c0a', rose: '#9f1239', violet: '#5b21b6' };
-const DARK_ACCENT = { indigo: '#818cf8', blue: '#60a5fa', green: '#4ade80', teal: '#2dd4bf', orange: '#fb923c', rose: '#fb7185', violet: '#a78bfa' };
+const BAR = { bright: '#2340d6', indigo: '#312e81', blue: '#1a4fb4', green: '#107c41', teal: '#0f5e58', orange: '#b23c0a', rose: '#9f1239', violet: '#5b21b6' };
+const DARK_ACCENT = { bright: '#7d94ff', indigo: '#818cf8', blue: '#60a5fa', green: '#4ade80', teal: '#2dd4bf', orange: '#fb923c', rose: '#fb7185', violet: '#a78bfa' };
 
 export function useLook() {
   const [look, setLook] = useState(LOOK.read);
@@ -17,8 +17,8 @@ function Swatch({ look }) {
   const dark = look.mode === 'dark' || (look.mode === 'system' && LOOK.isDark());
   const accent = look.contrast === 'high' && dark ? '#fde047' : (dark ? DARK_ACCENT : Object.fromEntries(LOOK.ACCENTS.map((a) => [a.id, a.color])))[look.accent];
   const bar = look.contrast === 'high' ? '#000' : look.bar === 'accent' ? BAR[look.accent] : '#0c1425';
-  const bg = look.contrast === 'high' ? (dark ? '#000' : '#fff') : dark ? '#0b1120' : '#eef1f6';
-  const panel = dark ? (look.contrast === 'high' ? '#161616' : '#1a2438') : '#ffffff';
+  const bg = look.contrast === 'high' ? (dark ? '#000' : '#fff') : dark ? '#0f1117' : '#f6f7fb';
+  const panel = dark ? (look.contrast === 'high' ? '#161616' : '#171a23') : '#ffffff';
   return (
     <span className="lk-swatch" style={{ background: bg }} aria-hidden="true">
       <i style={{ background: bar }} />
