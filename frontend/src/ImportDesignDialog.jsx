@@ -27,8 +27,16 @@ const readDataUrl = (file) => new Promise((resolve, reject) => {
 /** The imported page as the report design: page size, Background (the picture) and Detail (one page per record). */
 export function designFromImport(result, previous) {
   const base = emptyDesign();
-  const place = (list) => list.map(({ fields, ...el }) => { const { id, ...rest } = el; void id; void fields; return { ...defaultElement(el.type, el.x, el.y), ...rest }; });
+  const place = (list, shift = 0) => list.map(({ fields, region, ...el }) => {
+    const { id, ...rest } = el; void id; void fields; void region;
+    return { ...defaultElement(el.type, el.x, el.y), ...rest, y: Math.max(0, Math.round((el.y - shift) * 10) / 10) };
+  });
   const height = result.page.height;
+  // a scan's header / footer (found by the server) go to the Page Header / Page Footer bands: they repeat on every page
+  const headerEnd = Math.min(result.regions?.header || 0, height);
+  const footerStart = result.regions?.footer > headerEnd ? Math.min(result.regions.footer, height) : height;
+  const inRegion = (name) => result.elements.filter((el) => el.region === name);
+  const body = result.elements.filter((el) => el.region !== 'header' && el.region !== 'footer');
   return {
     ...base,
     calculatedFields: previous?.calculatedFields || [],
@@ -40,7 +48,10 @@ export function designFromImport(result, previous) {
     bands: {
       ...base.bands,
       background: { height: result.background.length ? height : 0, elements: place(result.background) },
-      detail: { height, elements: place(result.elements) },
+      // whole points that add up to no more than the page (Jasper refuses bands taller than the page)
+      pageHeader: { height: Math.round(headerEnd), elements: place(inRegion('header')) },
+      detail: { height: Math.round(footerStart) - Math.round(headerEnd), elements: place(body, Math.round(headerEnd)) },
+      pageFooter: { height: Math.max(0, Math.floor(height) - Math.round(footerStart)), elements: place(inRegion('footer'), Math.round(footerStart)) },
     },
   };
 }

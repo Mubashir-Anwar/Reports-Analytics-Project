@@ -82,7 +82,8 @@ def test_designer_token_can_design_but_not_manage(make_client):
     assert client.get("/api/admin/reports", headers=admin(DESIGNER)).status_code == 200
     assert client.post("/api/admin/reports/R1/preview", headers=admin(DESIGNER), json={"parameters": {}}).status_code == 200
     assert client.delete("/api/admin/reports/R1", headers=admin(DESIGNER)).status_code == 403
-    assert client.post("/api/admin/connections", headers=admin(DESIGNER), json={"name": "x", "uri": "mongodb://x/y"}).status_code == 403
+    # data sources need no Admin right any more: the designer token may connect one
+    assert client.post("/api/data-sources", headers=admin(DESIGNER), json={"name": "x", "uri": "mongodb://x/y"}).status_code == 200
     assert client.get("/api/admin/logs", headers=admin(DESIGNER)).status_code == 403
     assert client.get("/api/admin/whoami", headers=admin(ADMIN)).json()["role"] == "admin"
     assert client.get("/api/admin/reports", headers=admin("wrong")).status_code == 401

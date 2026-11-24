@@ -25,12 +25,14 @@ BUSY_RETRY_SECONDS = 10
 
 
 class RunGate:
-    def __init__(self, limit: int, per_caller: int, wait_seconds: float):
+    def __init__(self, limit: int, per_caller: int, wait_seconds: float, live: bool = False):
         self.limit = max(1, int(limit))
         self.per_caller = max(1, int(per_caller))
         self.wait_seconds = max(0.0, float(wait_seconds))
-        self._slots = threading.BoundedSemaphore(self.limit)
+        self.live = live                       # follow Admin → Limits (the app); tests pass fixed numbers
         self._lock = threading.Lock()
+        self._free = threading.Condition(self._lock)
+        self._busy = 0                         # places taken (a count, so the limit can change while running)
         self._by_caller: dict[str, int] = {}
         self.running = 0
         self.waiting = 0
@@ -44,6 +46,7 @@ class RunGate:
     def slot(self, caller: str) -> Iterator[None]:
         """Hold one place while the report is made. 429 when this caller already has its share, 503 when full."""
         caller = caller or "anonymous"
+        self._follow_limits()
         share = self.share(caller)
         with self._lock:
             if self._by_caller.get(caller, 0) >= share:
@@ -57,7 +60,7 @@ class RunGate:
             self.waiting += 1
         acquired = False
         try:
-            acquired = self._slots.acquire(timeout=self.wait_seconds) if self.wait_seconds else self._slots.acquire(blocking=False)
+            acquired = self._take_place()
         finally:
             with self._lock:
                 self.waiting -= 1
@@ -76,11 +79,40 @@ class RunGate:
         try:
             yield
         finally:
-            self._slots.release()
             with self._lock:
+                self._busy -= 1
+                self._free.notify()
                 self.running -= 1
                 self.served += 1
                 self._release_caller(caller)
+
+    def _take_place(self) -> bool:
+        """Wait (up to wait_seconds) until fewer than limit places are taken, then take one."""
+        deadline = time.monotonic() + self.wait_seconds
+        with self._free:
+            while self._busy >= self.limit:
+                left = deadline - time.monotonic()
+                if left <= 0:
+                    return False
+                self._free.wait(left)
+            self._busy += 1
+            return True
+
+    def resize(self, limit: int, per_caller: int, wait_seconds: float) -> None:
+        """New numbers from Admin → Limits: a larger limit lets waiting requests in at once; a smaller one lets
+        the reports already running finish."""
+        with self._free:
+            self.limit, self.per_caller, self.wait_seconds = max(1, int(limit)), max(1, int(per_caller)), max(0.0, float(wait_seconds))
+            self._free.notify_all()
+
+    def _follow_limits(self) -> None:
+        if not self.live:
+            return
+        from backend.app import limits  # noqa: PLC0415
+        wanted = (int(limits.value("REPORT_MAX_CONCURRENT")), int(limits.value("REPORT_MAX_PER_CALLER")),
+                  float(limits.value("REPORT_QUEUE_WAIT_SECONDS")))
+        if wanted != (self.limit, self.per_caller, self.wait_seconds):
+            self.resize(*wanted)
 
     def share(self, caller: str) -> int:
         """How many places one caller may hold: a user its own few, a key or token (many visitors) up to half."""
@@ -96,6 +128,7 @@ class RunGate:
             self._by_caller.pop(caller, None)
 
     def stats(self) -> dict[str, Any]:
+        self._follow_limits()
         with self._lock:
             return {"limit": self.limit, "perCaller": self.per_caller, "waitSeconds": self.wait_seconds,
                     "running": self.running, "waiting": self.waiting, "peak": self.peak, "served": self.served,

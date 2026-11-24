@@ -164,12 +164,29 @@ def _report_element(parent: ET.Element, el: dict[str, Any], out: _Out, where: st
         _sub(node, "printWhenExpression", text=out.refs(str(el["printWhenExpression"]), where))
 
 
+TEXT_PADDING = 2                  # the designer and our PDF keep text 2 px inside its box; Jasper's default is 0
+STUDIO_ADAPTER = "One Empty Record"  # Studio's built-in adapter: Preview shows the layout until a real one is chosen
+OUR_ADAPTER = "com.mongoreporting.data.adapter"
+
+
+def _text_padding(el: dict[str, Any]) -> dict[str, str]:
+    """Left/right as in the designer (so letters start where they did); top only while one line still fits, and no
+    bottom padding: Jasper prints nothing at all when the first line is taller than the room left inside the box."""
+    pad = max(0.0, _num(el.get("padding"), TEXT_PADDING))
+    line = _num(el.get("fontSize"), 10) * 1.3                 # one line of Arial / DejaVu Sans in Jasper
+    room = max(_num(el.get("height"), 16) - line, 0.0)
+    top = int(min(pad, room))
+    return {"leftPadding": _int(pad), "rightPadding": _int(pad), "topPadding": str(top), "bottomPadding": "0"}
+
+
 def _box(parent: ET.Element, el: dict[str, Any]) -> None:
     width = _num(el.get("borderWidth"))
     padding = el.get("padding")
-    if not width and padding is None:
+    text = el.get("type") in ("staticText", "textField")
+    if not width and padding is None and not text:
         return
-    box = _sub(parent, "box", {"padding": _int(padding) if padding is not None else None})
+    attrs = _text_padding(el) if text else {"padding": _int(padding) if padding is not None else None}
+    box = _sub(parent, "box", attrs)
     if width:
         _sub(box, "pen", {"lineWidth": f"{width:g}", "lineColor": str(el.get("borderColor") or el.get("color") or "#000000")})
 
@@ -181,7 +198,7 @@ def _text_element(parent: ET.Element, el: dict[str, Any]) -> None:
     if el.get("markup") in ("html", "styled"):
         attrs["markup"] = el["markup"]
     node = _sub(parent, "textElement", attrs)
-    font = {"fontName": str(el.get("fontName") or "SansSerif"), "size": f"{_num(el.get('fontSize'), 10):g}"}
+    font = {"fontName": jasper_font(el.get("fontName")), "size": f"{_num(el.get('fontSize'), 10):g}"}
     for ours, theirs in (("bold", "isBold"), ("italic", "isItalic"), ("underline", "isUnderline")):
         if el.get(ours):
             font[theirs] = "true"
@@ -194,6 +211,15 @@ def _text_element(parent: ET.Element, el: dict[str, Any]) -> None:
             paragraph[name] = f"{_num(el[name]):g}" if name == "lineSpacingSize" else _int(el[name])
     if paragraph:
         _sub(node, "paragraph", paragraph)
+
+
+def jasper_font(name: Any) -> str:
+    """The font our PDF really uses, as a Jasper logical font: Arial, Calibri, Verdana … are drawn as Helvetica, Georgia
+    as Times. Jasper has those three built in for PDF; a font it does not bundle (Arial, Calibri) loses bold and italic
+    in Jasper's PDF and has other letter widths, so the text would not line up with the design."""
+    from backend.app.rendering.engine import FONT_FAMILY  # noqa: PLC0415
+    family = FONT_FAMILY.get(str(name or "SansSerif"), "Helvetica")
+    return {"Helvetica": "SansSerif", "Times": "Serif", "Courier": "Monospaced"}[family]
 
 
 def _graphic(parent: ET.Element, el: dict[str, Any], default_width: float = 1) -> None:
@@ -218,7 +244,8 @@ def _element(parent: ET.Element, el: dict[str, Any], out: _Out, where: str, widt
         _sub(node, "text", text=str(el.get("text") or ""))
     elif kind == "textField":
         expression, at_report = out.expression(str(el.get("expression") or ""), where)
-        attrs = {"isBlankWhenNull": "true" if el.get("blankWhenNull") else None, "pattern": str(el["pattern"]) if el.get("pattern") else None,
+        # like the designer: an empty value prints nothing (Jasper would print "null")
+        attrs = {"isBlankWhenNull": "false" if el.get("blankWhenNull") is False else "true", "pattern": str(el["pattern"]) if el.get("pattern") else None,
                  "evaluationTime": "Report" if at_report else (str(el["evaluationTime"]) if el.get("evaluationTime") else None)}
         if el.get("textAdjust") in ("StretchHeight", "ScaleFont") or el.get("stretch"):
             attrs["textAdjust"] = el.get("textAdjust") if el.get("textAdjust") in ("StretchHeight", "ScaleFont") else "StretchHeight"
@@ -324,7 +351,8 @@ def export_jrxml(definition: dict[str, Any]) -> dict[str, Any]:
 
     ET.register_namespace("", NS)
     ET.register_namespace("xsi", XSI)
-    no_data = _has_band(bands.get("noData"))
+    # an empty No Data band would make Jasper print a blank page when the query has no rows
+    no_data = bool((bands.get("noData") or {}).get("elements"))
     root = ET.Element(f"{{{NS}}}jasperReport", {
         f"{{{XSI}}}schemaLocation": f"{NS} http://jasperreports.sourceforge.net/xsd/jasperreport.xsd",
         "name": name, "pageWidth": _int(width), "pageHeight": _int(height),
@@ -335,7 +363,10 @@ def export_jrxml(definition: dict[str, Any]) -> dict[str, Any]:
     })
     if page.get("ignorePagination"):
         root.set("isIgnorePagination", "true")
-    for prop, value in (("com.jaspersoft.studio.data.defaultdataadapter", definition.get("connectionId")),
+    # Studio has no adapter called like ours: naming it would stop Preview ("No MongoDB connection", a blank page).
+    # Start on Studio's "One Empty Record" (the layout shows); our data source name is kept for the way back.
+    for prop, value in (("com.jaspersoft.studio.data.defaultdataadapter", STUDIO_ADAPTER),
+                        (OUR_ADAPTER, definition.get("connectionId")),
                         ("com.jaspersoft.studio.report.description", definition.get("description")),
                         ("com.jaspersoft.studio.unit.", "pixel")):
         if value:
@@ -386,6 +417,9 @@ def export_jrxml(definition: dict[str, Any]) -> dict[str, Any]:
         column_name = column.get("name") if isinstance(column, dict) else column
         if column_name and column_name not in calc_names:
             _sub(root, "field", {"name": str(column_name), "class": "java.lang.Object"})
+    if query_language == "MongoDbQuery":
+        out.warn("In Jaspersoft Studio choose a MongoDB data adapter (Preview → data adapter) to see real rows; "
+                 "until then Preview uses “One Empty Record” and shows the layout with empty values")
     if definition.get("columns"):
         out.warn("Fields are exported as java.lang.Object; set each field's class in Studio (e.g. java.math.BigDecimal) "
                  "where a number or date pattern must format it")
@@ -430,7 +464,7 @@ def export_jrxml(definition: dict[str, Any]) -> dict[str, Any]:
 
     for key in BAND_ORDER:
         band = bands.get(key)
-        if not _has_band(band):
+        if not _has_band(band) or (key == "noData" and not no_data):
             continue
         holder = _sub(root, key)
         _band(holder, band, out, key, column_width)

@@ -19,7 +19,7 @@ from backend.app.routers.accounts import check_contact
 from backend.app.security.users import bootstrap_login_active, is_super_admin, load_users, save_users, set_user_password, user_rights
 
 # Old clients send role instead of rights.
-ROLE_RIGHTS = {"viewer": ["server", "runner"], "designer": ["designer", "server", "runner"]}
+ROLE_RIGHTS = {"viewer": ["server", "runner"], "designer": ["designer", "query", "server", "runner"]}
 
 
 def register(app: FastAPI, ctx: SimpleNamespace) -> None:

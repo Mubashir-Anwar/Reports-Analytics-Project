@@ -11,7 +11,6 @@ from __future__ import annotations
 
 import hashlib
 import hmac
-import os
 import re
 import secrets
 import threading
@@ -139,10 +138,8 @@ def rate_limit(item: dict[str, Any]) -> int:
     own = item.get("ratePerMinute")
     if isinstance(own, int) and own > 0:
         return own
-    try:
-        return max(0, int(os.getenv("REPORTING_API_RATE_PER_MINUTE", "120")))
-    except ValueError:
-        return 120
+    from backend.app import limits  # noqa: PLC0415
+    return int(limits.value("REPORTING_API_RATE_PER_MINUTE"))
 
 
 def over_limit(item: dict[str, Any]) -> int:

@@ -47,6 +47,40 @@ def test_signed_out_pages_go_to_sign_in(client):
     assert client.get("/server").status_code == 200                  # the sign-in form
 
 
+def test_query_right_opens_only_the_query_workspace(client):
+    """The Query workspace has its own right: given alone, it opens /query and its API, nothing else."""
+    assert make_user(client, "quinn", ["query"]).status_code == 200
+    sign_in(client, "quinn")
+    assert client.get("/query").status_code == 200
+    assert client.post("/api/query/mongo/collections", json={"connectionId": ""}).status_code == 422   # past the right check
+    assert client.get("/designer").status_code == 403 and client.get("/api/admin/workspace").status_code == 403
+    assert client.get("/", follow_redirects=False).headers["location"] == "/query"
+    assert make_user(client, "dora", ["designer"]).status_code == 200       # Designer alone no longer opens /query
+    sign_in(client, "dora")
+    assert client.get("/query").status_code == 403
+    assert client.post("/api/query/mongo/collections", json={"connectionId": ""}).status_code == 403
+
+
+def test_designers_keep_the_query_workspace_after_the_upgrade(tmp_path, monkeypatch):
+    """Once, at start-up: accounts that have the Designer right also get the Query right."""
+    monkeypatch.setenv("REPORTING_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("REPORTING_STORAGE", "files")
+    from backend.app.db import entities as ent
+    from backend.app.db import people
+    from backend.app.storage.store import get_store
+    ent.reset_cache()
+    people.save_users([{"username": "old", "rights": ["designer", "server"], "email": "old@example.com"},
+                       {"username": "viewer", "rights": ["server"], "email": "v@example.com"}])
+    db = ent.get_entities()
+    for row in db.find(ent.USER_RIGHTS):
+        if row["rightName"] == "query":
+            db.delete(ent.USER_RIGHTS, row["userId"], "query")            # as written by the previous version
+    assert people.grant_query_right(get_store()) == 1
+    assert people.grant_query_right(get_store()) == 0                      # once
+    rights = {u["username"]: set(u["rights"]) for u in people.load_users()}
+    assert "query" in rights["old"] and "query" not in rights["viewer"]
+
+
 def test_designer_only_user_sees_only_the_designer(client):
     assert make_user(client, "dina", ["designer"]).status_code == 200
     sign_in(client, "dina")
@@ -125,7 +159,7 @@ def test_only_super_admin_manages_administrators(client):
     assert make_user(client, "boss2", [], super_admin=True, headers={}).status_code == 200  # several super admins
     assert client.put("/api/admin/users/adam", json={"rights": ["admin", "designer"]}).status_code == 200
     users = {item["username"]: item for item in client.get("/api/admin/users").json()["users"]}
-    assert users["boss"]["superAdmin"] and users["boss"]["rights"] == ["admin", "analytics", "designer", "runner", "server"]
+    assert users["boss"]["superAdmin"] and users["boss"]["rights"] == ["admin", "analytics", "designer", "query", "runner", "server"]
     assert users["adam"]["rights"] == ["admin", "designer"]
 
 
@@ -152,7 +186,7 @@ def test_accounts_saved_before_rights_keep_working(client):
                 {"username": "oldv", "role": "viewer", **old}])
     users = {item["username"]: item for item in client.get("/api/admin/users", headers=ADMIN_HEADERS).json()["users"]}
     assert users["olda"]["superAdmin"] is True
-    assert users["oldd"]["rights"] == ["designer", "runner", "server"] and users["oldv"]["rights"] == ["runner", "server"]
+    assert users["oldd"]["rights"] == ["designer", "query", "runner", "server"] and users["oldv"]["rights"] == ["runner", "server"]
     sign_in(client, "oldd")
     assert client.get("/designer").status_code == 200 and client.get("/admin").status_code == 403
 
@@ -238,3 +272,27 @@ def test_the_old_run_reports_page_goes_home_and_urls_still_run(client, key):
     assert response.status_code == 303 and response.headers["location"] == "/"
     assert client.get("/reports", headers={"X-API-Key": key["secret"]}).status_code == 200
     assert client.get("/reports", headers={"X-API-Key": "mrk_000000000000_" + "x" * 40}).status_code in (401, 403)
+
+
+def test_data_sources_need_no_admin_right(client):
+    """Users with the Designer, Query or Server right connect data sources themselves (no Admin right); on the
+    Server a report is linked to any of them, from any folder, by whoever may Manage that report."""
+    make_user(client, "sara", ["server"])
+    make_user(client, "dave", ["server", "designer"])
+    make_user(client, "rana", ["runner"])
+    sign_in(client, "rana")
+    assert client.get("/api/data-sources").status_code == 403                   # the Runner right alone is not enough
+    sign_in(client, "sara")
+    saved = client.post("/api/data-sources", json={"name": "Sales DB", "uri": "mongodb://127.0.0.1:1/sales", "folder": "Team/Sources"})
+    assert saved.status_code == 200 and saved.json()["connection"]["folder"] == "Team/Sources"
+    listed = {item["id"]: item for item in client.get("/api/server/connections").json()["connections"]}
+    assert listed["sales_db"]["folder"] == "Team/Sources"
+    assert client.get("/api/server/reports/R1").json()["canLink"] is False       # viewers only run reports
+    assert client.put("/api/server/reports/R1", json={"connectionId": "sales_db"}).status_code == 403
+    sign_in(client, "dave")
+    assert client.put("/api/server/reports/R1", json={"connectionId": "sales_db"}).status_code == 200
+    details = client.get("/api/server/reports/R1").json()
+    assert details["connection"]["id"] == "sales_db" and details["connection"]["folder"] == "Team/Sources" and details["canLink"] is True
+    assert client.put("/api/server/reports/R1", json={"connectionId": "nope"}).status_code == 422
+    assert client.put("/api/server/reports/R1", json={"connectionId": "default"}).status_code == 200
+    assert client.request("DELETE", "/api/data-sources/sales_db", json={}).status_code == 200

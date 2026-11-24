@@ -179,13 +179,14 @@ def require_admin(ctx: SimpleNamespace, request: Request, role: str = "admin") -
     """Check the caller of a management endpoint (/api/admin/...) and return "admin" or "designer".
 
     A signed-in user needs the right for the area: role="admin" needs the Admin right; role="designer" needs
-    the Designer right (an administrator may also use these). Automation may still send X-Admin-Token
+    the Designer right (an administrator may also use these); role="sources" (data sources) needs any of the
+    Admin, Designer, Query or Report Server rights. Automation may still send X-Admin-Token
     (REPORTING_ADMIN_TOKEN, full access) or REPORTING_DESIGNER_TOKEN (designer endpoints only).
     request.state.actor names the caller for history records.
     An endpoint whose area is switched off with REPORTING_ENABLED_AREAS answers 404.
     """
     areas = enabled_areas()
-    if (role == "admin" and "admin" not in areas) or (role == "designer" and not areas & {"admin", "designer"}):
+    if (role == "admin" and "admin" not in areas) or (role in ("designer", "query") and not areas & {"admin", "designer"}):
         raise HTTPException(status_code=404, detail="Not Found")
     provided = request.headers.get("X-Admin-Token", "")
     if provided:
@@ -196,7 +197,7 @@ def require_admin(ctx: SimpleNamespace, request: Request, role: str = "admin") -
             return "admin"
         designer_token = os.getenv("REPORTING_DESIGNER_TOKEN", "").strip()
         if len(designer_token) >= ROLE_TOKEN_MIN_LENGTH and secrets.compare_digest(provided, designer_token):
-            if role == "designer":
+            if role in ("designer", "query", "sources"):
                 request.state.actor = "designer token"
                 request.state.session = None
                 return "designer"
@@ -210,6 +211,10 @@ def require_admin(ctx: SimpleNamespace, request: Request, role: str = "admin") -
         raise HTTPException(status_code=403, detail="Your account does not have the Admin right")
     if role == "designer" and not rights & {"designer", "admin"}:
         raise HTTPException(status_code=403, detail="Your account does not have the Designer right")
+    if role == "query" and not rights & {"query", "admin"}:
+        raise HTTPException(status_code=403, detail="Your account does not have the Query right")
+    if role == "sources" and not rights & {"admin", "designer", "query", "server"}:
+        raise HTTPException(status_code=403, detail="Data sources need the Designer, Query or Report Server right")
     if request.method not in ("GET", "HEAD"):
         ctx.require_json_request(request)
     request.state.actor = session["username"]

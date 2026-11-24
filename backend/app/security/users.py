@@ -61,7 +61,7 @@ def is_super_admin(user: dict[str, Any]) -> bool:
     return "rights" not in user and user.get("role") == "admin"
 
 
-_LEGACY_RIGHTS = {"designer": ("designer", "server", "runner"), "viewer": ("server", "runner")}
+_LEGACY_RIGHTS = {"designer": ("designer", "query", "server", "runner"), "viewer": ("server", "runner")}
 
 
 def user_rights(user: dict[str, Any]) -> set[str]:

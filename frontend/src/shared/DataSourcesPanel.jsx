@@ -1,5 +1,6 @@
-// /admin → Data sources: every data adapter of every kind (MongoDB, PostgreSQL, MySQL/MariaDB, SQL Server, Oracle),
-// with the same wizard as the designer, a test per adapter or for all, which reports use it, folders and delete.
+// Data sources: every data adapter of every kind (MongoDB, PostgreSQL, MySQL/MariaDB, SQL Server, Oracle), with the
+// same wizard as the designer, a test per adapter or for all, which reports use it, folders and delete. Shown on the
+// Server (Data sources view); every user with the Designer, Query or Server right connects their own (no Admin needed).
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { api } from '../api.js';
 import { Notice } from '../portal/Shell.jsx';
@@ -10,7 +11,7 @@ function describeTest(checked) {
   return checked.message || 'Connected';
 }
 
-export default function DataSourcesTab({ notify }) {
+export default function DataSourcesPanel({ notify, folders: knownFolders }) {
   const [adapters, setAdapters] = useState(null);
   const [folders, setFolders] = useState([]);
   const [tests, setTests] = useState({}); // id -> { text, kind }
@@ -21,11 +22,11 @@ export default function DataSourcesTab({ notify }) {
 
   const load = useCallback(async () => {
     try {
-      const [c, f] = await Promise.all([api.connections(), api.folders()]);
+      const [c, f] = await Promise.all([api.connections(), knownFolders ? { folders: knownFolders } : api.folders()]);
       setAdapters(c.connections);
       setFolders(f.folders);
     } catch (error) { setAdapters([]); notify(error.message, 'error'); }
-  }, [notify]);
+  }, [notify, knownFolders]);
   useEffect(() => { load(); }, [load]);
 
   const test = async (adapter) => {
@@ -72,7 +73,7 @@ export default function DataSourcesTab({ notify }) {
     <section className="card">
       <div className="card-head">
         <div><p className="eyebrow">Data sources</p><h2>Database connections for reports</h2>
-          <p className="muted">The same data adapters as in the Designer. Passwords are stored on the server (encrypted when REPORTING_SECRETS_KEY is set) and never shown again.</p></div>
+          <p className="muted">Connect your own databases with a connection string, in any folder; every report on the Server can then be linked to them (report → Data source tab). The same data adapters as in the Designer. Passwords are stored on the server (encrypted when REPORTING_SECRETS_KEY is set) and never shown again.</p></div>
         <div className="row">
           <button className="btn" onClick={testAll} disabled={!adapters?.some((a) => a.configured)}>⟳ Test all</button>
           <button className="btn primary" onClick={() => setWizard({})}>＋ New data source</button>

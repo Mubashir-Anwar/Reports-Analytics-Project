@@ -1,9 +1,10 @@
-// The product name. Default "Analysis"; a super admin renames it in Admin → Branding (GET /api/branding).
+// The product name and logo. Default "Analysis" with the built-in mark; a super admin changes both in
+// Admin → Name & look (GET /api/branding; logo is "/brand/logo?v=…" for an own logo, else "").
 // The last name seen is kept per browser, so pages show it at once instead of flashing the default.
 import { useEffect, useState } from 'react';
 
 const KEY = 'reporting-brand';
-const DEFAULT = { name: 'Analysis', tagline: 'Design · Publish · Deliver' };
+const DEFAULT = { name: 'Analysis', tagline: 'Design · Publish · Deliver', logo: '' };
 
 function split(name) {
   const words = name.trim().split(/\s+/);
@@ -12,7 +13,8 @@ function split(name) {
 
 function make(value) {
   const name = String(value?.name || DEFAULT.name);
-  return { name, tagline: String(value?.tagline || DEFAULT.tagline), ...split(name) };
+  const logo = String(value?.logo || '');
+  return { name, tagline: String(value?.tagline || DEFAULT.tagline), logo: logo.startsWith('/brand/logo') ? logo : '', ...split(name) };
 }
 
 function cached() {
@@ -27,8 +29,9 @@ const listeners = new Set();
 
 function publish(value) {
   BRAND = make(value);
-  try { localStorage.setItem(KEY, JSON.stringify({ name: BRAND.name, tagline: BRAND.tagline })); } catch { /* private mode */ }
+  try { localStorage.setItem(KEY, JSON.stringify({ name: BRAND.name, tagline: BRAND.tagline, logo: BRAND.logo })); } catch { /* private mode */ }
   retitle();
+  refavicon();
   listeners.forEach((listener) => listener(BRAND));
 }
 
@@ -58,5 +61,15 @@ function retitle() {
   document.title = part ? `${part} · ${BRAND.name}` : BRAND.name;
 }
 
+/** The browser-tab icon follows an own logo. */
+function refavicon() {
+  if (typeof document === 'undefined') return;
+  const link = document.querySelector('link[rel~="icon"]');
+  if (!link) return;
+  if (!link.dataset.builtin) link.dataset.builtin = link.getAttribute('href') || '';
+  link.setAttribute('href', BRAND.logo || link.dataset.builtin);
+}
+
 export const pageTitle = (part) => `${part} · ${BRAND.name}`;
 retitle();
+refavicon();

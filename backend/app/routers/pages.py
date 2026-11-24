@@ -17,7 +17,7 @@ from backend.app.branding import brand_name
 from backend.app.constants import RIGHT_LABELS
 
 # Which page each right opens, in the order the home page picks the first one.
-APP_PAGES = (("designer", "/designer"), ("server", "/server"), ("analytics", "/analytics"), ("admin", "/admin"))
+APP_PAGES = (("designer", "/designer"), ("query", "/query"), ("server", "/server"), ("analytics", "/analytics"), ("admin", "/admin"))
 
 _STYLE = """
 :root{color-scheme:light dark;--bg:#f6f7fb;--card:#fff;--ink:#14161f;--muted:#5b6173;--line:#e3e6ef;--accent:#4f46e5}
@@ -88,8 +88,8 @@ def register(app: FastAPI, ctx: SimpleNamespace) -> None:
 
     @app.get("/query", include_in_schema=False)
     def query_ui(request: Request) -> Response:
-        """The Query workspace: browse the data adapters and try queries (Designer right)."""
-        return guarded(request, "designer", react_page("query.html"))
+        """The Query workspace: browse the data adapters and try queries (Query right)."""
+        return guarded(request, "query", react_page("query.html"))
 
     @app.get("/analytics", include_in_schema=False)
     def analytics_ui(request: Request) -> Response:

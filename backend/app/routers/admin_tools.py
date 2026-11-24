@@ -16,9 +16,9 @@ from types import SimpleNamespace
 from typing import Any
 
 from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import JSONResponse
+from fastapi.responses import FileResponse, JSONResponse, Response
 
-from backend.app import branding
+from backend.app import branding, limits
 from backend.app.constants import PROJECT_ROOT
 from backend.app.logs import LOG
 from backend.app.storage import switch
@@ -48,6 +48,19 @@ def register(app: FastAPI, ctx: SimpleNamespace) -> None:
     def get_branding() -> dict[str, str]:
         return branding.branding()
 
+    @app.get("/brand/logo", include_in_schema=False)
+    def brand_logo() -> Response:
+        """The product logo for every page (public: the sign-in page shows it). The own one, else the built-in mark."""
+        own = branding.logo_file()
+        if own is None:
+            return FileResponse(ctx.ui_directory / "brand" / "logo.svg", media_type="image/svg+xml",
+                                headers={"Cache-Control": "no-cache"})
+        data, kind = own
+        return Response(data, media_type=kind, headers={
+            "Cache-Control": "public, max-age=31536000, immutable",           # the address carries ?v=<version>
+            "Content-Security-Policy": "default-src 'none'; style-src 'unsafe-inline'; sandbox",
+            "X-Content-Type-Options": "nosniff"})
+
     @app.put("/api/admin/branding")
     async def put_branding(request: Request) -> dict[str, str]:
         require_admin(request)
@@ -58,7 +71,8 @@ def register(app: FastAPI, ctx: SimpleNamespace) -> None:
         payload = await json_body(request)
         before = branding.branding()
         try:
-            saved = branding.save_branding(payload.get("name", ""), payload.get("tagline", ""))
+            saved = branding.save_branding(payload.get("name", ""), payload.get("tagline", ""),
+                                           payload["logo"] if "logo" in payload else ...)
         except ValueError as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from None
         ctx.audit_event(request, "branding.changed", saved["name"], {"before": before, "after": saved})
@@ -81,6 +95,31 @@ def register(app: FastAPI, ctx: SimpleNamespace) -> None:
                        "maxPerCaller": settings.max_per_caller, "queueWaitSeconds": settings.queue_wait_seconds},
             "exportDirectory": str(export_directory()),
         }
+
+    @app.get("/api/admin/limits")
+    def get_limits(request: Request) -> dict[str, Any]:
+        """Every limit (reports, downloads, analytics, API) with its value now and where it comes from."""
+        require_admin(request)
+        return limits.describe()
+
+    @app.put("/api/admin/limits")
+    async def put_limits(request: Request) -> dict[str, Any]:
+        """{"values": {ENV_NAME: value | null}}: null goes back to the environment variable / default.
+        Takes effect on every server within limits.LIVE_SECONDS, without a restart."""
+        require_admin(request)
+        ctx.require_json_request(request)
+        payload = await json_body(request)
+        before = {item["key"]: item["value"] for item in limits.describe()["limits"]}
+        actor = str(getattr(request.state, "actor", "") or "admin")
+        try:
+            result = limits.save(payload.get("values") if isinstance(payload, dict) else None, by=actor)
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from None
+        after = {item["key"]: item["value"] for item in result["limits"]}
+        changed = {key: {"before": before[key], "after": after[key]} for key in after if before.get(key) != after[key]}
+        ctx.audit_event(request, "limits.changed", ", ".join(changed) or "no change", {"changed": changed})
+        ctx.run_gate.stats()                      # the report places follow at once on this server
+        return result
 
     @app.get("/api/admin/system-db")
     def system_db(request: Request) -> dict[str, Any]:

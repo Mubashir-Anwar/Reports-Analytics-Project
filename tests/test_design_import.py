@@ -143,3 +143,31 @@ def test_ocr_reads_the_text_of_a_picture():
     text = next(e for e in result["elements"] if "Muhammad" in e["text"])
     assert text["backColor"] == "#fdf6e3" and text["color"] in ("#000000", "#010101", "#020202")
     assert abs(text["x"] - 200 * 842 / 1200) < 10 and 30 < text["fontSize"] < 52
+
+
+def test_scan_header_and_footer_get_their_own_bands():
+    """OCR text above the first clear gap at the top is the Page Header, below the last one at the bottom the Page
+    Footer; body text stays in Detail. The bands stay tight around their text."""
+    from backend.app.importers import design_import as di  # noqa: PLC0415
+    box = lambda y, text: {"type": "staticText", "x": 20, "y": y, "width": 200, "height": 12, "text": text}  # noqa: E731
+    elements = [box(10, "ABC BANK"), box(24, "Head office"), box(90, "Row 1"), box(104, "Row 2"), box(118, "Row 3"),
+                box(800, "Printed on 24-11-2026"), box(814, "Page 1 of 3")]
+    notes: list[str] = []
+    di._mark_header_footer(elements, 842, notes)
+    marker = elements.pop()
+    assert marker["type"] == "_regions" and 36 <= marker["header"] <= 50 and 785 <= marker["footer"] <= 800
+    assert [e.get("region", "body") for e in elements] == ["header", "header", "body", "body", "body", "footer", "footer"]
+    assert "Page Header and Page Footer" in notes[0]
+    result = di._result(595, 842, elements + [marker], None, 1, 1, [])
+    assert result["regions"] == {"header": marker["header"], "footer": marker["footer"]}
+    # a page of body text only has no header / footer
+    plain = [box(100 + 14 * i, f"Row {i}") for i in range(10)]
+    di._mark_header_footer(plain, 842, [])
+    assert all("region" not in e for e in plain if e["type"] != "_regions")
+
+
+def test_edge_pass_adds_only_text_the_page_pass_missed():
+    from backend.app.importers import design_import as di  # noqa: PLC0415
+    found = [("ABC BANK", (10.0, 10.0, 200.0, 30.0))]
+    added = di._merge(found, [("ABC BANK", (12.0, 11.0, 198.0, 29.0)), ("Page 1 of 3", (900.0, 1600.0, 1000.0, 1615.0))])
+    assert added == 1 and [t for t, _b in found] == ["ABC BANK", "Page 1 of 3"]

@@ -313,6 +313,24 @@ def save_keys(keys: list[dict[str, Any]]) -> None:
         put_key(item)
 
 
+# ------------------------------------------------------------------ one-time: the Query right
+def grant_query_right(store: Any) -> int:
+    """The Query workspace had no right of its own (the Designer right opened it). Once: every account with the
+    Designer right gets the Query right too, so nobody loses it; afterwards an administrator gives it on its own."""
+    from backend.app.storage.routed import UPGRADE_KEY  # noqa: PLC0415
+    state = store.read_json(UPGRADE_KEY, None) or {}
+    if state.get("queryRight"):
+        return 0
+    db = _db()
+    rows = db.find(ent.USER_RIGHTS)
+    holders = {row["userId"] for row in rows if row["rightName"] == "designer"}
+    already = {row["userId"] for row in rows if row["rightName"] == "query"}
+    for user_id in sorted(holders - already):
+        db.put(ent.USER_RIGHTS, {"userId": user_id, "rightName": "query", "grantedBy": "upgrade", "grantedAt": model.now()})
+    store.write_json(UPGRADE_KEY, {**(store.read_json(UPGRADE_KEY, None) or {}), "queryRight": model.iso(model.now())})
+    return len(holders - already)
+
+
 # ------------------------------------------------------------------ one-time copy from the previous version
 def upgrade_people(store: Any) -> dict[str, int]:
     """rs_users, rs_api_keys and rs_folder_permissions -> the step 2 tables, once (the old tables are kept)."""

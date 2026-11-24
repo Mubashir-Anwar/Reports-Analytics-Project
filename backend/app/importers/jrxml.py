@@ -308,8 +308,14 @@ def _convert_element(node: ET.Element, ctx: _Ctx, band_name: str, dx: float = 0,
                     if paragraph.get(attribute) is not None:
                         element[name] = _num(paragraph.get(attribute))
         box = _kid(node, "box")
+        # Jasper's default padding is 0 (ours is 2): without one in the file, keep the text where Studio shows it
+        sides = [box.get(f"{side}Padding") for side in ("left", "right")] if box is not None else []
         if box is not None and box.get("padding") is not None:
-            element["padding"] = _num(box.get("padding"), 2)
+            element["padding"] = _num(box.get("padding"), 0)
+        elif any(side is not None for side in sides):
+            element["padding"] = max(_num(side, 0) for side in sides)    # our own export writes the sides
+        else:
+            element["padding"] = 0
     if kind == "textField":
         raw_pattern = _text(_kid(node, "patternExpression")).strip()
         if raw_pattern:
@@ -771,5 +777,8 @@ def import_jrxml(xml_text: str, resources: dict[str, str] | None = None) -> dict
     return {
         "report": report, "design": design, "warnings": unique_warnings,
         "warningElements": {w: ctx.places[w] for w in unique_warnings if w in ctx.places},
-        "hints": {"dataAdapter": properties.get("com.jaspersoft.studio.data.defaultdataadapter", ""), "jasperName": root.get("name", "")},
+        "hints": {"dataAdapter": properties.get("com.mongoreporting.data.adapter")
+                  or (properties.get("com.jaspersoft.studio.data.defaultdataadapter", "") if properties.get(
+                      "com.jaspersoft.studio.data.defaultdataadapter") != "One Empty Record" else ""),
+                  "jasperName": root.get("name", "")},
     }

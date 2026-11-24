@@ -827,17 +827,24 @@ export default function SetupForm({ state, dispatch, notify, onTemplates, refres
     el.scrollIntoView({ block: focusIt ? 'center' : 'nearest', behavior: 'smooth' });
     if (focusIt) el.querySelector?.('input, select, textarea')?.focus({ preventScroll: true });
   }, 40);
+  // A task still to do: not filled in yet and not optional (optional ones stay one click away on the dots).
+  const todo = (t) => !t.done && !t.optional;
   /** Open a step at a task: by default its first task still to do. */
   const goStep = (id, at) => {
     const list = tasks[id];
-    const first = list.findIndex((t) => !t.done);
+    const first = list.findIndex(todo);
+    const open = list.findIndex((t) => !t.done);
     setCurrent(id);
-    setTaskIndex(at ?? (first < 0 ? 0 : first));
+    setTaskIndex(at ?? (first >= 0 ? first : open >= 0 ? open : 0));
     setTimeout(() => root.current?.scrollIntoView({ block: 'start', behavior: 'smooth' }), 20);
   };
+  /** Next: the next task of this step that still needs something; when the rest of the step is filled in, the next step
+   *  (so a filled-in name and ID do not each need their own click). */
   const nextTask = () => {
-    if (taskIndex < stepTasks.length - 1) { setTaskIndex(taskIndex + 1); return; }
-    if (stepIndex < SEGMENTS.length - 1) goStep(SEGMENTS[stepIndex + 1][0], 0);
+    const ahead = stepTasks.findIndex((t, i) => i > taskIndex && todo(t));
+    if (ahead >= 0) { setTaskIndex(ahead); return; }
+    if (stepIndex < SEGMENTS.length - 1) goStep(SEGMENTS[stepIndex + 1][0]);
+    else if (taskIndex < stepTasks.length - 1) setTaskIndex(stepTasks.length - 1);
   };
   const prevTask = () => {
     if (taskIndex > 0) { setTaskIndex(taskIndex - 1); return; }

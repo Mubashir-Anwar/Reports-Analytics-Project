@@ -1,10 +1,10 @@
 // The Designer's ribbon: a header (report name with the File menu, Saved / Draft status, Design · Setup · Preview · Source,
 // Ctrl K search, Undo, Redo, Check, light / dark, Help, Save, Publish), seven slim tabs (Home, Insert, Format, Arrange, Page,
-// Data & Formulas, Review & Share) with one row of grouped buttons each, and a collapse button. Every button calls the same
+// Data & Formulas, Review & Share, View) with one row of grouped buttons each, and a collapse button. Every button calls the same
 // actions as the menus and shortcuts (outlineActions.js), so nothing here has its own logic. Ctrl K reads these buttons.
 import { useEffect, useRef, useState } from 'react';
 import { selectedIds } from './arrange.js';
-import { FONT_NAMES, PAGE_PRESETS, PALETTE_GROUPS, ZOOM_LIMITS, clampZoom, contentRight, findElement, mapElements, pagePreset } from './designModel.js';
+import { FONT_NAMES, PAGE_PRESETS, PALETTE_GROUPS, RESIZE_MODES, ZOOM_LIMITS, clampZoom, contentRight, findElement, mapElements, pagePreset } from './designModel.js';
 import HelpDialog from './HelpDialogs.jsx';
 import { MRD_WITH_IMAGES_ACCEPT } from './mrd.js';
 import { publishState } from './panels.jsx';
@@ -148,7 +148,7 @@ const Row = ({ children }) => <div className="rb-row">{children}</div>;
 
 // [id, label, tint] — the tint colours the chosen tab (see --tint-* in shared/theme.css)
 const TABS = [['home', 'Home', 'b'], ['insert', 'Insert', 'g'], ['format', 'Format', 'v'], ['arrange', 'Arrange', 'a'], ['page', 'Page', 'c'],
-  ['data', 'Data & Formulas', 'b'], ['share', 'Review & Share', 'g']];
+  ['data', 'Data & Formulas', 'b'], ['share', 'Review & Share', 'g'], ['view', 'View', 'v']];
 const VIEWS = [['design', 'Design'], ['setup', 'Setup'], ['preview', 'Preview'], ['source', 'Source']];
 const HELP_ITEMS = [['help', 'help', 'Help: making a report step by step'], ['keyboard', 'shortcuts', 'Keyboard Shortcuts'], ['book', 'functions', 'Function List'],
   ['star', 'whatsnew', "What's New"], ['chat', 'feedback', 'Feedback'], ['support', 'support', 'Contact Support']];
@@ -158,7 +158,7 @@ const MARGINS = [['Normal', 30], ['Narrow', 15], ['Wide', 50], ['None', 0]];
 function readPrefs() {
   try {
     const saved = { tab: 'home', collapsed: false, ...JSON.parse(localStorage.getItem(KEY) || '{}') };
-    return TABS.some(([id]) => id === saved.tab) ? saved : { ...saved, tab: 'home' };   // tabs of the old ribbon (File, View…) are gone
+    return TABS.some(([id]) => id === saved.tab) ? saved : { ...saved, tab: 'home' };   // tabs of the old ribbon (File…) are gone
   } catch { return { tab: 'home', collapsed: false }; }
 }
 
@@ -464,6 +464,16 @@ export default function Ribbon({
             <Small icon="ruler" label="Rulers" on={prefs.showRulers} onClick={() => set({ showRulers: !prefs.showRulers })} />
           </Stack>
         </Group>
+        <Group label="Resizing">
+          <Stack>
+            <span className="rb-hint" title="When you drag the edge of a box wider">Wider box moves…</span>
+            <select className="rb-select wide" aria-label="Resizing a box" value={prefs.resizeMode || 'auto'}
+              title={RESIZE_MODES.find(([id]) => id === (prefs.resizeMode || 'auto'))?.[2]} onChange={(e) => set({ resizeMode: e.target.value })}>
+              {RESIZE_MODES.map(([id, label, help]) => <option key={id} value={id} title={help}>{label}</option>)}
+            </select>
+            <span className="rb-hint">Alt while dragging: the other way</span>
+          </Stack>
+        </Group>
         <Group label="Panels">
           <Stack>
             <Small icon="explorer" label="Repository explorer" title="Show or hide the Repository explorer: Workspace, Server and Data Adapters" on={panelOn('explorer')} onClick={() => togglePanel('explorer')} />
@@ -588,13 +598,11 @@ export default function Ribbon({
         <Group label="Notes">
           <Big icon="note" label="New note" title="A note on the canvas — only visible in the designer, never printed" on={tool === 'note'} onClick={() => { if (!inDesign) setView('design'); dispatch({ type: 'TOOL', tool: tool === 'note' ? null : 'note' }); }} />
           <Stack>
-            <span className="rb-hint">{plural(noteCount, 'note')} in the design</span>
+            <span className="rb-hint" title="Notes are only visible in the designer, never printed">{plural(noteCount, 'note')}</span>
           </Stack>
         </Group>
-        <Group label="Protect">
+        <Group label="Protect · Source">
           <Big icon={lockedAll ? 'unlock' : 'lock'} label={lockedAll ? 'Unlock' : 'Lock'} title="Lock: cannot be moved or resized (Ctrl+L)" onClick={() => actions.toggleLock()} disabled={none} on={lockedAll} />
-        </Group>
-        <Group label="Source">
           <Big icon="code" label="Source" title="The report definition as text (with Validate)" on={view === 'source'} onClick={() => setView('source')} />
         </Group>
       </>
@@ -604,13 +612,13 @@ export default function Ribbon({
         <Group label="Share">
           <Big icon="publish" label="Publish" title="Copy this report to a folder on the report server" onClick={onPublish} primary />
           <Big icon="download" label="Save as file" title="Download one .mrd file to send to someone" onClick={onSaveFile} />
-          <Big icon="download" label="Save as JRXML" title="Download a .jrxml to open in Jaspersoft Studio" onClick={onSaveJrxml} />
+          <Big icon="download" label="JRXML" title="Save as JRXML: download a .jrxml to open in Jaspersoft Studio" onClick={onSaveJrxml} />
         </Group>
         <Group label="Link">
           <Big icon="link" label={linkCopied ? 'Copied' : 'Copy link'} title={report.isNew ? 'Save and publish the report first' : `Copy ${runLink}`} disabled={report.isNew} onClick={() => { navigator.clipboard?.writeText(runLink).then(() => setLinkCopied(true), () => {}); setTimeout(() => setLinkCopied(false), 2000); }} />
           <Stack>
-            <code className="rb-link" title="Add X-API-Key (or sign in) to run it">{report.isNew ? 'Not saved yet' : runPath}</code>
-            <span className="rb-hint">.pdf · .xlsx · .csv — needs an API key or sign-in</span>
+            <code className="rb-link" title={report.isNew ? 'Publish the report to get its link' : `${runPath}: add X-API-Key (or sign in) to run it`}>{report.isNew ? 'Not published yet' : runPath}</code>
+            <span className="rb-hint" title="Change the ending for another format; needs an API key or sign-in">.pdf · .xlsx · .csv</span>
           </Stack>
         </Group>
       </>
@@ -620,7 +628,8 @@ export default function Ribbon({
   const tabBody = {
     home: body.home, insert: body.insert, format: body.format, arrange: body.arrange, page: body.page,
     data: <>{body.data}{body.formulas}</>,
-    share: <>{body.review}{body.share}{body.view}</>,
+    share: <>{body.review}{body.share}</>,
+    view: body.view,
   };
   const fileItems = (
     <>

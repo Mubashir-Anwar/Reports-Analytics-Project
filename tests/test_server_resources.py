@@ -96,7 +96,8 @@ def test_viewer_cannot_change_or_download_and_designer_cannot_delete(client):
     assert client.get("/api/server/reports/R1/file").status_code == 403
     assert client.post("/api/server/reports/R1/copy", json={}).status_code == 403
     assert client.post("/api/server/upload", json={"content": "x"}).status_code == 403
-    assert client.get("/api/server/connections").status_code == 403
+    listed = client.get("/api/server/connections")             # every signed-in user sees the data sources (names, no secrets)
+    assert listed.status_code == 200 and "uri" not in listed.text.lower()
     login(client, "dee", "dee-pass-12")
     assert client.get("/api/server/connections").json()["connections"][0]["id"] == "default"
     assert client.request("DELETE", "/api/server/reports/R1", json={}).status_code == 403

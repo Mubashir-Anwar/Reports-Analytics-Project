@@ -50,8 +50,8 @@ def test_move_adapter_between_folders_keeps_its_url(make_client, tmp_path):
     assert adapters(client)["broken"]["folder"] == ""
     assert client.put("/api/admin/connections/nope/folder", headers=admin(), json={"folder": "x"}).status_code == 404
     assert client.put("/api/admin/connections/broken/folder", headers=admin(), json={"folder": "../etc"}).status_code == 422
-    # moving adapters is admin-only, like saving them
-    assert client.put("/api/admin/connections/broken/folder", headers=admin(DESIGNER), json={"folder": "x"}).status_code == 403
+    # data sources need no Admin right: a designer moves them too (new address /api/data-sources)
+    assert client.put("/api/data-sources/broken/folder", headers=admin(DESIGNER), json={"folder": "x"}).status_code == 200
 
 
 def test_update_without_folder_field_keeps_the_folder(make_client):
