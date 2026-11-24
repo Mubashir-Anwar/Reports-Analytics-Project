@@ -121,7 +121,8 @@ function DataSourceTab({ info, onSave }) {
   const [chosen, setChosen] = useState(info.connection.id);
   const [test, setTest] = useState(null);
   useEffect(() => { setChosen(info.connection.id); setTest(null); }, [info]);
-  useEffect(() => { if (info.canEdit) serverApi.connections().then((d) => setConnections(d.connections)).catch(() => {}); }, [info.canEdit]);
+  const mayLink = info.canLink ?? info.canEdit;
+  useEffect(() => { if (mayLink) serverApi.connections().then((d) => setConnections(d.connections)).catch(() => {}); }, [mayLink]);
   const c = info.connection;
   const kind = c.type || 'mongodb';
   const isSql = info.queryLanguage ? info.queryLanguage === 'sql' : kind !== 'mongodb';
@@ -141,16 +142,16 @@ function DataSourceTab({ info, onSave }) {
           <small>{c.missing ? 'Not registered any more!' : `${adapterTypeLabel(kind)}${c.database ? ` · ${c.database}` : ''}${c.folder ? ` · 📁 ${c.folder}` : ''}`}</small>
           {!c.missing && <span className={`status-chip ${c.configured ? 'ok' : 'error'}`}>{c.configured ? 'Configured' : 'Setup needed'}</span>}
         </div>
-        {info.canEdit && !c.missing && <button className="btn sm" onClick={() => runTest(c.id)}>Test</button>}
+        {mayLink && !c.missing && <button className="btn sm" onClick={() => runTest(c.id)}>Test</button>}
       </div>
       <dl className="facts">
         <dt>Query</dt><dd>{isSql ? 'SQL (read-only SELECT)' : 'MongoDB aggregation'}</dd>
         {!isSql && <><dt>Collection</dt><dd><code>{info.collection}</code></dd></>}
       </dl>
       {test && <Notice message={test} />}
-      {info.canEdit && (
+      {mayLink && (
         <div className="row">
-          <label className="field" style={{ minWidth: 260 }}><span>Use another {isSql ? 'SQL' : 'MongoDB'} data adapter</span>
+          <label className="field" style={{ minWidth: 260 }}><span>Link another {isSql ? 'SQL' : 'MongoDB'} data source (any folder)</span>
             <select value={chosen} onChange={(e) => { setChosen(e.target.value); setTest(null); }}>
               {usable.map((x) => <option key={x.id} value={x.id}>{x.folder ? `${x.folder} / ` : ''}{x.name} · {adapterTypeLabel(x.type)}{x.configured ? '' : ' (setup needed)'}</option>)}
               {!usable.some((x) => x.id === chosen) && <option value={chosen}>{chosen}</option>}
@@ -160,7 +161,7 @@ function DataSourceTab({ info, onSave }) {
           <button className="btn primary sm" disabled={chosen === c.id} onClick={() => onSave({ connectionId: chosen })} style={{ alignSelf: 'flex-end' }}>Save</button>
         </div>
       )}
-      <p className="muted" style={{ fontSize: 12 }}>Data adapters are created and edited in <a href="/admin#sources">Admin → Data sources</a> or the Designer; passwords are never shown here.</p>
+      <p className="muted" style={{ fontSize: 12 }}>New data sources are connected in <a href="/server#sources">Server → Data sources</a> (with a connection string, in any folder) or the Designer; passwords are never shown here.</p>
     </div>
   );
 }

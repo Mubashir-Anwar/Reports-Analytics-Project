@@ -23,7 +23,10 @@ NO_CSP_PATHS = ("/docs", "/redoc", "/openapi.json")
 
 
 def max_body_bytes() -> int:
-    try:
+    from backend.app import limits  # noqa: PLC0415
+    if "REPORTING_MAX_BODY_MB" in limits.saved():           # set in Admin → Limits (whole MB)
+        return int(limits.value("REPORTING_MAX_BODY_MB")) * 1024 * 1024
+    try:                                                     # the environment may give part of a MB, e.g. 0.5
         return int(float(os.getenv("REPORTING_MAX_BODY_MB", "25")) * 1024 * 1024)
     except ValueError:
         return 25 * 1024 * 1024

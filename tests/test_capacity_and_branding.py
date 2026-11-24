@@ -1,6 +1,5 @@
 """Many users at once (report places), big exports written to disk, the product name, and the password recovery CLI."""
 import csv
-import dataclasses
 import sys
 import threading
 from pathlib import Path
@@ -103,7 +102,8 @@ def test_spool_csv_and_xlsx(tmp_path):
 def test_background_csv_over_the_row_limit_is_written_to_disk(client, monkeypatch, tmp_path):
     ctx = client.app.state.ctx
     monkeypatch.setenv("REPORTING_EXPORT_DIR", str(tmp_path / "exports"))
-    ctx.settings = dataclasses.replace(ctx.settings, max_rows=10, export_max_rows=1000)
+    monkeypatch.setenv("REPORT_MAX_ROWS", "10")                           # live limits (Admin → Limits, else the environment)
+    monkeypatch.setenv("REPORT_EXPORT_MAX_ROWS", "1000")
     produced = []
 
     def many(*_args, limit, **_kwargs):
@@ -143,6 +143,73 @@ def test_branding_default_rename_and_rights(client):
     saved = client.put("/api/admin/branding", json={"name": "Acme Reports", "tagline": "Numbers"})
     assert saved.status_code == 200 and saved.json()["name"] == "Acme Reports"
     assert client.get("/api/branding").json() == {**client.get("/api/branding").json(), "name": "Acme Reports", "tagline": "Numbers"}
+
+
+PNG_1PX = ("data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk"
+           "+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==")
+
+
+def test_own_logo_upload_serve_and_reset(client):
+    from backend.app import branding  # noqa: PLC0415
+    branding._CACHE.update(at=0.0, value=None)
+    assert client.get("/api/branding").json()["logo"] == ""
+    builtin = client.get("/brand/logo")
+    assert builtin.status_code == 200 and builtin.headers["content-type"].startswith("image/svg+xml")
+    make_user(client, "boss", ["admin"], super_admin=True)
+    sign_in(client, "boss")
+    bad_svg = "data:image/svg+xml;base64," + __import__("base64").b64encode(b"<svg onload='x()'></svg>").decode()
+    assert client.put("/api/admin/branding", json={"name": "Acme", "logo": bad_svg}).status_code == 422
+    assert client.put("/api/admin/branding", json={"name": "Acme", "logo": "data:text/html;base64,PGI+"}).status_code == 422
+    saved = client.put("/api/admin/branding", json={"name": "Acme", "logo": PNG_1PX}).json()
+    assert saved["logo"].startswith("/brand/logo?v=")
+    own = client.get(saved["logo"])
+    assert own.status_code == 200 and own.headers["content-type"] == "image/png" and own.content[1:4] == b"PNG"
+    renamed = client.put("/api/admin/branding", json={"name": "Acme 2"}).json()     # no logo sent: it is kept
+    assert renamed["logo"] == saved["logo"]
+    reset = client.put("/api/admin/branding", json={"name": "Acme 2", "logo": None}).json()
+    assert reset["logo"] == "" and client.get("/brand/logo").headers["content-type"].startswith("image/svg+xml")
+
+
+def test_admin_limits_change_reset_and_rights(client, monkeypatch):
+    from backend.app import limits  # noqa: PLC0415
+    limits._CACHE.update(at=0.0, value=None)
+    monkeypatch.delenv("REPORT_MAX_CONCURRENT", raising=False)
+    data = client.get("/api/admin/limits", headers=ADMIN_HEADERS).json()
+    keys = {item["key"] for item in data["limits"]}
+    assert {"REPORT_MAX_CONCURRENT", "REPORT_MAX_ROWS", "ANALYTICS_QUERY_MAX_ROWS", "REPORTING_API_RATE_PER_MINUTE"} <= keys
+    assert client.get("/api/admin/limits").status_code in (401, 403)
+    make_user(client, "dina", ["designer"])
+    sign_in(client, "dina")
+    assert client.put("/api/admin/limits", json={"values": {"REPORT_MAX_CONCURRENT": 3}}).status_code == 403
+    client.post("/api/server/logout", json={})
+    put = lambda values: client.put("/api/admin/limits", json={"values": values}, headers=ADMIN_HEADERS)  # noqa: E731
+    assert put({"REPORT_MAX_CONCURRENT": 0}).status_code == 422                  # below the lowest
+    assert put({"NOT_A_LIMIT": 3}).status_code == 422
+    assert put({"ANALYTICS_MEMORY_LIMIT": "lots"}).status_code == 422
+    saved = put({"REPORT_MAX_CONCURRENT": 3, "REPORT_MAX_ROWS": 50, "ANALYTICS_MEMORY_LIMIT": "512mb"})
+    assert saved.status_code == 200
+    by_key = {item["key"]: item for item in saved.json()["limits"]}
+    assert by_key["REPORT_MAX_CONCURRENT"]["value"] == 3 and by_key["REPORT_MAX_CONCURRENT"]["source"] == "admin"
+    assert by_key["ANALYTICS_MEMORY_LIMIT"]["value"] == "512MB"
+    ctx = client.app.state.ctx
+    assert ctx.settings.max_rows == 50 and ctx.run_gate.stats()["limit"] == 3      # live, no restart
+    back = {item["key"]: item for item in put({"REPORT_MAX_CONCURRENT": None}).json()["limits"]}
+    assert back["REPORT_MAX_CONCURRENT"]["source"] == "default" and ctx.run_gate.stats()["limit"] == back["REPORT_MAX_CONCURRENT"]["value"]
+    put({"REPORT_MAX_ROWS": None, "ANALYTICS_MEMORY_LIMIT": None})
+
+
+def test_run_gate_grows_and_shrinks():
+    gate = RunGate(1, 1, 0)
+    with gate.slot("a"):
+        with pytest.raises(HTTPException):
+            with gate.slot("b"):
+                pass
+        gate.resize(2, 1, 0)
+        with gate.slot("b"):
+            assert gate.stats()["running"] == 2
+    gate.resize(1, 1, 0)
+    with gate.slot("c"):
+        assert gate.stats()["running"] == 1
 
 
 def test_capacity_endpoint(client):

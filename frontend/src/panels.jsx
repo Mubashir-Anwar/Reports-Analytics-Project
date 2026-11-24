@@ -696,11 +696,12 @@ export function Palette({ tool, dispatch }) {
         const open = needle || !closed[group.title];
         return (
           <div key={group.title} className="palette-group">
-            <button className="palette-head" onClick={() => toggle(group.title)}>{open ? '▾' : '▸'} {group.title}</button>
+            <button className={`palette-head ${open ? 'open' : ''}`} onClick={() => toggle(group.title)}><span className="ph-caret" aria-hidden="true">▸</span> {group.title} <span className="ph-count">{items.length}</span></button>
             {open && (
               <div className="palette">
-                {items.map(([type, icon, label]) => (
+                {items.map(([type, icon, label], itemIndex) => (
                   <button
+                    style={{ '--i': itemIndex }}
                     key={type}
                     className={`palette-item ${tool === type ? 'armed' : ''}`}
                     draggable

@@ -2,7 +2,8 @@ import PasswordInput from '../shared/PasswordInput.jsx';
 import { Suspense, lazy, useCallback, useEffect, useMemo, useState } from 'react';
 import ContextMenu from '../ContextMenu.jsx';
 import { Notice, Topbar } from '../portal/Shell.jsx';
-import { BRAND } from '../shared/brand.js';
+import DataSourcesPanel from '../shared/DataSourcesPanel.jsx';
+import { useBrand } from '../shared/brand.js';
 import { Logo } from '../shared/NavBar.jsx';
 import { Breadcrumbs, FolderDeleteDialog, FolderTree, NewFolderDialog, SubfolderTiles } from '../shared/folders.jsx';
 import PermissionsDialog from './PermissionsDialog.jsx';
@@ -94,6 +95,47 @@ function ResetPassword({ token, onDone }) {
 }
 
 /* ---------------------------------------------------------------- sign in */
+const LOGIN_APPS = [
+  ['🎨', 'Designer', 'Build pixel-perfect reports'],
+  ['🔎', 'Query', 'Try MongoDB and SQL, read-only'],
+  ['🗄️', 'Server', 'Folders, schedules, deliveries'],
+  ['📊', 'Analytics', 'Dashboards people love'],
+];
+
+/** The sign-in page frame: an animated brand side and a glass card for the form. */
+function LoginShell({ children }) {
+  const brand = useBrand();
+  const [shown, setShown] = useState(0);
+  useEffect(() => {
+    const timer = setInterval(() => setShown((i) => (i + 1) % LOGIN_APPS.length), 2600);
+    return () => clearInterval(timer);
+  }, []);
+  return (
+    <div className="gz-login">
+      <div className="gz-aurora" aria-hidden="true"><i /><i /><i /><i /></div>
+      <section className="gz-brand">
+        <div className="gz-brand-top">
+          <span className="gz-logo"><Logo size={44} className="login-logo" /></span>
+          <span className="gz-name"><b>{brand.name}</b><small>{brand.tagline}</small></span>
+        </div>
+        <h2 className="gz-hero">Reports that <span className="gz-grad">just work</span>.<br />Data that <span className="gz-grad alt">looks good</span>.</h2>
+        <ul className="gz-apps">
+          {LOGIN_APPS.map(([icon, name, text], index) => (
+            <li key={name} className={index === shown ? 'on' : ''} style={{ '--d': `${index * 90}ms` }}>
+              <span className="gz-app-ico" aria-hidden="true">{icon}</span>
+              <span><b>{name}</b><small>{text}</small></span>
+            </li>
+          ))}
+        </ul>
+        <p className="gz-foot">One sign-in · you see the apps your account has rights for</p>
+      </section>
+      <section className="gz-card-wrap">
+        <div className="gz-card">{children}</div>
+      </section>
+    </div>
+  );
+}
+
 function LoginForm({ onSignedIn, message }) {
   const resetToken = new URLSearchParams(window.location.search).get('reset') || '';
   const [mode, setMode] = useState(resetToken ? 'reset' : 'signin');   // signin | forgot | reset
@@ -126,28 +168,30 @@ function LoginForm({ onSignedIn, message }) {
 
   if (mode !== 'signin') {
     return (
-      <div className="login-wrap">
-        <div className="card login">
-          <Logo size={52} className="login-logo" />
-          <p className="eyebrow">{BRAND.name}</p>
+      <LoginShell>
+        <div className="login gz-form">
           {mode === 'forgot' ? <ForgotPassword onBack={() => backToSignIn('')} /> : <ResetPassword token={resetToken} onDone={backToSignIn} />}
         </div>
-      </div>
+      </LoginShell>
     );
   }
+  const hour = new Date().getHours();
+  const hello = hour < 5 ? 'Up late? 🌙' : hour < 12 ? 'Good morning ☀️' : hour < 17 ? 'Good afternoon 👋' : 'Good evening ✨';
   return (
-    <div className="login-wrap">
-      <form className="card login" onSubmit={submit} autoComplete="on">
-        <Logo size={52} className="login-logo" />
-        <div><p className="eyebrow">{BRAND.name}</p><h1>Sign in</h1><p className="muted">One sign-in for the Designer, Query, Report Server, Analytics and Admin. You see the parts your account has rights for.</p></div>
-        <label className="field"><span>Username</span><input name="username" autoComplete="username" value={username} onChange={(e) => setUsername(e.target.value)} required autoFocus /></label>
-        <label className="field"><span>Password</span><PasswordInput name="password" autoComplete="current-password" value={password} onChange={(e) => setPassword(e.target.value)} required /></label>
+    <LoginShell>
+      <form className="login gz-form" onSubmit={submit} autoComplete="on">
+        <div className="gz-head"><p className="gz-hello">{hello}</p><h1>Sign in</h1><p className="muted">Designer, Query, Report Server and Analytics: one account for all of them.</p></div>
+        <label className="field gz-field"><span>Username</span><input name="username" autoComplete="username" value={username} onChange={(e) => setUsername(e.target.value)} placeholder="your.name" required autoFocus /></label>
+        <label className="field gz-field"><span>Password</span><PasswordInput name="password" autoComplete="current-password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="••••••••" required /></label>
         <Notice message={error} />
-        <button className="btn primary" type="submit" disabled={busy} style={{ justifyContent: 'center', padding: '10px' }}>{busy ? 'Signing in…' : 'Sign in'}</button>
-        <button type="button" className="btn quiet link-btn" onClick={() => setMode('forgot')}>Forgot your password?</button>
-        <p className="muted" style={{ fontSize: 12 }}>Accounts and their rights are set in Admin → Users &amp; rights. First setup: user <code>admin</code> with the admin token as the password, until a super admin exists.</p>
+        <button className="btn primary gz-go" type="submit" disabled={busy}>{busy ? <><span className="gz-spin" aria-hidden="true" /> Signing in…</> : <>Sign in <span aria-hidden="true">→</span></>}</button>
+        <button type="button" className="btn quiet link-btn gz-forgot" onClick={() => setMode('forgot')}>Forgot your password?</button>
+        <details className="gz-help">
+          <summary>First time here?</summary>
+          <p>Ask your administrator for an account. You will see the parts your account has rights for.</p>
+        </details>
       </form>
-    </div>
+    </LoginShell>
   );
 }
 
@@ -169,7 +213,7 @@ function Repository({ user, onUser }) {
   const [clipboard, setClipboard] = useState(null); // { mode: 'copy' | 'cut', id, title, kind: 'report' | 'dashboard' }
   const [uploading, setUploading] = useState(false);
   const [version, setVersion] = useState(0); // reloads the resource panel after a change
-  const [view, setView] = useState('repository'); // repository | schedules | runs
+  const [view, setView] = useState(() => (window.location.hash === '#sources' ? 'sources' : 'repository')); // repository | sources | schedules | runs | logs
   const [folderAccess, setFolderAccess] = useState({}); // folder → 'none' | 'run' | 'manage' for this user
   const [permFolder, setPermFolder] = useState(null); // folder whose Permissions dialog is open ('' = root)
   const [scheduleInfo, setScheduleInfo] = useState(null);
@@ -180,6 +224,8 @@ function Repository({ user, onUser }) {
   const activity = useActivity(`${runsVersion}-${version}-${view}`);
   useEffect(() => { serverApi.scheduleInfo().then(setScheduleInfo).catch(() => setScheduleInfo(null)); }, []);
   const showMessage = useCallback((m) => setMessage(m), []);
+  const notifySources = useCallback((text, kind = 'ok') => setMessage({ text, kind }), []);
+  useEffect(() => { if (view === 'sources' || window.location.hash === '#sources') window.history.replaceState(null, '', view === 'sources' ? '#sources' : window.location.pathname + window.location.search); }, [view]);
   const designer = roleAtLeast(user, 'designer');
   const admin = roleAtLeast(user, 'admin');
   // folder permissions: what this user may do with a report / in a folder (the server checks it again)
@@ -349,7 +395,7 @@ function Repository({ user, onUser }) {
           <p className="muted">{{ repository: 'Right-click a report, a dashboard or a folder for its actions. Reports are published from the Designer, dashboards are made in Analytics; both can be uploaded as files.', schedules: 'Reports that run by themselves at set times. Create one from a report → Schedules.', runs: 'Background runs and scheduled outputs. Files are kept on the server until they are replaced or deleted.', logs: 'Every request that reached the server (kept in the system database), report runs, the service log and the audit trail.' }[view]}</p></div>
         <div className="row">
           <div className="segmented view-switch" role="tablist">
-            {[['repository', '🗄 Repository'], ['schedules', '⏰ Schedules'], ['runs', '⟳ Runs'], ...(admin ? [['logs', '📜 Logs']] : [])].map(([id, label]) => (
+            {[['repository', '🗄 Repository'], ['sources', '🔌 Data sources'], ['schedules', '⏰ Schedules'], ['runs', '⟳ Runs'], ...(admin ? [['logs', '📜 Logs']] : [])].map(([id, label]) => (
               <button key={id} role="tab" aria-selected={view === id} className={view === id ? 'on' : ''} onClick={() => setView(id)}>{label}</button>
             ))}
           </div>
@@ -368,6 +414,7 @@ function Repository({ user, onUser }) {
       )}
       {view === 'schedules' && <section className="card"><SchedulesList info={scheduleInfo} onMessage={showMessage} /></section>}
       {view === 'runs' && <section className="card"><RunsList onMessage={showMessage} version={runsVersion} /></section>}
+      {view === 'sources' && <div style={{ marginTop: 14 }}><DataSourcesPanel notify={notifySources} folders={folders} /></div>}
       {view === 'logs' && admin && <section className="card"><LogsView /></section>}
       {view === 'repository' && openDash && (
         <Suspense fallback={<section className="card"><p className="muted">Loading the dashboard…</p></section>}>

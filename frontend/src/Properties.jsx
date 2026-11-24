@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import {
   ELEMENT_LABELS, FONT_NAMES, MARKUPS, PAGE_LIMITS, PAGE_PRESETS, bandLabel, bandPresent, bandPurpose, contentBottom, contentRight, findElement, getBand, pagePreset,
-  mapElements, resizeElement, safeMarkupHtml, setBand,
+  mapElements, resizeElement, resizeRule, safeMarkupHtml, setBand,
 } from './designModel.js';
 import { selectedIds } from './arrange.js';
 import { CrosstabProps, DatasetProps, ListProps, NoteProps, SubreportProps, TableProps } from './ComponentProps.jsx';
@@ -172,9 +172,9 @@ function ExpressionExamples({ fields, params, onPick }) {
   );
 }
 
-export default function Properties({ state, dispatch, notify, actions, onEditExpression, onOpenQuery, onOpenTable }) {
+export default function Properties({ state, dispatch, notify, actions, onEditExpression, onOpenQuery, onOpenTable, resizeMode = 'auto' }) {
   const { design, report, selection } = state;
-  const [shiftColumns, setShiftColumns] = useState(true);
+  const [shiftColumns, setShiftColumns] = useState(null);   // null = follow View → Canvas → Resizing
   const [elementTab, setElementTab] = useState('');
   const [patternOpen, setPatternOpen] = useState(false);
   const design$ = (update, key) => dispatch({ type: 'DESIGN', update, key });
@@ -261,10 +261,15 @@ export default function Properties({ state, dispatch, notify, actions, onEditExp
             </Row>
             <div className="prop-section">Size</div>
             <div className="prop-grid">
-              <Row label="W (px)"><Num value={element.width} min={1} onChange={(width) => design$((d) => resizeElement(d, bandKey, element.id, { width: Math.max(1, width) }, shiftColumns && !['frame', 'rectangle', 'ellipse', 'image'].includes(element.type)), `el-${element.id}-width`)} /></Row>
+              <Row label="W (px)"><Num value={element.width} min={1} onChange={(width) => design$((d) => {
+                const backdrop = ['frame', 'rectangle', 'ellipse', 'image'].includes(element.type);
+                const rule = resizeRule(d, bandKey, element, resizeMode);
+                const follow = !backdrop && (shiftColumns ?? rule.follow);
+                return resizeElement(d, bandKey, element.id, { width: Math.max(1, width) }, follow, follow && (shiftColumns ? resizeMode !== 'free' : rule.widen));
+              }, `el-${element.id}-width`)} /></Row>
               <Row label="H (px)"><Num value={element.height} min={0} onChange={(height) => patch({ height })} /></Row>
             </div>
-            {text && <label className="check-row" title="Like a table column: the same column in the header and the columns to the right move when the width changes. On the canvas, hold Alt while resizing to change only this element."><input type="checkbox" checked={shiftColumns} onChange={(e) => setShiftColumns(e.target.checked)} /> Width change moves the columns to the right</label>}
+            {text && <label className="check-row" title="Like a table column: the same column in the header and the columns to the right move when the width changes. On the canvas, hold Alt while resizing to change only this element."><input type="checkbox" checked={shiftColumns ?? resizeRule(design, bandKey, element, resizeMode).follow} onChange={(e) => setShiftColumns(e.target.checked)} /> Width change moves the columns to the right</label>}
             <Row label="Stretch Type">
               <select value={element.stretchType || ''} onChange={(e) => patch({ stretchType: e.target.value || undefined })}>
                 {STRETCH_TYPES.map(([id, label]) => <option key={id} value={id}>{label}</option>)}

@@ -8,6 +8,10 @@ Two ways (``mode``):
   text is laid over it as an editable box whose background is the picture's own colour there, so it can later be
   turned into a field. Images (scans, photos) always use this way; their text is found with OCR.
 
+Header and footer: a scan is read once as a whole and again in its top and bottom strips, enlarged, so small or light header / footer lines (addresses, "Page 1 of 3", printed-on dates) are not lost. Text
+that sits above / below a clear gap at the top / bottom of the page is marked as page header / page footer, so the
+designer puts it in the Page Header and Page Footer bands (repeated on every page) instead of the Detail band.
+
 Placeholders such as ``{{Name}}``, ``«Name»``, ``<<Name>>`` or ``$F{Name}`` become Text Fields of that field.
 Nothing is saved: the result is a design the designer applies. Packages: pdfplumber (+ pypdfium2) for PDF,
 rapidocr + onnxruntime for OCR, Pillow; Word files are turned into PDF by MS Word (Windows) or LibreOffice.
@@ -29,6 +33,11 @@ MAX_ELEMENTS = 380                       # the design allows 400; room for the u
 MAX_PICTURE_BYTES = 2_000_000            # one image element may hold 2.5 MB
 PICTURE_DPI = 150
 WORD_TIMEOUT = 120
+EDGE_SHARE = 0.18                        # the top / bottom part of a scan read a second time, enlarged
+EDGE_ZOOM = 3.0
+EDGE_SCORE = 0.4                         # small header / footer text is read with less certainty
+HEADER_SHARE = 0.25                      # a page header lies within the top quarter, a footer within the bottom fifth
+FOOTER_SHARE = 0.2
 
 PLACEHOLDER_RE = re.compile(
     r"\{\{\s*([A-Za-z_][\w.]*)\s*\}\}|«\s*([A-Za-z_][\w.]*)\s*»|<<\s*([A-Za-z_][\w.]*)\s*>>|\$F\{\s*([A-Za-z_][\w.]*)\s*\}")
@@ -530,6 +539,7 @@ def _from_image(raw: bytes, text_on_top: bool, notes: list[str]) -> dict[str, An
             element["y"] = round(top * scale, 1)
             element["height"] = round(max((bottom - top) * scale, size * 1.2), 1)
             elements.append(element)
+        _mark_header_footer(elements, height, notes)
         if lines:
             notes.append(f"{len(lines)} pieces of text were read with OCR. Check the spelling: OCR can misread letters. "
                          "Urdu text is not read; it stays in the picture.")
@@ -545,8 +555,22 @@ def _ocr_lines(image: Any, notes: list[str]) -> list[tuple[str, tuple[float, flo
     except Exception as exc:  # noqa: BLE001 - a missing model download and similar
         notes.append(f"Text was not read: the OCR engine could not start ({type(exc).__name__}). The picture was imported.")
         return []
+    out = _read(engine, image, 0.5, 1.0, 0.0)
+    found = 0
+    for top_share in (0.0, 1 - EDGE_SHARE):                  # header strip, footer strip
+        found += _merge(out, _edge(engine, image, top_share))
+    if found:
+        notes.append(f"{found} more pieces of small header / footer text were read from an enlarged copy of the page edges.")
+    return out
+
+
+def _read(engine: Any, image: Any, min_score: float, zoom: float, offset_y: float) -> list[tuple[str, tuple[float, float, float, float]]]:
+    """OCR one picture; boxes in the page's pixels (zoom and offset_y undo the crop / enlargement)."""
     import numpy
-    result = engine(numpy.asarray(image))
+    try:
+        result = engine(numpy.asarray(image))
+    except Exception:  # noqa: BLE001 - one strip failing must not lose the rest
+        return []
     boxes = getattr(result, "boxes", None)
     texts = getattr(result, "txts", None)
     scores = getattr(result, "scores", None)
@@ -555,17 +579,90 @@ def _ocr_lines(image: Any, notes: list[str]) -> list[tuple[str, tuple[float, flo
     out = []
     for box, text, score in zip(boxes, texts, scores if scores is not None else [1.0] * len(texts), strict=False):
         text = str(text).strip()
-        if not text or float(score) < 0.5:
+        if not text or float(score) < min_score:
             continue
-        xs = [float(p[0]) for p in box]
-        ys = [float(p[1]) for p in box]
+        xs = [float(p[0]) / zoom for p in box]
+        ys = [float(p[1]) / zoom + offset_y for p in box]
         out.append((text, (min(xs), min(ys), max(xs), max(ys))))
     return out
+
+
+def _edge(engine: Any, image: Any, top_share: float) -> list[tuple[str, tuple[float, float, float, float]]]:
+    """The top or bottom strip again, enlarged (3x read small light text best; stretching the contrast made JPEG
+    noise worse), so small header / footer lines are read too."""
+    from PIL import Image
+    width, height = image.size
+    top = int(height * top_share)
+    strip = image.crop((0, top, width, min(height, top + int(height * EDGE_SHARE) + 1)))
+    zoom = min(EDGE_ZOOM, 4000 / max(width, 1))              # the OCR scales anything bigger back down
+    if zoom <= 1.05:
+        zoom = 1.0
+    if zoom != 1.0:
+        strip = strip.resize((int(strip.width * zoom), int(strip.height * zoom)), Image.LANCZOS)
+    return _read(engine, strip, EDGE_SCORE, zoom, top)
+
+
+def _overlap(a: tuple[float, float, float, float], b: tuple[float, float, float, float]) -> float:
+    """How much of the smaller box lies inside the other (0..1)."""
+    w = min(a[2], b[2]) - max(a[0], b[0])
+    h = min(a[3], b[3]) - max(a[1], b[1])
+    if w <= 0 or h <= 0:
+        return 0.0
+    smaller = min((a[2] - a[0]) * (a[3] - a[1]), (b[2] - b[0]) * (b[3] - b[1])) or 1.0
+    return w * h / smaller
+
+
+def _merge(out: list[tuple[str, tuple[float, float, float, float]]], extra: list[tuple[str, tuple[float, float, float, float]]]) -> int:
+    """Add the pieces the whole-page pass missed (those that do not cover text already found)."""
+    added = 0
+    for text, box in extra:
+        if any(_overlap(box, known) > 0.3 for _t, known in out):
+            continue
+        out.append((text, box))
+        added += 1
+    return added
+
+
+def _mark_header_footer(elements: list[dict[str, Any]], height: float, notes: list[str]) -> None:
+    """element["region"] = "header" / "footer" for text above the first clear gap near the top / below the last one
+    near the bottom (a gap: at least the height of a body line, or a line drawn across)."""
+    if len(elements) < 3:
+        return
+    rows = sorted(elements, key=lambda e: e["y"])
+    line = median([e["height"] for e in rows]) or 12.0
+    header_end = footer_start = None
+    for index in range(1, len(rows)):
+        bottom = max(e["y"] + e["height"] for e in rows[:index])
+        gap = rows[index]["y"] - bottom
+        if bottom <= height * HEADER_SHARE and rows[index]["y"] < height / 2 and gap >= line * 1.2:
+            header_end = bottom + min(gap / 2, line)         # the last such gap within the top quarter
+    for index in range(len(rows) - 1, 0, -1):
+        top = min(e["y"] for e in rows[index:])
+        above = max(e["y"] + e["height"] for e in rows[:index])
+        gap = top - above
+        if top >= height * (1 - FOOTER_SHARE) and gap >= line * 1.2:
+            footer_start = top - min(gap / 2, line)          # the first such gap within the bottom fifth
+    body = [e for e in rows if (header_end is None or e["y"] >= header_end) and (footer_start is None or e["y"] < footer_start)]
+    if not body:                                              # everything would be header / footer: keep it in Detail
+        return
+    for element in rows:
+        if header_end is not None and element["y"] < header_end:
+            element["region"] = "header"
+        elif footer_start is not None and element["y"] >= footer_start:
+            element["region"] = "footer"
+    regions = {"header": round(header_end, 1) if header_end else 0, "footer": round(footer_start, 1) if footer_start else 0}
+    marked = [name for name, value in (("Page Header", regions["header"]), ("Page Footer", regions["footer"])) if value]
+    if marked:
+        notes.append(" and ".join(marked) + " were found and put in their own band" + ("s" if len(marked) > 1 else "")
+                     + " (they repeat on every page).")
+    elements.append({"type": "_regions", **regions})
 
 
 # ------------------------------------------------------------------ result
 def _result(width: float, height: float, elements: list[dict[str, Any]], picture: dict[str, Any] | None,
             count: int, page: int, notes: list[str]) -> dict[str, Any]:
+    marker = next((e for e in elements if e.get("type") == "_regions"), None)
+    elements = [e for e in elements if e.get("type") != "_regions"]
     room = MAX_ELEMENTS - (1 if picture else 0)
     if len(elements) > room:
         texts = [e for e in elements if e["type"] in ("staticText", "textField")]
@@ -593,4 +690,6 @@ def _result(width: float, height: float, elements: list[dict[str, Any]], picture
         "fields": fields,
         "pageCount": count,
         "pageNumber": page,
+        # where the Page Header ends and the Page Footer starts (pt from the top; 0 = none found)
+        "regions": {"header": marker["header"], "footer": marker["footer"]} if marker else {"header": 0, "footer": 0},
     }

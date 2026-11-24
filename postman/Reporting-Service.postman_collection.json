@@ -584,8 +584,8 @@
       ]
     },
     {
-      "name": "03 Data sources (Admin)",
-      "description": "",
+      "name": "03 Data sources",
+      "description": "Any signed-in user with Designer, Query or Report Server rights connects data sources: no Admin right needed. The old /api/admin/connections paths still answer.",
       "item": [
         {
           "name": "Test a connection before saving",
@@ -598,14 +598,13 @@
               }
             ],
             "url": {
-              "raw": "{{baseUrl}}/api/admin/connections/test",
+              "raw": "{{baseUrl}}/api/data-sources/test",
               "host": [
                 "{{baseUrl}}"
               ],
               "path": [
                 "api",
-                "admin",
-                "connections",
+                "data-sources",
                 "test"
               ]
             },
@@ -643,14 +642,13 @@
               }
             ],
             "url": {
-              "raw": "{{baseUrl}}/api/admin/connections",
+              "raw": "{{baseUrl}}/api/data-sources",
               "host": [
                 "{{baseUrl}}"
               ],
               "path": [
                 "api",
-                "admin",
-                "connections"
+                "data-sources"
               ]
             },
             "description": "",
@@ -682,6 +680,35 @@
             "method": "GET",
             "header": [],
             "url": {
+              "raw": "{{baseUrl}}/api/data-sources",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "data-sources"
+              ]
+            },
+            "description": ""
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"List data adapters: HTTP 200\", function () { pm.expect([200]).to.include(pm.response.code); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "List data adapters (the old Admin path still works)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
               "raw": "{{baseUrl}}/api/admin/connections",
               "host": [
                 "{{baseUrl}}"
@@ -700,7 +727,7 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test(\"List data adapters: HTTP 200\", function () { pm.expect([200]).to.include(pm.response.code); });"
+                  "pm.test(\"List data adapters (the old Admin path still works): HTTP 200\", function () { pm.expect([200]).to.include(pm.response.code); });"
                 ]
               }
             }
@@ -717,14 +744,13 @@
               }
             ],
             "url": {
-              "raw": "{{baseUrl}}/api/admin/connections/pm_mongo/test",
+              "raw": "{{baseUrl}}/api/data-sources/pm_mongo/test",
               "host": [
                 "{{baseUrl}}"
               ],
               "path": [
                 "api",
-                "admin",
-                "connections",
+                "data-sources",
                 "pm_mongo",
                 "test"
               ]
@@ -763,14 +789,13 @@
               }
             ],
             "url": {
-              "raw": "{{baseUrl}}/api/admin/connections/pm_mongo/folder",
+              "raw": "{{baseUrl}}/api/data-sources/pm_mongo/folder",
               "host": [
                 "{{baseUrl}}"
               ],
               "path": [
                 "api",
-                "admin",
-                "connections",
+                "data-sources",
                 "pm_mongo",
                 "folder"
               ]
@@ -2612,6 +2637,52 @@
                 "type": "text/javascript",
                 "exec": [
                   "pm.test(\"List users: HTTP 200\", function () { pm.expect([200]).to.include(pm.response.code); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Give only the Query right",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/admin/users/pm_runner",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "admin",
+                "users",
+                "pm_runner"
+              ]
+            },
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"rights\": [\n    \"query\"\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Give only the Query right: HTTP 200\", function () { pm.expect([200]).to.include(pm.response.code); });",
+                  "pm.test('query right kept', function () { pm.expect(JSON.stringify(pm.response.json())).to.include('query'); });"
                 ]
               }
             }
@@ -7497,7 +7568,7 @@
             "description": "",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"content\": \"UEsDBBQAAAAIAKZweF1hfqQcfgAAABgBAAAPAAAARGF0YU1vZGVsU2NoZW1hhY8xCoNAEEXfUcTaE9jFC6SxCxbGlURQI6sWIt4931HEQrBYdvfx/h9mJqThh6Ok1jsmYNY9kPMWKel3+jLeijeiGwt54i3rzYuMFeqrGeW1N+lEuVy04Hukncg6PWWiO7m9qKeS/dFvMfuq82H7jOLDbaczc9tz7cz2s/AHUEsDBBQAAAAIAKZweF02PitejAEAAJQFAAANAAAAUmVwb3J0L0xheW91dM1Ty2rCQBQ9n1Jcu1AptHRnRZf2iVCaLiTGmBKT1KSPEPLvPXMzEyYTQdxJyDzu49xz7sxUGCBHAB8FIqRIuBvgDld4R8XVhtYcGWKsUWLJcc/oJmKAexxoSZi9o1VlDsX+y6wNEXc6cowJbjHSXhUbIeRcaP8N/cb7IxW/iRtjJowKriPOAat12f3pncktnf25PK7pM15fam8lwuit4HFMdBc8bfckeizzUO9zYRxSQ4CVpcjkNEi21leyz3qoMb05+SntAbWojijbnugzMl/TXnQqZ7Sk+HTOtFt3xjyFGdJ7YF3P6qpaf7FCIJ5nzluHkxprfLQV387KL9v82uFcyN904alF6DJf6VvQ6DK+SYu0EKR9j9HyyJmlnb7N5aZFwsCOeiDiRld1lb/QHutOuxXtk+pqmPPeZnKeeU9JpXFTZh6IGzgd7Pv7imqrs4/Sj0z4u8rs19vkmaxj3fKtmIbFlPcnFB2h3KdjSk5rvfw+TclN4ST6lO28hdj9nvrRiW7ar0B9Zq3+f1BLAQIUABQAAAAIAKZweF1hfqQcfgAAABgBAAAPAAAAAAAAAAAAAACAAQAAAABEYXRhTW9kZWxTY2hlbWFQSwECFAAUAAAACACmcHhdNj4rXowBAACUBQAADQAAAAAAAAAAAAAAgAGrAAAAUmVwb3J0L0xheW91dFBLBQYAAAAAAgACAHgAAABiAgAAAAA=\",\n  \"name\": \"PM sales.pbit\"\n}",
+              "raw": "{\n  \"content\": \"UEsDBBQAAAAIAH18eF1hfqQcfgAAABgBAAAPAAAARGF0YU1vZGVsU2NoZW1hhY8xCoNAEEXfUcTaE9jFC6SxCxbGlURQI6sWIt4931HEQrBYdvfx/h9mJqThh6Ok1jsmYNY9kPMWKel3+jLeijeiGwt54i3rzYuMFeqrGeW1N+lEuVy04Hukncg6PWWiO7m9qKeS/dFvMfuq82H7jOLDbaczc9tz7cz2s/AHUEsDBBQAAAAIAH18eF02PitejAEAAJQFAAANAAAAUmVwb3J0L0xheW91dM1Ty2rCQBQ9n1Jcu1AptHRnRZf2iVCaLiTGmBKT1KSPEPLvPXMzEyYTQdxJyDzu49xz7sxUGCBHAB8FIqRIuBvgDld4R8XVhtYcGWKsUWLJcc/oJmKAexxoSZi9o1VlDsX+y6wNEXc6cowJbjHSXhUbIeRcaP8N/cb7IxW/iRtjJowKriPOAat12f3pncktnf25PK7pM15fam8lwuit4HFMdBc8bfckeizzUO9zYRxSQ4CVpcjkNEi21leyz3qoMb05+SntAbWojijbnugzMl/TXnQqZ7Sk+HTOtFt3xjyFGdJ7YF3P6qpaf7FCIJ5nzluHkxprfLQV387KL9v82uFcyN904alF6DJf6VvQ6DK+SYu0EKR9j9HyyJmlnb7N5aZFwsCOeiDiRld1lb/QHutOuxXtk+pqmPPeZnKeeU9JpXFTZh6IGzgd7Pv7imqrs4/Sj0z4u8rs19vkmaxj3fKtmIbFlPcnFB2h3KdjSk5rvfw+TclN4ST6lO28hdj9nvrRiW7ar0B9Zq3+f1BLAQIUABQAAAAIAH18eF1hfqQcfgAAABgBAAAPAAAAAAAAAAAAAACAAQAAAABEYXRhTW9kZWxTY2hlbWFQSwECFAAUAAAACAB9fHhdNj4rXowBAACUBQAADQAAAAAAAAAAAAAAgAGrAAAAUmVwb3J0L0xheW91dFBLBQYAAAAAAgACAHgAAABiAgAAAAA=\",\n  \"name\": \"PM sales.pbit\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -7589,7 +7660,7 @@
             "description": "",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"content\": \"UEsDBBQAAAAIAKZweF1hfqQcfgAAABgBAAAPAAAARGF0YU1vZGVsU2NoZW1hhY8xCoNAEEXfUcTaE9jFC6SxCxbGlURQI6sWIt4931HEQrBYdvfx/h9mJqThh6Ok1jsmYNY9kPMWKel3+jLeijeiGwt54i3rzYuMFeqrGeW1N+lEuVy04Hukncg6PWWiO7m9qKeS/dFvMfuq82H7jOLDbaczc9tz7cz2s/AHUEsDBBQAAAAIAKZweF02PitejAEAAJQFAAANAAAAUmVwb3J0L0xheW91dM1Ty2rCQBQ9n1Jcu1AptHRnRZf2iVCaLiTGmBKT1KSPEPLvPXMzEyYTQdxJyDzu49xz7sxUGCBHAB8FIqRIuBvgDld4R8XVhtYcGWKsUWLJcc/oJmKAexxoSZi9o1VlDsX+y6wNEXc6cowJbjHSXhUbIeRcaP8N/cb7IxW/iRtjJowKriPOAat12f3pncktnf25PK7pM15fam8lwuit4HFMdBc8bfckeizzUO9zYRxSQ4CVpcjkNEi21leyz3qoMb05+SntAbWojijbnugzMl/TXnQqZ7Sk+HTOtFt3xjyFGdJ7YF3P6qpaf7FCIJ5nzluHkxprfLQV387KL9v82uFcyN904alF6DJf6VvQ6DK+SYu0EKR9j9HyyJmlnb7N5aZFwsCOeiDiRld1lb/QHutOuxXtk+pqmPPeZnKeeU9JpXFTZh6IGzgd7Pv7imqrs4/Sj0z4u8rs19vkmaxj3fKtmIbFlPcnFB2h3KdjSk5rvfw+TclN4ST6lO28hdj9nvrRiW7ar0B9Zq3+f1BLAQIUABQAAAAIAKZweF1hfqQcfgAAABgBAAAPAAAAAAAAAAAAAACAAQAAAABEYXRhTW9kZWxTY2hlbWFQSwECFAAUAAAACACmcHhdNj4rXowBAACUBQAADQAAAAAAAAAAAAAAgAGrAAAAUmVwb3J0L0xheW91dFBLBQYAAAAAAgACAHgAAABiAgAAAAA=\",\n  \"name\": \"PM sales.pbit\",\n  \"folder\": \"Postman\",\n  \"pages\": [\n    0\n  ],\n  \"tables\": {\n    \"Orders\": {\n      \"dataset\": \"{{dsOrders}}\"\n    }\n  }\n}",
+              "raw": "{\n  \"content\": \"UEsDBBQAAAAIAH18eF1hfqQcfgAAABgBAAAPAAAARGF0YU1vZGVsU2NoZW1hhY8xCoNAEEXfUcTaE9jFC6SxCxbGlURQI6sWIt4931HEQrBYdvfx/h9mJqThh6Ok1jsmYNY9kPMWKel3+jLeijeiGwt54i3rzYuMFeqrGeW1N+lEuVy04Hukncg6PWWiO7m9qKeS/dFvMfuq82H7jOLDbaczc9tz7cz2s/AHUEsDBBQAAAAIAH18eF02PitejAEAAJQFAAANAAAAUmVwb3J0L0xheW91dM1Ty2rCQBQ9n1Jcu1AptHRnRZf2iVCaLiTGmBKT1KSPEPLvPXMzEyYTQdxJyDzu49xz7sxUGCBHAB8FIqRIuBvgDld4R8XVhtYcGWKsUWLJcc/oJmKAexxoSZi9o1VlDsX+y6wNEXc6cowJbjHSXhUbIeRcaP8N/cb7IxW/iRtjJowKriPOAat12f3pncktnf25PK7pM15fam8lwuit4HFMdBc8bfckeizzUO9zYRxSQ4CVpcjkNEi21leyz3qoMb05+SntAbWojijbnugzMl/TXnQqZ7Sk+HTOtFt3xjyFGdJ7YF3P6qpaf7FCIJ5nzluHkxprfLQV387KL9v82uFcyN904alF6DJf6VvQ6DK+SYu0EKR9j9HyyJmlnb7N5aZFwsCOeiDiRld1lb/QHutOuxXtk+pqmPPeZnKeeU9JpXFTZh6IGzgd7Pv7imqrs4/Sj0z4u8rs19vkmaxj3fKtmIbFlPcnFB2h3KdjSk5rvfw+TclN4ST6lO28hdj9nvrRiW7ar0B9Zq3+f1BLAQIUABQAAAAIAH18eF1hfqQcfgAAABgBAAAPAAAAAAAAAAAAAACAAQAAAABEYXRhTW9kZWxTY2hlbWFQSwECFAAUAAAACAB9fHhdNj4rXowBAACUBQAADQAAAAAAAAAAAAAAgAGrAAAAUmVwb3J0L0xheW91dFBLBQYAAAAAAgACAHgAAABiAgAAAAA=\",\n  \"name\": \"PM sales.pbit\",\n  \"folder\": \"Postman\",\n  \"pages\": [\n    0\n  ],\n  \"tables\": {\n    \"Orders\": {\n      \"dataset\": \"{{dsOrders}}\"\n    }\n  }\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -9822,6 +9893,311 @@
           ]
         },
         {
+          "name": "Logo (public): the built-in mark or the uploaded logo",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/brand/logo",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "brand",
+                "logo"
+              ]
+            },
+            "description": "",
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Logo (public): the built-in mark or the uploaded logo: HTTP 200\", function () { pm.expect([200]).to.include(pm.response.code); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Remember the current name",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/branding",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "branding"
+              ]
+            },
+            "description": "",
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Remember the current name: HTTP 200\", function () { pm.expect([200]).to.include(pm.response.code); });",
+                  "try { pm.environment.set('brandName', pm.response.json().name); } catch (e) { console.log('could not save brandName', e); }",
+                  "try { pm.environment.set('brandTagline', pm.response.json().tagline || ''); } catch (e) { console.log('could not save brandTagline', e); }"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Logo: an SVG with a script is refused (the logo is not changed)",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/admin/branding",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "admin",
+                "branding"
+              ]
+            },
+            "description": "A logo is sent as a data: URL (PNG, JPEG, WebP or SVG, up to 300 KB). \"logo\": \"\" puts the built-in mark back; leaving \"logo\" out keeps the current one.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"{{brandName}}\",\n  \"tagline\": \"{{brandTagline}}\",\n  \"logo\": \"data:image/svg+xml;base64,PHN2Zz48c2NyaXB0Pjwvc2NyaXB0Pjwvc3ZnPg==\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Logo: an SVG with a script is refused (the logo is not changed): HTTP 422\", function () { pm.expect([422]).to.include(pm.response.code); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Limits: every limit, its value and where it comes from",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/admin/limits",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "admin",
+                "limits"
+              ]
+            },
+            "description": ""
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Limits: every limit, its value and where it comes from: HTTP 200\", function () { pm.expect([200]).to.include(pm.response.code); });",
+                  "try { pm.environment.set('limitRestore', (function (l) { return l.source === 'admin' ? String(l.value) : 'null'; })(pm.response.json().limits.find(l => l.key === 'REPORT_MAX_CONCURRENT'))); } catch (e) { console.log('could not save limitRestore', e); }",
+                  "pm.test('reports at once is listed', function () { pm.expect(pm.response.json().limits.map(l => l.key)).to.include('REPORT_MAX_CONCURRENT'); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Limits: a value out of range is refused",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/admin/limits",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "admin",
+                "limits"
+              ]
+            },
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"values\": {\n    \"REPORT_MAX_CONCURRENT\": 0\n  }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Limits: a value out of range is refused: HTTP 422\", function () { pm.expect([422]).to.include(pm.response.code); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Limits: set reports at the same time to 3",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/admin/limits",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "admin",
+                "limits"
+              ]
+            },
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"values\": {\n    \"REPORT_MAX_CONCURRENT\": 3\n  }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Limits: set reports at the same time to 3: HTTP 200\", function () { pm.expect([200]).to.include(pm.response.code); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Capacity follows the new limit at once",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/admin/capacity",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "admin",
+                "capacity"
+              ]
+            },
+            "description": ""
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Capacity follows the new limit at once: HTTP 200\", function () { pm.expect([200]).to.include(pm.response.code); });",
+                  "pm.test('3 places', function () { pm.expect(pm.response.json().limits.maxConcurrent).to.eql(3); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Limits: put the earlier value back (null = the .env value or the default)",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/admin/limits",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "admin",
+                "limits"
+              ]
+            },
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{\"values\": {\"REPORT_MAX_CONCURRENT\": {{limitRestore}}}}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Limits: put the earlier value back (null = the .env value or the default): HTTP 200\", function () { pm.expect([200]).to.include(pm.response.code); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
           "name": "Capacity: report places in use, background queue, limits",
           "request": {
             "method": "GET",
@@ -10617,14 +10993,13 @@
               }
             ],
             "url": {
-              "raw": "{{baseUrl}}/api/admin/connections/pm_mongo/folder",
+              "raw": "{{baseUrl}}/api/data-sources/pm_mongo/folder",
               "host": [
                 "{{baseUrl}}"
               ],
               "path": [
                 "api",
-                "admin",
-                "connections",
+                "data-sources",
                 "pm_mongo",
                 "folder"
               ]
@@ -10886,14 +11261,13 @@
               }
             ],
             "url": {
-              "raw": "{{baseUrl}}/api/admin/connections/pm_mongo",
+              "raw": "{{baseUrl}}/api/data-sources/pm_mongo",
               "host": [
                 "{{baseUrl}}"
               ],
               "path": [
                 "api",
-                "admin",
-                "connections",
+                "data-sources",
                 "pm_mongo"
               ]
             },

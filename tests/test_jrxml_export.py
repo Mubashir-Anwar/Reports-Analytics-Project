@@ -145,3 +145,27 @@ def test_fixture_round_trip():
 
 def test_java_string_escapes():
     assert java_string('a "b"\n\\c') == '"a \\"b\\"\\n\\\\c"'
+
+
+def test_studio_preview_and_letters_line_up():
+    """Studio has no adapter called like ours (Preview stayed blank: "No MongoDB connection"); text sits 2 px in like
+    the designer; Arial/Calibri become Jasper's SansSerif (bold kept, same letter widths as our PDF); no "null"."""
+    definition = _definition(connectionId="local-cascade")
+    definition["design"]["bands"]["noData"] = {"height": 40, "elements": []}           # shown but empty
+    definition["design"]["bands"]["title"]["elements"][0]["fontName"] = "Calibri"
+    root = ET.fromstring(export_jrxml(definition)["xml"].split("\n", 2)[2])
+    props = {p.get("name"): p.get("value") for p in root.findall(f"{NS}property")}
+    assert props["com.jaspersoft.studio.data.defaultdataadapter"] == "One Empty Record"
+    assert props["com.mongoreporting.data.adapter"] == "local-cascade"
+    assert root.get("whenNoDataType") == "AllSectionsNoDetail" and root.find(f"{NS}noData") is None
+    title = root.find(f"{NS}title/{NS}band/{NS}staticText")
+    assert title.find(f"{NS}textElement/{NS}font").get("fontName") == "SansSerif"
+    box = title.find(f"{NS}box")
+    assert box.get("leftPadding") == "2" and box.get("rightPadding") == "2" and box.get("bottomPadding") == "0"
+    small = {"type": "staticText", "x": 0, "y": 0, "width": 100, "height": 14, "text": "x", "fontSize": 10}
+    tight = ET.fromstring(export_jrxml({**definition, "design": {**definition["design"], "bands": {"title": {"height": 14, "elements": [small]}}}})["xml"].split("\n", 2)[2])
+    assert tight.find(f"{NS}title/{NS}band/{NS}staticText/{NS}box").get("topPadding") == "1"   # one line must still fit
+    assert all(tf.get("isBlankWhenNull") == "true" for tf in root.iter(f"{NS}textField"))
+    back = jrxml_import.import_jrxml(export_jrxml(definition)["xml"]) if hasattr(jrxml_import, "import_jrxml") else None
+    if back:
+        assert back["hints"]["dataAdapter"] == "local-cascade"

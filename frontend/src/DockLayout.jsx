@@ -7,6 +7,65 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 
 const KEY = 'designer-layout';
+const TIPS_KEY = 'designer-panel-tips-hidden';
+/** Each panel's own icon, colour and tips (shown under its title bar; ✕ hides them for that panel). */
+export const PANEL_LOOK = {
+  explorer: { icon: '🗂️', tint: 'blue', tips: [
+    'Right-click a report or folder for open, rename, copy, publish and delete.',
+    'Drag a report onto a folder to move it.',
+    'Green dot = published and up to date · orange = changed since it was published.',
+    'Data adapters live here too: right-click one to test it or browse its collections.',
+  ] },
+  outline: { icon: '🧭', tint: 'violet', tips: [
+    'Click an element here to select it on the page, even when it is hidden behind another.',
+    'Drag a field from Fields onto a band to make a Text Field.',
+    'Double-click a name to rename it · right-click for more.',
+    'Parameters, variables and groups are all edited from here.',
+  ] },
+  palette: { icon: '🎨', tint: 'pink', tips: [
+    'Click an element, then click a band, or drag it straight onto a band.',
+    'Type in “Find an element…” to filter: try “chart” or “barcode”.',
+    'Esc puts the armed element away.',
+    'Hold Shift while drawing to keep lines straight.',
+  ] },
+  properties: { icon: '🎛️', tint: 'amber', tips: [
+    'Select several elements to change them all at once.',
+    'Expressions: click ƒx to open the editor with fields, parameters and functions.',
+    'Arrow keys nudge the selection by 1 px, Shift + arrow by 10 px.',
+    'Nothing selected? You are editing the report itself (page, dataset, Excel).',
+  ] },
+};
+const readTipsHidden = () => { try { return JSON.parse(localStorage.getItem(TIPS_KEY) || '{}') || {}; } catch { return {}; } };
+
+/** A rotating hint under a panel's title bar. */
+function PanelTip({ name }) {
+  const tips = PANEL_LOOK[name]?.tips || [];
+  const [hidden, setHidden] = useState(() => Boolean(readTipsHidden()[name]));
+  const [index, setIndex] = useState(0);
+  useEffect(() => {
+    if (hidden || tips.length < 2) return undefined;
+    const timer = setInterval(() => setIndex((i) => (i + 1) % tips.length), 9000);
+    return () => clearInterval(timer);
+  }, [hidden, tips.length]);
+  if (hidden || !tips.length) return null;
+  const hide = () => {
+    setHidden(true);
+    try { localStorage.setItem(TIPS_KEY, JSON.stringify({ ...readTipsHidden(), [name]: true })); } catch { /* storage blocked */ }
+  };
+  return (
+    <div className="dock-tip" role="note">
+      <span className="dock-tip-spark" aria-hidden="true">✨</span>
+      <button type="button" className="dock-tip-text" key={index} title="Next tip" onClick={() => setIndex((i) => (i + 1) % tips.length)}>{tips[index]}</button>
+      <span className="dock-tip-dots" aria-hidden="true">{tips.map((tip, i) => <i key={tip} className={i === index ? 'on' : ''} />)}</span>
+      <button type="button" className="dock-tip-close" title="Hide the tips of this panel" aria-label="Hide the tips of this panel" onClick={hide}>✕</button>
+    </div>
+  );
+}
+
+/** Show the tips of every panel again (View → Panels). */
+export function showPanelTips() {
+  try { localStorage.removeItem(TIPS_KEY); } catch { /* storage blocked */ }
+}
 export const PANEL_TITLES = { explorer: 'Repository explorer', outline: 'Outline', palette: 'Palette', properties: 'Properties' };
 const DEFAULT_LAYOUT = {
   order: { left: ['explorer', 'outline'], right: ['palette', 'properties'] },
@@ -115,6 +174,7 @@ function DockBar({ name, side, index, count, ops, onHide, floating, onPointerDow
       onDoubleClick={() => (floating ? null : ops.toggleCollapse(name))}
       title={floating ? 'Drag to move · the corner makes it bigger' : 'Drag to move it: to the other side, up or down, or onto the report to float it · double-click to minimise'}>
       <span className="dock-grip" aria-hidden="true">⠿</span>
+      <span className={`dock-ico tint-${PANEL_LOOK[name]?.tint || 'blue'}`} aria-hidden="true">{PANEL_LOOK[name]?.icon}</span>
       <span className="dock-title">{PANEL_TITLES[name]}</span>
       <span className="dock-btns">
         {!floating && (
@@ -185,6 +245,7 @@ export function DockSide({ side, ops, visible, render, onHide, narrow }) {
         return (
           <div key={name} className={`dock dock-${name} ${collapsed ? 'collapsed' : ''} ${maximized === name ? 'maxed' : ''} ${dropAt === index ? 'drop-before' : ''}`} aria-label={PANEL_TITLES[name]}>
             <DockBar name={name} side={side} index={index} count={names.length} ops={ops} onHide={() => onHide(name)} />
+            {!collapsed && <PanelTip name={name} />}
             {!collapsed && <div className="dock-body">{render(name)}</div>}
           </div>
         );
@@ -254,6 +315,7 @@ export function FloatingPanel({ name, ops, render, onHide }) {
     <div ref={ref} className={`dock dock-floating dock-${name}`} role="dialog" aria-label={PANEL_TITLES[name]}
       style={{ left: box.x, top: box.y, width: box.w, height: box.h }}>
       <DockBar name={name} ops={ops} floating onHide={() => onHide(name)} onPointerDown={drag} />
+      <PanelTip name={name} />
       <div className="dock-body">{render(name)}</div>
     </div>
   );

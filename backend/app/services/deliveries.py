@@ -84,10 +84,8 @@ def _now() -> str:
 
 
 def _keep_seconds() -> int:
-    try:
-        return max(5, int(os.getenv("REPORTING_DELIVERY_KEEP_MINUTES", "60") or 60)) * 60
-    except ValueError:
-        return 3600
+    from backend.app import limits  # noqa: PLC0415
+    return int(limits.value("REPORTING_DELIVERY_KEEP_MINUTES")) * 60
 
 
 class Deliveries:

@@ -103,7 +103,7 @@ export default function App() {
 
   // Canvas view options (grid, snap, smart guides, rulers) are kept per browser, like Studio's preferences.
   const [canvasPrefs, setCanvasPrefs] = useState(() => {
-    const defaults = { showGrid: true, snapGrid: false, gridSize: 10, smartGuides: true, showRulers: true };
+    const defaults = { showGrid: true, snapGrid: false, gridSize: 10, smartGuides: true, showRulers: true, resizeMode: 'auto' };
     try { return { ...defaults, ...JSON.parse(localStorage.getItem('reporting-designer-canvas') || '{}') }; } catch { return defaults; }
   });
   useEffect(() => { try { localStorage.setItem('reporting-designer-canvas', JSON.stringify(canvasPrefs)); } catch { /* ignore */ } }, [canvasPrefs]);
@@ -596,7 +596,7 @@ export default function App() {
     }
     if (name === 'outline') return <Outline report={report} design={design} selection={selection} dispatch={dispatch} actions={actions} openMenu={openMenu} onDetectFields={() => setTab('setup')} onEditExpression={editExpression} />;
     if (name === 'palette') return <Palette tool={tool} dispatch={dispatch} />;
-    return <Properties state={state} dispatch={dispatch} notify={notify} actions={actions} onEditExpression={editExpression} onOpenQuery={(t) => setQueryTab(t || 'query')} onOpenTable={setTableId} />;
+    return <Properties state={state} dispatch={dispatch} notify={notify} actions={actions} resizeMode={canvasPrefs.resizeMode} onEditExpression={editExpression} onOpenQuery={(t) => setQueryTab(t || 'query')} onOpenTable={setTableId} />;
   };
   const widths = { '--left-w': `${showLeft ? dock.layout.width.left : 0}px`, '--right-w': `${showRight ? dock.layout.width.right : 0}px` };
   return (

@@ -4,6 +4,7 @@ import { createRoot } from 'react-dom/client';
 import App from './App.jsx';
 import './shared/theme.css';
 import './styles.css';
+import './designer-genz.css';
 
 createRoot(document.getElementById('root')).render(
   <StrictMode>

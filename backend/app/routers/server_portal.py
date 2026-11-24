@@ -31,6 +31,7 @@ from backend.app.security.users import (
     make_session_cookie,
     password_needs_upgrade,
     read_session_cookie,
+    role_at_least,
     session_lifetime_seconds,
     set_user_password,
     user_rights,
@@ -229,10 +230,16 @@ def register(app: FastAPI, ctx: SimpleNamespace) -> None:
     @app.put("/api/server/reports/{report_id}")
     async def server_edit_report(report_id: str, request: Request) -> dict[str, Any]:
         """Edit a published report's properties: title, description, formats, data adapter, the questions
-        (label, help, required, default, allowed values) and, for designers, the query."""
-        session = require_session(request, "designer")
+        (label, help, required, default, allowed values) and, for designers, the query.
+        Linking a data source (connectionId alone) needs only the Manage permission on the report's folder."""
+        session = require_session(request)
         definition = report_at(session, report_id, request, permissions.MANAGE)
         changes = await json_body(request)
+        if set(changes) - {"connectionId"} and not role_at_least(session["role"], "designer"):
+            raise HTTPException(status_code=403, detail="This needs a designer account; you may link the report to another data source")
+        if "connectionId" in changes and not any(item["id"] == str(changes["connectionId"] or "").strip()
+                                                 for item in load_connection_profiles()):
+            raise HTTPException(status_code=422, detail=f"There is no data source {changes['connectionId']!s}")
         payload = copy.deepcopy(definition.editor_config)
         for key in ("title", "description"):
             if key in changes:
@@ -374,7 +381,8 @@ def register(app: FastAPI, ctx: SimpleNamespace) -> None:
 
     @app.get("/api/server/connections")
     def server_connections(request: Request) -> dict[str, Any]:
-        require_session(request, "designer")
+        """Every data source, from any folder: a report can be linked to any of them."""
+        require_session(request)
         return {"connections": [connection_summary(item["id"]) for item in load_connection_profiles()]}
 
     # ---------------------------------------------------------------- versions (every save of a server report)

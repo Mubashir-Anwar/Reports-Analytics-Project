@@ -71,19 +71,19 @@ export const api = {
   createFolder: (path) => request('/api/admin/folders', { method: 'POST', body: { path } }),
   deleteFolder: (path, answer = {}) => request('/api/admin/folders', { method: 'DELETE', body: { path, ...answer } }),
   folderContents: (path) => request(`/api/admin/folders/contents?path=${encodeURIComponent(path)}`),
-  moveConnection: (id, folder) => request(`/api/admin/connections/${encodeURIComponent(id)}/folder`, { method: 'PUT', body: { folder } }),
+  moveConnection: (id, folder) => request(`/api/data-sources/${encodeURIComponent(id)}/folder`, { method: 'PUT', body: { folder } }),
   reports: () => request('/api/admin/reports'),
   saveReport: (definition, isNew) =>
     isNew
       ? request('/api/admin/reports', { method: 'POST', body: definition })
       : request(`/api/admin/reports/${encodeURIComponent(definition.id)}`, { method: 'PUT', body: definition }),
   deleteReport: (id, folder) => request(withQuery(`/api/admin/reports/${encodeURIComponent(id)}`, inFolder(folder)), { method: 'DELETE' }),
-  connections: () => request('/api/admin/connections'),
+  connections: () => request('/api/data-sources'),
   systemStatus: () => request('/api/admin/system/status'),
-  saveConnection: (payload) => request('/api/admin/connections', { method: 'POST', body: payload }),
-  testConnectionValues: (payload) => request('/api/admin/connections/test', { method: 'POST', body: payload }),
-  testConnection: (id) => request(`/api/admin/connections/${encodeURIComponent(id)}/test`, { method: 'POST' }),
-  deleteConnection: (id) => request(`/api/admin/connections/${encodeURIComponent(id)}`, { method: 'DELETE' }),
+  saveConnection: (payload) => request('/api/data-sources', { method: 'POST', body: payload }),
+  testConnectionValues: (payload) => request('/api/data-sources/test', { method: 'POST', body: payload }),
+  testConnection: (id) => request(`/api/data-sources/${encodeURIComponent(id)}/test`, { method: 'POST' }),
+  deleteConnection: (id) => request(`/api/data-sources/${encodeURIComponent(id)}`, { method: 'DELETE' }),
   /** A .jrxml and the pictures it uses ({ 'logo.png': dataURL }): image elements get the matching file. */
   importJrxml: (xml, resources = {}) => request('/api/admin/jrxml/import', { method: 'POST', body: { xml, resources } }),
   /** Query workspace (/query): browse a data adapter and run read-only queries. */

@@ -405,15 +405,51 @@ export function safeMarkupHtml(source, markup) {
   return root.innerHTML;
 }
 
+/** How resizing a box on the canvas behaves (View → Canvas → Resizing; kept per browser). */
+export const RESIZE_MODES = [
+  ['auto', 'Automatic', 'Table columns move the columns to their right and may widen the page; any other box (a letter, a form) changes only itself and stays inside the page.'],
+  ['columns', 'Like table columns', 'Always: the columns to the right move along and the page widens when needed.'],
+  ['free', 'This box only', 'Never: only the box changes, and it stays inside the page.'],
+];
+
+/**
+ * Is this element a column of a table layout? It is when the same column is in another band (a heading above a
+ * detail field), or when it sits in a row of at least three boxes. A text alone in a letter or form is not.
+ */
+export function isTableColumn(design, bandKey, element) {
+  if (!element) return false;
+  const twin = (el) => el.id !== element.id && Math.abs(el.x - element.x) <= 1 && Math.abs(el.width - element.width) <= 1;
+  if (bandKeys(design).some((key) => key !== bandKey && getBand(design, key).elements.some(twin))) return true;
+  const top = element.y;
+  const bottom = element.y + element.height;
+  const sameRow = getBand(design, bandKey).elements.filter((el) => el.id !== element.id && el.type !== 'line'
+    && el.y < bottom - 1 && el.y + el.height > top + 1 && el.width < element.width * 4);
+  return sameRow.length >= 2;
+}
+
+/**
+ * Whether a resize moves the columns to the right (`follow`) and may widen the page (`widen`).
+ * mode: auto | columns | free (see RESIZE_MODES); flip (Alt held) turns following off, or on in "This box only".
+ */
+export function resizeRule(design, bandKey, element, mode = 'auto', flip = false) {
+  const columnar = mode === 'columns' || (mode === 'auto' && isTableColumn(design, bandKey, element));
+  const follow = mode === 'free' ? flip : columnar && !flip;
+  return { follow, widen: follow && mode !== 'free' };
+}
+
 /**
  * Resize an element. With `shiftFollowing` it behaves like a table column: the same column in other bands
  * (e.g. the header above a detail field) gets the same width, the columns to its right move by the same amount,
- * and elements spanning the column (a full-width line, a group header) grow with it. The page widens if needed.
+ * and elements spanning the column (a full-width line, a group header) grow with it. With `widenPage` the page widens
+ * if needed; without it the element is kept inside the page.
  */
-export function resizeElement(design, bandKey, elementId, size, shiftFollowing = true) {
+export function resizeElement(design, bandKey, elementId, size, shiftFollowing = true, widenPage = shiftFollowing) {
   const band = getBand(design, bandKey);
   const target = band.elements.find((el) => el.id === elementId);
   if (!target) return design;
+  const { margins: pageMargins } = design.page;
+  const room = Math.max(1, design.page.width - pageMargins.left - pageMargins.right - target.x);
+  if (!widenPage && size.width != null && size.width > room) size = { ...size, width: Math.max(Math.floor(room), Math.min(size.width, target.width)) };
   const width = size.width ?? target.width;
   const delta = width - target.width;
   const oldRight = target.x + target.width;
@@ -435,7 +471,7 @@ export function resizeElement(design, bandKey, elementId, size, shiftFollowing =
   }
   const { margins } = next.page;
   const needed = contentRight(next) + margins.left + margins.right;
-  if (needed > next.page.width) next = { ...next, page: { ...next.page, width: Math.min(PAGE_LIMITS.max, Math.ceil(needed)) } };
+  if (widenPage && needed > next.page.width) next = { ...next, page: { ...next.page, width: Math.min(PAGE_LIMITS.max, Math.ceil(needed)) } };
   return next;
 }
 

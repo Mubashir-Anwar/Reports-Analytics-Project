@@ -1,4 +1,7 @@
-"""Data adapters: list, save, test, move, delete."""
+"""Data sources (data adapters): list, save, test, move, delete.
+
+Every user with the Designer, Query or Report Server right connects data sources (/api/data-sources);
+no Admin right is needed. /api/admin/connections is the older address of the same endpoints."""
 from __future__ import annotations
 
 import re
@@ -22,9 +25,10 @@ def register(app: FastAPI, ctx: SimpleNamespace) -> None:
     state = ctx.state
     test_adapter_values = ctx.test_adapter_values
 
+    @app.get("/api/data-sources")
     @app.get("/api/admin/connections")
     def admin_list_connections(request: Request) -> dict[str, Any]:
-        require_admin(request, "designer")
+        require_admin(request, "sources")
         profiles = load_connection_profiles()
         usage = ctx.adapter_usage()
         result = []
@@ -42,9 +46,10 @@ def register(app: FastAPI, ctx: SimpleNamespace) -> None:
             })
         return {"connections": result}
 
+    @app.post("/api/data-sources")
     @app.post("/api/admin/connections")
     async def admin_save_connection(request: Request) -> dict[str, Any]:
-        require_admin(request)
+        require_admin(request, "sources")
         try:
             payload = await request.json()
         except Exception:
@@ -134,9 +139,10 @@ def register(app: FastAPI, ctx: SimpleNamespace) -> None:
         return {"connection": {"id": connection_id, "name": name, "type": profile.get("type", "mongodb"), "folder": adapter_folder,
                                "database": database, "configured": True}}
 
+    @app.post("/api/data-sources/test")
     @app.post("/api/admin/connections/test")
     async def admin_test_connection_values(request: Request) -> dict[str, Any]:
-        require_admin(request)
+        require_admin(request, "sources")
         try:
             payload = await request.json()
         except Exception:
@@ -148,9 +154,10 @@ def register(app: FastAPI, ctx: SimpleNamespace) -> None:
         connection_id = str(payload.get("id", "")).strip().lower()
         return test_adapter_values(str(payload.get("type", "mongodb") or "mongodb").lower(), uri, database, connection_id)
 
+    @app.delete("/api/data-sources/{connection_id}")
     @app.delete("/api/admin/connections/{connection_id}")
     def admin_delete_connection(connection_id: str, request: Request) -> dict[str, str]:
-        require_admin(request)
+        require_admin(request, "sources")
         if connection_id == "default":
             raise HTTPException(status_code=400, detail="The default connection cannot be deleted")
         used_by = ctx.adapter_usage().get(connection_id, [])
@@ -167,10 +174,11 @@ def register(app: FastAPI, ctx: SimpleNamespace) -> None:
             old_client.close()
         return {"status": "deleted", "connectionId": connection_id}
 
+    @app.put("/api/data-sources/{connection_id}/folder")
     @app.put("/api/admin/connections/{connection_id}/folder")
     async def admin_move_connection(connection_id: str, request: Request) -> dict[str, Any]:
         """Move a data adapter into a repository folder (or back to the top level) without re-entering its URL."""
-        require_admin(request)
+        require_admin(request, "sources")
         try:
             payload = await request.json()
         except Exception:
@@ -192,7 +200,8 @@ def register(app: FastAPI, ctx: SimpleNamespace) -> None:
         get_store().write_json("connections.json", {"connections": profiles})
         return {"connectionId": connection_id, "folder": folder}
 
+    @app.post("/api/data-sources/{connection_id}/test")
     @app.post("/api/admin/connections/{connection_id}/test")
     def admin_test_connection(connection_id: str, request: Request) -> dict[str, Any]:
-        require_admin(request, "designer")
+        require_admin(request, "sources")
         return ctx.test_adapter_by_id(connection_id)

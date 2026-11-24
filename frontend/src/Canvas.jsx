@@ -4,7 +4,7 @@ import { isJavaExpression, toEditorHtml } from './richText.js';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   CSS_FONT, PAGE_LIMITS, ZOOM_LIMITS, bandKeys, bandLabel, bandWidth, clampZoom, contentBottom, contentRight, defaultElement,
-  BACKDROP_TYPES, CONTAINER_TYPES, bandPresent, describeElement, getBand, resizeElement, setBand,
+  BACKDROP_TYPES, CONTAINER_TYPES, bandPresent, describeElement, getBand, resizeElement, resizeRule, setBand,
   safeMarkupHtml,
 } from './designModel.js';
 import {
@@ -563,9 +563,11 @@ export default function Canvas({ knownFields: knownList, design, selection, tool
         setDragInfo({ kind: 'resize', text: `${Object.keys(patches).length} elements · width ${dw >= 0 ? '+' : ''}${dw}px · height ${dh >= 0 ? '+' : ''}${dh}px` });
         dispatch({ type: 'LIVE', update: () => patchElements(base, patches) });
       } else {
-        // Like a table column: the columns to the right move along (hold Alt to resize only this element).
-        const shift = !e.altKey && !BACKDROP_TYPES.has(element.type);
-        const maxWidth = shift ? PAGE_LIMITS.max : width - start.ex;
+        // A table column moves the columns to its right (and may widen the page); a box in a letter changes only
+        // itself. View → Canvas → Resizing chooses; Alt flips it for one drag.
+        const rule = BACKDROP_TYPES.has(element.type) ? { follow: false, widen: false } : resizeRule(base, bandKey, element, prefs.resizeMode, e.altKey);
+        const shift = rule.follow;
+        const maxWidth = rule.widen ? PAGE_LIMITS.max : width - start.ex;
         let right = start.ex + start.ew + dx;
         let bottom = start.ey + start.eh + dy;
         if (prefs.snapGrid) { right = snapToGrid(right, prefs.gridSize); bottom = snapToGrid(bottom, prefs.gridSize); }
@@ -576,8 +578,8 @@ export default function Canvas({ knownFields: knownList, design, selection, tool
           if (sy) { bottom = sy.line; lines.y.push({ key: bandKey, y: sy.line }); }
         }
         const size = { width: Math.round(Math.min(Math.max(MIN_W, right - start.ex), maxWidth)), height: Math.round(Math.max(MIN_H, bottom - start.ey)) };
-        setDragInfo({ kind: 'resize', text: `${size.width} × ${size.height}px${shift ? ' · columns to the right follow (Alt = this element only)' : ' · this element only'}` });
-        dispatch({ type: 'LIVE', update: () => resizeElement(base, bandKey, element.id, size, shift) });
+        setDragInfo({ kind: 'resize', text: `${size.width} × ${size.height}px${shift ? ` · columns to the right follow${rule.widen ? ', the page may widen' : ''} (Alt = this box only)` : ' · this box only, inside the page (Alt = columns follow)'}` });
+        dispatch({ type: 'LIVE', update: () => resizeElement(base, bandKey, element.id, size, shift, rule.widen) });
       }
       setSnapLines(lines.x.length || lines.y.length ? lines : null);
     };

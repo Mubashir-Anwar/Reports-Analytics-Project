@@ -21,6 +21,9 @@ from backend.app.storage.files import data_directory
 
 
 def _int(name: str, default: int, low: int, high: int) -> int:
+    from backend.app import limits  # noqa: PLC0415
+    if name in limits.BY_ENV:
+        return int(limits.value(name))               # Admin → Limits, else the environment variable
     raw = os.getenv(name, "").strip()
     if not raw:
         return default
@@ -55,7 +58,8 @@ def query_timeout_seconds() -> int:
 
 
 def memory_limit() -> str:
-    raw = os.getenv("ANALYTICS_MEMORY_LIMIT", "").strip().upper().replace(" ", "")
+    from backend.app import limits  # noqa: PLC0415
+    raw = str(limits.value("ANALYTICS_MEMORY_LIMIT")).strip().upper().replace(" ", "")
     if raw and re.fullmatch(r"\d{1,6}(KB|MB|GB|TB)", raw):
         return raw
     if raw:

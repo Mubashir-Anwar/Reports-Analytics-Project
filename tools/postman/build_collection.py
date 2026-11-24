@@ -137,14 +137,15 @@ req("The old Run reports page (/ui) goes home", "GET", "/ui", expect=(303,), red
 req("Admin whoami", "GET", "/api/admin/whoami")
 req("System status and production checklist", "GET", "/api/admin/system/status")
 
-folder("03 Data sources (Admin)")
-req("Test a connection before saving", "POST", "/api/admin/connections/test",
+folder("03 Data sources", "Any signed-in user with Designer, Query or Report Server rights connects data sources: no Admin right needed. The old /api/admin/connections paths still answer.")
+req("Test a connection before saving", "POST", "/api/data-sources/test",
     body={"type": "mongodb", "uri": "{{mongoUri}}", "database": "rs_postman_demo"})
-req("Save data adapter pm_mongo", "POST", "/api/admin/connections",
+req("Save data adapter pm_mongo", "POST", "/api/data-sources",
     body={"id": "pm_mongo", "name": "Postman Mongo", "type": "mongodb", "uri": "{{mongoUri}}", "database": "rs_postman_demo", "folder": ""})
-req("List data adapters", "GET", "/api/admin/connections")
-req("Test saved adapter", "POST", "/api/admin/connections/pm_mongo/test")
-req("Move adapter to a folder", "PUT", "/api/admin/connections/pm_mongo/folder", body={"folder": "Postman"})
+req("List data adapters", "GET", "/api/data-sources")
+req("List data adapters (the old Admin path still works)", "GET", "/api/admin/connections")
+req("Test saved adapter", "POST", "/api/data-sources/pm_mongo/test")
+req("Move adapter to a folder", "PUT", "/api/data-sources/pm_mongo/folder", body={"folder": "Postman"})
 
 folder("04 Repository folders (Admin)")
 req("Create folder Postman", "POST", "/api/admin/folders", body={"path": "Postman"})
@@ -232,6 +233,8 @@ req("Create user pm_runner", "POST", "/api/admin/users",
     body={"username": "pm_runner", "password": RUNNER_PASSWORD, "rights": ["runner"], "fullName": "Postman Runner",
           "email": "pm_runner@example.com"})
 req("List users", "GET", "/api/admin/users")
+req("Give only the Query right", "PUT", "/api/admin/users/pm_runner", body={"rights": ["query"]},
+    checks="pm.test('query right kept', function () { pm.expect(JSON.stringify(pm.response.json())).to.include('query'); });")
 req("Change rights", "PUT", "/api/admin/users/pm_runner", body={"rights": ["runner", "server"]})
 req("Create team PM team", "POST", "/api/admin/user-groups", body={"name": "PM team", "description": "Made by Postman", "members": ["pm_runner"]},
     save={"groupId": "pm.response.json().group.groupId"})
@@ -590,6 +593,23 @@ req("Postman environment for this server", "GET", "/api/admin/postman/environmen
 req("Product name (public: sign-in page, navigation bar)", "GET", "/api/branding", auth="none",
     checks="pm.test('has a name', function () { pm.expect(pm.response.json().name).to.be.a('string'); });")
 req("Product name: a wrong name is refused (super admin)", "PUT", "/api/admin/branding", body={"name": "<x>", "tagline": ""}, expect=(422,))
+req("Logo (public): the built-in mark or the uploaded logo", "GET", "/brand/logo", auth="none")
+req("Remember the current name", "GET", "/api/branding", auth="none",
+    save={"brandName": "pm.response.json().name", "brandTagline": "pm.response.json().tagline || ''"})
+req("Logo: an SVG with a script is refused (the logo is not changed)", "PUT", "/api/admin/branding",
+    body={"name": "{{brandName}}", "tagline": "{{brandTagline}}", "logo": "data:image/svg+xml;base64,PHN2Zz48c2NyaXB0Pjwvc2NyaXB0Pjwvc3ZnPg=="},
+    expect=(422,), description='A logo is sent as a data: URL (PNG, JPEG, WebP or SVG, up to 300 KB). "logo": "" puts the built-in mark back; '
+    'leaving "logo" out keeps the current one.')
+req("Limits: every limit, its value and where it comes from", "GET", "/api/admin/limits",
+    save={"limitRestore": "(function (l) { return l.source === 'admin' ? String(l.value) : 'null'; })"
+                          "(pm.response.json().limits.find(l => l.key === 'REPORT_MAX_CONCURRENT'))"},
+    checks="pm.test('reports at once is listed', function () { pm.expect(pm.response.json().limits.map(l => l.key)).to.include('REPORT_MAX_CONCURRENT'); });")
+req("Limits: a value out of range is refused", "PUT", "/api/admin/limits", body={"values": {"REPORT_MAX_CONCURRENT": 0}}, expect=(422,))
+req("Limits: set reports at the same time to 3", "PUT", "/api/admin/limits", body={"values": {"REPORT_MAX_CONCURRENT": 3}})
+req("Capacity follows the new limit at once", "GET", "/api/admin/capacity",
+    checks="pm.test('3 places', function () { pm.expect(pm.response.json().limits.maxConcurrent).to.eql(3); });")
+req("Limits: put the earlier value back (null = the .env value or the default)", "PUT", "/api/admin/limits",
+    raw_body='{"values": {"REPORT_MAX_CONCURRENT": {{limitRestore}}}}')
 req("Capacity: report places in use, background queue, limits", "GET", "/api/admin/capacity",
     checks="pm.test('has limits', function () { pm.expect(pm.response.json().limits.maxConcurrent).to.be.above(0); });")
 req("Report Server logs: every request today (system database)", "GET", "/api/server/logs/requests?limit=50",
@@ -616,13 +636,13 @@ req("Delete copied report", "DELETE", "/api/server/reports/PM_ORDERS_COPY")
 req("Delete PM_ADMIN", "DELETE", "/api/admin/reports/PM_ADMIN")
 req("Delete draft", "DELETE", f"/api/admin/workspace/{REPORT}")
 req("Delete workspace folder", "DELETE", "/api/admin/workspace-folders", body={"path": "Postman"}, expect=(200, 409))
-req("Move the data adapter out of the folder", "PUT", "/api/admin/connections/pm_mongo/folder", body={"folder": ""})
+req("Move the data adapter out of the folder", "PUT", "/api/data-sources/pm_mongo/folder", body={"folder": ""})
 req("Delete server folder with its reports", "DELETE", "/api/server/folders", body={"path": "Postman", "recursive": True})
 req("Delete admin folder (already gone)", "DELETE", "/api/admin/folders", body={"path": "Postman", "recursive": True}, expect=(200, 404))
 req("Delete API key", "DELETE", "/api/admin/api-keys/{{apiKeyId}}")
 req("Delete team", "DELETE", "/api/admin/user-groups/{{groupId}}")
 req("Delete user", "DELETE", "/api/admin/users/pm_runner")
-req("Delete data adapter", "DELETE", "/api/admin/connections/pm_mongo")
+req("Delete data adapter", "DELETE", "/api/data-sources/pm_mongo")
 req("Sign out", "POST", "/api/server/logout", body={})
 
 

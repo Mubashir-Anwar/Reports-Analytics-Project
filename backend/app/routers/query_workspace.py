@@ -42,7 +42,7 @@ def register(app: FastAPI, ctx: SimpleNamespace) -> None:
             raise HTTPException(status_code=422, detail=f"MongoDB: {_safe_mongo_error(exc)}") from None
 
     async def mongo(request: Request, need_collection: bool = True) -> tuple[Any, str, dict[str, Any]]:
-        require_admin(request, "designer")
+        require_admin(request, "query")
         payload = await json_body(request)
         connection_id = str(payload.get("connectionId") or "").strip()
         if not connection_id:
@@ -76,7 +76,7 @@ def register(app: FastAPI, ctx: SimpleNamespace) -> None:
         return await call(lambda: explorer.mongo_fields(db, collection, limit_ms()))
 
     async def sql(request: Request) -> tuple[str, str, dict[str, Any]]:
-        require_admin(request, "designer")
+        require_admin(request, "query")
         payload = await json_body(request)
         kind, url = ctx.sql_adapter(str(payload.get("connectionId") or "").strip())
         return kind, url, payload

@@ -31,7 +31,7 @@ export default function CapacityCard() {
         <li><b>{background.running}</b> background runs working, <b>{background.queued}</b> queued ({background.workers} workers)</li>
       </ul>
       <details>
-        <summary>Limits (set in .env, see DEPLOYMENT.md → “Large reports and many users”)</summary>
+        <summary>Limits (change them in <a href="#limits">Admin → Limits</a>, no restart needed)</summary>
         <table className="cap-table">
           <tbody>
             <tr><td>REPORT_MAX_CONCURRENT</td><td>{limits.maxConcurrent}</td><td>reports made at the same time (per process)</td></tr>

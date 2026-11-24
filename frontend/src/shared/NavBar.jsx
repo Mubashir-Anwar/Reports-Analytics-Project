@@ -30,7 +30,10 @@ export function Icon({ name, size = 16 }) {
 }
 
 /** The product mark (same drawing as /assets/brand/logo.svg): a circle, a bar and a tall bar whose overlaps multiply. */
-export function Logo({ size = 30, className = 'fx-logo' }) {
+export function Logo({ size = 30, className = 'fx-logo', src }) {
+  const brand = useBrand();
+  const own = src === undefined ? brand.logo : src;
+  if (own) return <img className={`${className} fx-logo-own`} src={own} width={size} height={size} alt="" aria-hidden="true" style={{ objectFit: 'contain' }} />;
   return (
     <svg className={className} width={size} height={size} viewBox="0 0 64 64" aria-hidden="true">
       <g style={{ isolation: 'isolate' }}>
@@ -45,7 +48,7 @@ export function Logo({ size = 30, className = 'fx-logo' }) {
 export const NAV_APPS = [
   { href: '/designer', right: 'designer', label: 'Designer', icon: 'designer', text: 'Build reports and publish them' },
   { href: '/server', right: 'server', label: 'Server', icon: 'server', text: 'Folders, run, schedules, permissions' },
-  { href: '/query', right: 'designer', label: 'Query', icon: 'query', text: 'Browse data sources and try queries' },
+  { href: '/query', right: 'query', label: 'Query', icon: 'query', text: 'Browse data sources and try queries' },
   { href: '/analytics', right: 'analytics', label: 'Analytics', icon: 'analytics', text: 'Dashboards and models' },
   { href: '/admin', right: 'admin', label: 'Admin', icon: 'admin', text: 'Users, API keys, data sources, system DB' },
 ];

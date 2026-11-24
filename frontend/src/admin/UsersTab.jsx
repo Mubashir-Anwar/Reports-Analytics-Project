@@ -6,11 +6,12 @@ import PasswordInput from '../shared/PasswordInput.jsx';
 const RIGHT_HELP = {
   admin: 'Users, API keys, data sources, logs',
   designer: 'Build, preview and publish reports',
+  query: 'Query workspace: browse data sources and try MongoDB / SQL queries (read-only)',
   server: 'Report Server: folders, run, schedules (folder permissions apply)',
   analytics: 'Dashboards and models',
   runner: 'Running reports by URL (/generate, /reports, collections)',
 };
-const DEFAULT_RIGHTS = [{ id: 'admin', label: 'Admin' }, { id: 'designer', label: 'Designer' }, { id: 'server', label: 'Report Server' },
+const DEFAULT_RIGHTS = [{ id: 'admin', label: 'Admin' }, { id: 'designer', label: 'Designer' }, { id: 'query', label: 'Query' }, { id: 'server', label: 'Report Server' },
   { id: 'analytics', label: 'Analytics' }, { id: 'runner', label: 'Run reports by URL' }];
 const LEVEL_LABEL = { none: 'None', run: 'Run', manage: 'Manage' };
 const EMPTY_FORM = { username: '', fullName: '', email: '', phone: '', password: '', rights: ['runner'], superAdmin: false };

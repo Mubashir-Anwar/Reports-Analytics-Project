@@ -79,8 +79,10 @@ def create_context() -> SimpleNamespace:
     ctx.job_runner = JobRunner(ctx)
     from backend.app.analytics.refresher import Refresher  # noqa: PLC0415
     ctx.analytics_refresher = Refresher(ctx)
+    from backend.app.limits import LiveSettings  # noqa: PLC0415
     from backend.app.services.capacity import RunGate  # noqa: PLC0415
-    ctx.run_gate = RunGate(settings.max_concurrent, settings.max_per_caller, settings.queue_wait_seconds)
+    ctx.settings = LiveSettings(settings)        # Admin → Limits wins over the environment, without a restart
+    ctx.run_gate = RunGate(settings.max_concurrent, settings.max_per_caller, settings.queue_wait_seconds, live=True)
     LOG.info("At most %d reports at once in this process (%d per user), waiting up to %d s for a place",
              settings.max_concurrent, settings.max_per_caller, settings.queue_wait_seconds)
     try:  # the repository revision we started with (see services/versions.refresh_if_changed)

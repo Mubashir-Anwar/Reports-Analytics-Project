@@ -27,6 +27,7 @@ PUBLIC = {("GET", "/"), ("GET", "/ui"), ("GET", "/designer"), ("GET", "/server")
           ("GET", "/analytics"), ("GET", "/query"), ("GET", "/login"),
           ("GET", "/api/v1/openapi.json"),                       # describes the public API; no data
           ("GET", "/api/branding"),                              # product name and tagline for the sign-in page; no data
+          ("GET", "/brand/logo"),                                # the product logo for the sign-in page; no data
           ("GET", "/health"), ("POST", "/api/server/logout"), ("GET", "/docs"), ("GET", "/redoc"),
           ("GET", "/openapi.json"), ("GET", "/docs/oauth2-redirect"),
           ("GET", "/api/server/password-help"),                  # which forgot-password ways the sign-in page offers

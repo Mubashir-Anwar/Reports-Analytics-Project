@@ -329,6 +329,7 @@ def resource_details(ctx: SimpleNamespace, definition: ReportDefinition, session
         "usedBy": used_by,
         "history": list(reversed(ctx.read_history(definition.report_id, definition.folder)))[:50],
         "canEdit": designer, "canDelete": role_at_least(session["role"], "admin"),
+        "canLink": ctx.report_level(session, definition, rules) >= MANAGE,       # may link another data source
     }
 
 

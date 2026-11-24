@@ -21,7 +21,7 @@ function useTeamPlace() {
   return value;
 }
 
-const APP_NAMES = { designer: 'Designer', analytics: 'Analytics', server: 'Report Server', admin: 'Admin', runner: 'Run reports by URL' };
+const APP_NAMES = { designer: 'Designer', query: 'Query', analytics: 'Analytics', server: 'Report Server', admin: 'Admin', runner: 'Run reports by URL' };
 const WHAT = { designer: 'report', analytics: 'workbook', server: 'item' };
 const initials = (name = '') => name.split(/[\s._-]+/).filter(Boolean).slice(0, 2).map((part) => part[0]).join('').toUpperCase() || '?';
 const hue = (name = '') => [...name].reduce((h, c) => (h * 31 + c.charCodeAt(0)) % 360, 7);
