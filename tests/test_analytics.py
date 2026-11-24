@@ -353,6 +353,8 @@ def test_admin_controls_analytics(bi):
     dash, orders, branches = sales_dashboard(bi)
     stray = importer.settings.directory() / "ds_abcdefabcdef-0badc0de.parquet"
     stray.write_bytes(b"x" * 100)                                       # left by a crash: no dataset uses it
+    # Branches is only in a visual's group-by (a related dataset): still in use, so the modeller's delete refuses too
+    assert bi.request("DELETE", f"/api/analytics/datasets/{branches}", json={}).status_code == 409
     assert bi.get("/api/admin/analytics").status_code == 403           # maya: Analytics + Designer, not Admin
     make_user(bi, "ada", ["admin"])                                    # Admin only: no Analytics right needed here
     sign_in(bi, "ada")

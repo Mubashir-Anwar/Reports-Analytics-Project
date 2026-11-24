@@ -2,7 +2,7 @@
 
 | File | What it is |
 |---|---|
-| `Reporting-Service.postman_collection.json` | 211 requests in 17 folders covering 173 of the 174 endpoints (incl. the public API, embedding and analytics; only the system-database switch is left out, because it changes where the server keeps its data), in an order that runs end to end (create → use → clean up). Every request checks its status; IDs, the API key and links are passed on through environment variables. |
+| `Reporting-Service.postman_collection.json` | 262 requests in 19 folders covering 200 of the 201 endpoints (incl. the public API, embedding, analytics and the Query workspace; only the system-database switch is left out, because it changes where the server keeps its data), in an order that runs end to end (create → use → clean up). Every request checks its status; IDs, the API key and links are passed on through environment variables. |
 | `Local.postman_environment.json` | The variables. Fill in `password` and `adminToken`; the rest has local defaults. |
 
 Regenerate both after changing the API: `python tools/postman/build_collection.py`.
@@ -29,7 +29,15 @@ that server's address and their username filled in).
 npx newman run postman/Reporting-Service.postman_collection.json -e postman/Local.postman_environment.json --env-var password=… --env-var adminToken=…
 ```
 
-Last full run: 126 requests, 126 test scripts, 140 checks, 0 failures (before the product-name, capacity and analytics requests were added; run it again to confirm 178).
+Last full run (Newman 6, 2026-11-24, a fresh server with the demo data): 262 requests, 262 test scripts, 315 checks, 0 failures.
+
+Folder **05b Query workspace** browses `pm_mongo` like the /query page: collections, find (filter, projection, sort), an
+aggregation with its shell code and fields. A writing stage ($out) is refused. The two SQL requests answer 422 because
+the demo adapter is MongoDB; point them at a SQL adapter to see schemas, tables, keys and rows.
+
+Folder **07b My account and forgotten passwords** signs in as `pm_runner` (My account, team chat), asks for a password
+reset as a visitor, approves it as `{{username}}` and uses the one-time link once. It ends signed in as `{{username}}`
+again, so run it as part of the collection. The old Run reports page `/ui` now only redirects to `/`.
 
 Folder **12c Analytics** imports the demo orders into two datasets, relates them, builds a dashboard and queries it with the
 session and with the API key. It also opens the dashboard on the Report Server, downloads it as a `.mdash` file and

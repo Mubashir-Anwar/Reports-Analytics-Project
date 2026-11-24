@@ -172,6 +172,40 @@
           ]
         },
         {
+          "name": "Forgot password: which ways the sign-in page offers",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/server/password-help",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "server",
+                "password-help"
+              ]
+            },
+            "description": "",
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Forgot password: which ways the sign-in page offers: HTTP 200\", function () { pm.expect([200]).to.include(pm.response.code); });",
+                  "pm.test('admin approval is offered', function () { pm.expect(pm.response.json().adminApproval).to.eql(true); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
           "name": "Public API refuses without a key",
           "request": {
             "method": "GET",
@@ -343,6 +377,34 @@
           ]
         },
         {
+          "name": "Page /query",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/query",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "query"
+              ]
+            },
+            "description": ""
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Page /query: HTTP 200\", function () { pm.expect([200]).to.include(pm.response.code); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
           "name": "Page /server",
           "request": {
             "method": "GET",
@@ -399,34 +461,6 @@
           ]
         },
         {
-          "name": "Page /ui",
-          "request": {
-            "method": "GET",
-            "header": [],
-            "url": {
-              "raw": "{{baseUrl}}/ui",
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "ui"
-              ]
-            },
-            "description": ""
-          },
-          "event": [
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "pm.test(\"Page /ui: HTTP 200\", function () { pm.expect([200]).to.include(pm.response.code); });"
-                ]
-              }
-            }
-          ]
-        },
-        {
           "name": "Page /analytics",
           "request": {
             "method": "GET",
@@ -453,6 +487,38 @@
               }
             }
           ]
+        },
+        {
+          "name": "The old Run reports page (/ui) goes home",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/ui",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "ui"
+              ]
+            },
+            "description": ""
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"The old Run reports page (/ui) goes home: HTTP 303\", function () { pm.expect([303]).to.include(pm.response.code); });",
+                  "pm.test('redirects to /', function () { pm.expect(pm.response.headers.get('Location')).to.eql('/'); });"
+                ]
+              }
+            }
+          ],
+          "protocolProfileBehavior": {
+            "followRedirects": false
+          }
         },
         {
           "name": "Admin whoami",
@@ -1082,6 +1148,190 @@
           ]
         },
         {
+          "name": "Save as JRXML (for Jaspersoft Studio)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/admin/jrxml/export",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "admin",
+                "jrxml",
+                "export"
+              ]
+            },
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"id\": \"PM_ORDERS\",\n  \"title\": \"Postman Orders\",\n  \"description\": \"Created by the Postman collection\",\n  \"folder\": \"Postman\",\n  \"connectionId\": \"pm_mongo\",\n  \"collection\": \"orders\",\n  \"queryLanguage\": \"aggregation-json\",\n  \"querySource\": \"[{\\\"$match\\\": {\\\"Branch\\\": {\\\"$param\\\": \\\"Branch\\\"}}}, {\\\"$project\\\": {\\\"_id\\\": 0, \\\"Name\\\": 1, \\\"Branch\\\": 1, \\\"Amount\\\": 1, \\\"CNIC\\\": 1}}]\",\n  \"columns\": [\n    \"Name\",\n    \"Branch\",\n    \"Amount\",\n    \"CNIC\"\n  ],\n  \"formats\": [\n    \"pdf\",\n    \"xlsx\",\n    \"csv\"\n  ],\n  \"defaultFormat\": \"pdf\",\n  \"parameters\": [\n    {\n      \"name\": \"Branch\",\n      \"type\": \"string\",\n      \"label\": \"Branch\",\n      \"required\": true,\n      \"allowedValues\": [\n        \"LHR\",\n        \"KHI\",\n        \"ISB\"\n      ]\n    },\n    {\n      \"name\": \"CNIC\",\n      \"type\": \"string\",\n      \"label\": \"CNIC\",\n      \"required\": false,\n      \"sensitive\": true\n    }\n  ],\n  \"design\": {\n    \"bands\": {\n      \"columnHeader\": {\n        \"height\": 20,\n        \"elements\": [\n          {\n            \"type\": \"staticText\",\n            \"x\": 0,\n            \"y\": 0,\n            \"width\": 160,\n            \"height\": 16,\n            \"text\": \"Name\"\n          },\n          {\n            \"type\": \"staticText\",\n            \"x\": 170,\n            \"y\": 0,\n            \"width\": 100,\n            \"height\": 16,\n            \"text\": \"Amount\"\n          }\n        ]\n      },\n      \"detail\": {\n        \"height\": 20,\n        \"elements\": [\n          {\n            \"type\": \"textField\",\n            \"x\": 0,\n            \"y\": 0,\n            \"width\": 160,\n            \"height\": 16,\n            \"expression\": \"$F{Name}\"\n          },\n          {\n            \"type\": \"textField\",\n            \"x\": 170,\n            \"y\": 0,\n            \"width\": 100,\n            \"height\": 16,\n            \"expression\": \"$F{Amount}\"\n          }\n        ]\n      }\n    }\n  }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Save as JRXML (for Jaspersoft Studio): HTTP 200\", function () { pm.expect([200]).to.include(pm.response.code); });",
+                  "pm.test('a jasperReport file', function () { const b = pm.response.json(); pm.expect(b.xml).to.include('<jasperReport'); pm.expect(b.fileName).to.include('.jrxml'); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Import an existing design (PNG, PDF, Word, .ai)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/admin/designer/import-design",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "admin",
+                "designer",
+                "import-design"
+              ]
+            },
+            "description": "Nothing is saved: the answer is the page size, a background picture and the elements found.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"file\": \"data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAMgAAAEYCAIAAACWcy5SAAAB+klEQVR42u3SQREAAAzCMPybBhV7LZHQawoHIgHGwlgYC4yFsTAWGAtjYSwwFsbCWGAsjIWxwFgYC2OBsTAWxgJjYSyMBcbCWBgLjIWxMBYYC2NhLDAWxsJYYCyMhbHAWBgLY4GxMBbGAmNhLIwFxsJYGAuMhbEwFhgLY2EsMBbGwlhgLIyFscBYGAtjgbEwFsYCY2EsjAXGwlgYC4yFsTAWGAtjYSwwFsbCWGAsjIWxMBYYC2NhLDAWxsJYYCyMhbHAWBgLY4GxMBbGAmNhLIwFxsJYGAuMhbEwFhgLY2EsMBbGwlhgLIyFscBYGAtjgbEwFsYCY2EsjAXGwlgYC4yFsTAWGAtjYSwwFsbCWGAsjIWxwFgYC2OBsTAWxgJjYSyMBcbCWBgLjIWxMBYYC2NhLDAWxsJYYCyMhbHAWBgLY2EsMBbGwlhgLIyFscBYGAtjgbEwFsYCY2EsjAXGwlgYC4yFsTAWGAtjYSwwFsbCWGAsjIWxwFgYC2OBsTAWxgJjYSyMBcbCWBgLjIWxMBYYC2NhLDAWxsJYYCyMhbHAWBgLY4GxMBbGAmNhLIwFxsJYGAuMhbEwFhgLY2EsMBbGwlhgLIyFscBYGAtjgbEwFsbCWBJgLIyFscBYGAtjgbEwFsYCY2EsjAXGwlgYC4yFsTAWGAtj8ckATebWBOiz4KMAAAAASUVORK5CYII=\",\n  \"name\": \"page.png\",\n  \"mode\": \"elements\",\n  \"page\": 1,\n  \"textOnTop\": true\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Import an existing design (PNG, PDF, Word, .ai): HTTP 200\", function () { pm.expect([200]).to.include(pm.response.code); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Custom function: try it",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/admin/designer/functions/try",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "admin",
+                "designer",
+                "functions",
+                "try"
+              ]
+            },
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"functions\": [\n    {\n      \"name\": \"FullName\",\n      \"params\": [\n        \"first\",\n        \"last\"\n      ],\n      \"body\": \"first + \\\" \\\" + last\"\n    }\n  ],\n  \"expression\": \"FullName($F{First}, \\\"Khan\\\")\",\n  \"values\": {\n    \"First\": \"Ali\"\n  }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Custom function: try it: HTTP 200\", function () { pm.expect([200]).to.include(pm.response.code); });",
+                  "pm.test('Ali Khan', function () { pm.expect(pm.response.json().value).to.eql('Ali Khan'); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Custom function: a wrong one is refused",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/admin/designer/functions/try",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "admin",
+                "designer",
+                "functions",
+                "try"
+              ]
+            },
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"functions\": [\n    {\n      \"name\": \"Bad\",\n      \"params\": [],\n      \"body\": \"1 +\"\n    }\n  ],\n  \"expression\": \"Bad()\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Custom function: a wrong one is refused: HTTP 422\", function () { pm.expect([422]).to.include(pm.response.code); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
           "name": "Create workspace folder",
           "request": {
             "method": "POST",
@@ -1283,6 +1533,136 @@
           ]
         },
         {
+          "name": "Mark the draft as open in the designer",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/admin/workspace/PM_ORDERS/editing",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "admin",
+                "workspace",
+                "PM_ORDERS",
+                "editing"
+              ]
+            },
+            "description": "The designer sends this every 30 s while the draft is open; the answer says who else is editing it.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"open\": true\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Mark the draft as open in the designer: HTTP 200\", function () { pm.expect([200]).to.include(pm.response.code); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Mark the draft as closed",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/admin/workspace/PM_ORDERS/editing",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "admin",
+                "workspace",
+                "PM_ORDERS",
+                "editing"
+              ]
+            },
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"open\": false\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Mark the draft as closed: HTTP 200\", function () { pm.expect([200]).to.include(pm.response.code); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Workspace folder contents (what deleting it would touch)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/admin/workspace-folders/contents?path=Postman",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "admin",
+                "workspace-folders",
+                "contents"
+              ],
+              "query": [
+                {
+                  "key": "path",
+                  "value": "Postman"
+                }
+              ]
+            },
+            "description": ""
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Workspace folder contents (what deleting it would touch): HTTP 200\", function () { pm.expect([200]).to.include(pm.response.code); });",
+                  "pm.test('lists the draft', function () { pm.expect(pm.response.json().reports.length).to.be.above(0); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
           "name": "Preview draft (20 rows)",
           "request": {
             "method": "POST",
@@ -1414,6 +1794,331 @@
                 "type": "text/javascript",
                 "exec": [
                   "pm.test(\"Publish draft to the server: HTTP 200\", function () { pm.expect([200]).to.include(pm.response.code); });"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "05b Query workspace (/query)",
+      "description": "Browse a data adapter and try queries without making a report: MongoDB find / aggregate / fields, and SQL. Everything is read-only ($out, $merge, $where and $function are refused; SQL runs one read-only statement).",
+      "item": [
+        {
+          "name": "MongoDB: collections of pm_mongo",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/query/mongo/collections",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "query",
+                "mongo",
+                "collections"
+              ]
+            },
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"connectionId\": \"pm_mongo\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"MongoDB: collections of pm_mongo: HTTP 200\", function () { pm.expect([200]).to.include(pm.response.code); });",
+                  "pm.test('has orders', function () { pm.expect(pm.response.json().collections.map(c => c.name)).to.include('orders'); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "MongoDB: find with filter, projection and sort",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/query/mongo/find",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "query",
+                "mongo",
+                "find"
+              ]
+            },
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"connectionId\": \"pm_mongo\",\n  \"collection\": \"orders\",\n  \"filter\": \"{ Branch: \\\"LHR\\\" }\",\n  \"projection\": \"{ _id: 0, Name: 1, Amount: 1 }\",\n  \"sort\": \"{ Amount: -1 }\",\n  \"skip\": 0,\n  \"limit\": 50\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"MongoDB: find with filter, projection and sort: HTTP 200\", function () { pm.expect([200]).to.include(pm.response.code); });",
+                  "pm.test('two LHR orders', function () { const b = pm.response.json(); pm.expect(b.total).to.eql(2); pm.expect(b.documents.length).to.eql(2); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "MongoDB: aggregate (stages as shell text) and the code",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/query/mongo/aggregate",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "query",
+                "mongo",
+                "aggregate"
+              ]
+            },
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"connectionId\": \"pm_mongo\",\n  \"collection\": \"orders\",\n  \"limit\": 50,\n  \"stages\": [\n    \"{ $group: { _id: \\\"$Branch\\\", total: { $sum: \\\"$Amount\\\" } } }\",\n    \"{ $sort: { total: -1 } }\"\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"MongoDB: aggregate (stages as shell text) and the code: HTTP 200\", function () { pm.expect([200]).to.include(pm.response.code); });",
+                  "pm.test('rows and code', function () { const b = pm.response.json(); pm.expect(b.documents.length).to.be.above(0); pm.expect(b.code).to.include('aggregate'); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "MongoDB: a writing stage is refused",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/query/mongo/aggregate",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "query",
+                "mongo",
+                "aggregate"
+              ]
+            },
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"connectionId\": \"pm_mongo\",\n  \"collection\": \"orders\",\n  \"stages\": [\n    \"{ $out: \\\"copy\\\" }\"\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"MongoDB: a writing stage is refused: HTTP 422\", function () { pm.expect([422]).to.include(pm.response.code); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "MongoDB: fields in a sample",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/query/mongo/fields",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "query",
+                "mongo",
+                "fields"
+              ]
+            },
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"connectionId\": \"pm_mongo\",\n  \"collection\": \"orders\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"MongoDB: fields in a sample: HTTP 200\", function () { pm.expect([200]).to.include(pm.response.code); });",
+                  "pm.test('has Amount', function () { pm.expect(pm.response.json().fields.map(f => f.path)).to.include('Amount'); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "SQL: schema (needs a SQL adapter: refused for MongoDB)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/query/sql/schema",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "query",
+                "sql",
+                "schema"
+              ]
+            },
+            "description": "With a SQL adapter the answer has schemas, tables, columns, primary and foreign keys.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"connectionId\": \"pm_mongo\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"SQL: schema (needs a SQL adapter: refused for MongoDB): HTTP 422\", function () { pm.expect([422]).to.include(pm.response.code); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "SQL: run a SELECT (needs a SQL adapter: refused for MongoDB)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/query/sql/run",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "query",
+                "sql",
+                "run"
+              ]
+            },
+            "description": "With a SQL adapter: one read-only statement, rolled back; $P{Name} values come from parameters.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"connectionId\": \"pm_mongo\",\n  \"sql\": \"SELECT 1 AS one\",\n  \"parameters\": {},\n  \"limit\": 200\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"SQL: run a SELECT (needs a SQL adapter: refused for MongoDB): HTTP 422\", function () { pm.expect([422]).to.include(pm.response.code); });"
                 ]
               }
             }
@@ -1752,6 +2457,93 @@
       "description": "",
       "item": [
         {
+          "name": "New user: is the name or e-mail already taken?",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/admin/users/available?username=pm_runner&email=pm_runner%40example.com",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "admin",
+                "users",
+                "available"
+              ],
+              "query": [
+                {
+                  "key": "username",
+                  "value": "pm_runner"
+                },
+                {
+                  "key": "email",
+                  "value": "pm_runner%40example.com"
+                }
+              ]
+            },
+            "description": ""
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"New user: is the name or e-mail already taken?: HTTP 200\", function () { pm.expect([200]).to.include(pm.response.code); });",
+                  "pm.test('answers per field', function () { pm.expect(pm.response.json().username).to.have.property('taken'); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Remove pm_runner left by an earlier run",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/admin/users/pm_runner",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "admin",
+                "users",
+                "pm_runner"
+              ]
+            },
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Remove pm_runner left by an earlier run: HTTP 200 or 404\", function () { pm.expect([200, 404]).to.include(pm.response.code); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
           "name": "Create user pm_runner",
           "request": {
             "method": "POST",
@@ -1775,7 +2567,7 @@
             "description": "",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"username\": \"pm_runner\",\n  \"password\": \"Postman-pass-2026\",\n  \"rights\": [\n    \"runner\"\n  ]\n}",
+              "raw": "{\n  \"username\": \"pm_runner\",\n  \"password\": \"Postman-pass-2026\",\n  \"rights\": [\n    \"runner\"\n  ],\n  \"fullName\": \"Postman Runner\",\n  \"email\": \"pm_runner@example.com\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -1865,6 +2657,854 @@
                 "type": "text/javascript",
                 "exec": [
                   "pm.test(\"Change rights: HTTP 200\", function () { pm.expect([200]).to.include(pm.response.code); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Create team PM team",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/admin/user-groups",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "admin",
+                "user-groups"
+              ]
+            },
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"PM team\",\n  \"description\": \"Made by Postman\",\n  \"members\": [\n    \"pm_runner\"\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Create team PM team: HTTP 200\", function () { pm.expect([200]).to.include(pm.response.code); });",
+                  "try { pm.environment.set('groupId', pm.response.json().group.groupId); } catch (e) { console.log('could not save groupId', e); }"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Teams",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/admin/user-groups",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "admin",
+                "user-groups"
+              ]
+            },
+            "description": ""
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Teams: HTTP 200\", function () { pm.expect([200]).to.include(pm.response.code); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Change the team",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/admin/user-groups/{{groupId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "admin",
+                "user-groups",
+                "{{groupId}}"
+              ]
+            },
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"PM team\",\n  \"description\": \"Edited\",\n  \"members\": [\n    \"pm_runner\"\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Change the team: HTTP 200\", function () { pm.expect([200]).to.include(pm.response.code); });"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "07b My account and forgotten passwords",
+      "description": "Signs in as pm_runner for My account, asks for a password reset as a visitor, approves it as {{username}} and uses the one-time link. Ends signed in as {{username}} again.",
+      "item": [
+        {
+          "name": "Sign in as pm_runner",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/server/login",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "server",
+                "login"
+              ]
+            },
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"username\": \"pm_runner\",\n  \"password\": \"Postman-pass-2026\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Sign in as pm_runner: HTTP 200\", function () { pm.expect([200]).to.include(pm.response.code); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "My account",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/server/account",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "server",
+                "account"
+              ]
+            },
+            "description": ""
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"My account: HTTP 200\", function () { pm.expect([200]).to.include(pm.response.code); });",
+                  "pm.test('is pm_runner', function () { pm.expect(pm.response.json().username).to.eql('pm_runner'); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Change my name and phone",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/server/account",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "server",
+                "account"
+              ]
+            },
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"fullName\": \"Postman Runner (edited)\",\n  \"email\": \"pm_runner@example.com\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Change my name and phone: HTTP 200\", function () { pm.expect([200]).to.include(pm.response.code); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Change my password: a wrong current password is refused",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/server/account/password",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "server",
+                "account",
+                "password"
+              ]
+            },
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"currentPassword\": \"not-it\",\n  \"newPassword\": \"Postman-pass-2026-new\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Change my password: a wrong current password is refused: HTTP 403\", function () { pm.expect([403]).to.include(pm.response.code); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Team chat: who is online (heartbeat)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/team/heartbeat",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "team",
+                "heartbeat"
+              ]
+            },
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"tab\": \"postman\",\n  \"app\": \"server\",\n  \"place\": \"\",\n  \"title\": \"Postman\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Team chat: who is online (heartbeat): HTTP 200\", function () { pm.expect([200]).to.include(pm.response.code); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Team chat: people I can write to",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/team/users",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "team",
+                "users"
+              ]
+            },
+            "description": ""
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Team chat: people I can write to: HTTP 200\", function () { pm.expect([200]).to.include(pm.response.code); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Team chat: send a message",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/team/messages",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "team",
+                "messages"
+              ]
+            },
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"text\": \"Hello from Postman\",\n  \"to\": null,\n  \"place\": \"\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Team chat: send a message: HTTP 200\", function () { pm.expect([200]).to.include(pm.response.code); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Team chat: messages",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/team/messages?after=0",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "team",
+                "messages"
+              ],
+              "query": [
+                {
+                  "key": "after",
+                  "value": "0"
+                }
+              ]
+            },
+            "description": ""
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Team chat: messages: HTTP 200\", function () { pm.expect([200]).to.include(pm.response.code); });",
+                  "pm.test('has the message', function () { pm.expect(pm.response.json().messages.map(m => m.text)).to.include('Hello from Postman'); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Team chat: leave",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/team/heartbeat?tab=postman",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "team",
+                "heartbeat"
+              ],
+              "query": [
+                {
+                  "key": "tab",
+                  "value": "postman"
+                }
+              ]
+            },
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Team chat: leave: HTTP 200\", function () { pm.expect([200]).to.include(pm.response.code); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Sign out pm_runner",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/server/logout",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "server",
+                "logout"
+              ]
+            },
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Sign out pm_runner: HTTP 200\", function () { pm.expect([200]).to.include(pm.response.code); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Forgot password (a visitor asks; the answer never says whether the account exists)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/server/forgot-password",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "server",
+                "forgot-password"
+              ]
+            },
+            "description": "",
+            "auth": {
+              "type": "noauth"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"username\": \"pm_runner\",\n  \"method\": \"admin_approval\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Forgot password (a visitor asks; the answer never says whether the account exists): HTTP 200\", function () { pm.expect([200]).to.include(pm.response.code); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Sign in again as {{username}}",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/server/login",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "server",
+                "login"
+              ]
+            },
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"username\": \"{{username}}\",\n  \"password\": \"{{password}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Sign in again as {{username}}: HTTP 200\", function () { pm.expect([200]).to.include(pm.response.code); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Password reset requests",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/admin/password-resets",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "admin",
+                "password-resets"
+              ]
+            },
+            "description": ""
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Password reset requests: HTTP 200\", function () { pm.expect([200]).to.include(pm.response.code); });",
+                  "try { pm.environment.set('resetId', pm.response.json().requests.find(r => r.username === 'pm_runner' && r.status === 'waiting').resetId); } catch (e) { console.log('could not save resetId', e); }"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Approve it: a one-time link to pass on",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/admin/password-resets/{{resetId}}/approve",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "admin",
+                "password-resets",
+                "{{resetId}}",
+                "approve"
+              ]
+            },
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Approve it: a one-time link to pass on: HTTP 200\", function () { pm.expect([200]).to.include(pm.response.code); });",
+                  "try { pm.environment.set('resetToken', pm.response.json().link.split('reset=')[1]); } catch (e) { console.log('could not save resetToken', e); }"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "The link sets a new password",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/server/reset-password",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "server",
+                "reset-password"
+              ]
+            },
+            "description": "",
+            "auth": {
+              "type": "noauth"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\"token\": \"{{resetToken}}\", \"password\": \"Postman-pass-2026-new\"}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"The link sets a new password: HTTP 200\", function () { pm.expect([200]).to.include(pm.response.code); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "The link works once",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/server/reset-password",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "server",
+                "reset-password"
+              ]
+            },
+            "description": "",
+            "auth": {
+              "type": "noauth"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\"token\": \"{{resetToken}}\", \"password\": \"Postman-pass-2026-new-2\"}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"The link works once: HTTP 400\", function () { pm.expect([400]).to.include(pm.response.code); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "A decided request cannot be decided again",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/admin/password-resets/{{resetId}}/reject",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "admin",
+                "password-resets",
+                "{{resetId}}",
+                "reject"
+              ]
+            },
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"A decided request cannot be decided again: HTTP 409\", function () { pm.expect([409]).to.include(pm.response.code); });"
                 ]
               }
             }
@@ -2686,6 +4326,37 @@
               }
             }
           ]
+        },
+        {
+          "name": "Who can see what (every user on every folder with a rule)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/admin/access-report",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "admin",
+                "access-report"
+              ]
+            },
+            "description": ""
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Who can see what (every user on every folder with a rule): HTTP 200\", function () { pm.expect([200]).to.include(pm.response.code); });",
+                  "pm.test('pm_runner may run in Postman', function () { pm.expect(pm.response.json().rows.some(r => r.username === 'pm_runner' && r.folder === 'Postman')).to.eql(true); });"
+                ]
+              }
+            }
+          ]
         }
       ]
     },
@@ -2794,6 +4465,52 @@
                 "type": "text/javascript",
                 "exec": [
                   "pm.test(\"List schedules: HTTP 200\", function () { pm.expect([200]).to.include(pm.response.code); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Try a delivery target: an unknown type is refused",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/server/schedules/delivery/test",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "server",
+                "schedules",
+                "delivery",
+                "test"
+              ]
+            },
+            "description": "SFTP: logs in and opens the folder; HTTP: checks the address; folder: checks it can write. Nothing is uploaded.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"target\": {\n    \"type\": \"ftp\",\n    \"host\": \"example.com\"\n  }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Try a delivery target: an unknown type is refused: HTTP 422\", function () { pm.expect([422]).to.include(pm.response.code); });"
                 ]
               }
             }
@@ -4902,6 +6619,127 @@
           ]
         },
         {
+          "name": "How two columns join, before saving",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/analytics/relationships/check",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "analytics",
+                "relationships",
+                "check"
+              ]
+            },
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"fromDataset\": \"{{dsOrders}}\",\n  \"fromColumn\": \"Branch\",\n  \"toDataset\": \"{{dsBranches}}\",\n  \"toColumn\": \"Code\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"How two columns join, before saving: HTTP 200\", function () { pm.expect([200]).to.include(pm.response.code); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Suggested relationships",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/analytics/relationships/suggest",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "analytics",
+                "relationships",
+                "suggest"
+              ]
+            },
+            "description": ""
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Suggested relationships: HTTP 200\", function () { pm.expect([200]).to.include(pm.response.code); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Change the relationship",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/analytics/relationships/{{relationshipId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "analytics",
+                "relationships",
+                "{{relationshipId}}"
+              ]
+            },
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"active\": true\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Change the relationship: HTTP 200\", function () { pm.expect([200]).to.include(pm.response.code); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
           "name": "One visual: amount by branch",
           "request": {
             "method": "POST",
@@ -5659,7 +7497,7 @@
             "description": "",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"content\": \"UEsDBBQAAAAIAAFZdF1hfqQcfgAAABgBAAAPAAAARGF0YU1vZGVsU2NoZW1hhY8xCoNAEEXfUcTaE9jFC6SxCxbGlURQI6sWIt4931HEQrBYdvfx/h9mJqThh6Ok1jsmYNY9kPMWKel3+jLeijeiGwt54i3rzYuMFeqrGeW1N+lEuVy04Hukncg6PWWiO7m9qKeS/dFvMfuq82H7jOLDbaczc9tz7cz2s/AHUEsDBBQAAAAIAAFZdF02PitejAEAAJQFAAANAAAAUmVwb3J0L0xheW91dM1Ty2rCQBQ9n1Jcu1AptHRnRZf2iVCaLiTGmBKT1KSPEPLvPXMzEyYTQdxJyDzu49xz7sxUGCBHAB8FIqRIuBvgDld4R8XVhtYcGWKsUWLJcc/oJmKAexxoSZi9o1VlDsX+y6wNEXc6cowJbjHSXhUbIeRcaP8N/cb7IxW/iRtjJowKriPOAat12f3pncktnf25PK7pM15fam8lwuit4HFMdBc8bfckeizzUO9zYRxSQ4CVpcjkNEi21leyz3qoMb05+SntAbWojijbnugzMl/TXnQqZ7Sk+HTOtFt3xjyFGdJ7YF3P6qpaf7FCIJ5nzluHkxprfLQV387KL9v82uFcyN904alF6DJf6VvQ6DK+SYu0EKR9j9HyyJmlnb7N5aZFwsCOeiDiRld1lb/QHutOuxXtk+pqmPPeZnKeeU9JpXFTZh6IGzgd7Pv7imqrs4/Sj0z4u8rs19vkmaxj3fKtmIbFlPcnFB2h3KdjSk5rvfw+TclN4ST6lO28hdj9nvrRiW7ar0B9Zq3+f1BLAQIUABQAAAAIAAFZdF1hfqQcfgAAABgBAAAPAAAAAAAAAAAAAACAAQAAAABEYXRhTW9kZWxTY2hlbWFQSwECFAAUAAAACAABWXRdNj4rXowBAACUBQAADQAAAAAAAAAAAAAAgAGrAAAAUmVwb3J0L0xheW91dFBLBQYAAAAAAgACAHgAAABiAgAAAAA=\",\n  \"name\": \"PM sales.pbit\"\n}",
+              "raw": "{\n  \"content\": \"UEsDBBQAAAAIAKZweF1hfqQcfgAAABgBAAAPAAAARGF0YU1vZGVsU2NoZW1hhY8xCoNAEEXfUcTaE9jFC6SxCxbGlURQI6sWIt4931HEQrBYdvfx/h9mJqThh6Ok1jsmYNY9kPMWKel3+jLeijeiGwt54i3rzYuMFeqrGeW1N+lEuVy04Hukncg6PWWiO7m9qKeS/dFvMfuq82H7jOLDbaczc9tz7cz2s/AHUEsDBBQAAAAIAKZweF02PitejAEAAJQFAAANAAAAUmVwb3J0L0xheW91dM1Ty2rCQBQ9n1Jcu1AptHRnRZf2iVCaLiTGmBKT1KSPEPLvPXMzEyYTQdxJyDzu49xz7sxUGCBHAB8FIqRIuBvgDld4R8XVhtYcGWKsUWLJcc/oJmKAexxoSZi9o1VlDsX+y6wNEXc6cowJbjHSXhUbIeRcaP8N/cb7IxW/iRtjJowKriPOAat12f3pncktnf25PK7pM15fam8lwuit4HFMdBc8bfckeizzUO9zYRxSQ4CVpcjkNEi21leyz3qoMb05+SntAbWojijbnugzMl/TXnQqZ7Sk+HTOtFt3xjyFGdJ7YF3P6qpaf7FCIJ5nzluHkxprfLQV387KL9v82uFcyN904alF6DJf6VvQ6DK+SYu0EKR9j9HyyJmlnb7N5aZFwsCOeiDiRld1lb/QHutOuxXtk+pqmPPeZnKeeU9JpXFTZh6IGzgd7Pv7imqrs4/Sj0z4u8rs19vkmaxj3fKtmIbFlPcnFB2h3KdjSk5rvfw+TclN4ST6lO28hdj9nvrRiW7ar0B9Zq3+f1BLAQIUABQAAAAIAKZweF1hfqQcfgAAABgBAAAPAAAAAAAAAAAAAACAAQAAAABEYXRhTW9kZWxTY2hlbWFQSwECFAAUAAAACACmcHhdNj4rXowBAACUBQAADQAAAAAAAAAAAAAAgAGrAAAAUmVwb3J0L0xheW91dFBLBQYAAAAAAgACAHgAAABiAgAAAAA=\",\n  \"name\": \"PM sales.pbit\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -5751,7 +7589,7 @@
             "description": "",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"content\": \"UEsDBBQAAAAIAAFZdF1hfqQcfgAAABgBAAAPAAAARGF0YU1vZGVsU2NoZW1hhY8xCoNAEEXfUcTaE9jFC6SxCxbGlURQI6sWIt4931HEQrBYdvfx/h9mJqThh6Ok1jsmYNY9kPMWKel3+jLeijeiGwt54i3rzYuMFeqrGeW1N+lEuVy04Hukncg6PWWiO7m9qKeS/dFvMfuq82H7jOLDbaczc9tz7cz2s/AHUEsDBBQAAAAIAAFZdF02PitejAEAAJQFAAANAAAAUmVwb3J0L0xheW91dM1Ty2rCQBQ9n1Jcu1AptHRnRZf2iVCaLiTGmBKT1KSPEPLvPXMzEyYTQdxJyDzu49xz7sxUGCBHAB8FIqRIuBvgDld4R8XVhtYcGWKsUWLJcc/oJmKAexxoSZi9o1VlDsX+y6wNEXc6cowJbjHSXhUbIeRcaP8N/cb7IxW/iRtjJowKriPOAat12f3pncktnf25PK7pM15fam8lwuit4HFMdBc8bfckeizzUO9zYRxSQ4CVpcjkNEi21leyz3qoMb05+SntAbWojijbnugzMl/TXnQqZ7Sk+HTOtFt3xjyFGdJ7YF3P6qpaf7FCIJ5nzluHkxprfLQV387KL9v82uFcyN904alF6DJf6VvQ6DK+SYu0EKR9j9HyyJmlnb7N5aZFwsCOeiDiRld1lb/QHutOuxXtk+pqmPPeZnKeeU9JpXFTZh6IGzgd7Pv7imqrs4/Sj0z4u8rs19vkmaxj3fKtmIbFlPcnFB2h3KdjSk5rvfw+TclN4ST6lO28hdj9nvrRiW7ar0B9Zq3+f1BLAQIUABQAAAAIAAFZdF1hfqQcfgAAABgBAAAPAAAAAAAAAAAAAACAAQAAAABEYXRhTW9kZWxTY2hlbWFQSwECFAAUAAAACAABWXRdNj4rXowBAACUBQAADQAAAAAAAAAAAAAAgAGrAAAAUmVwb3J0L0xheW91dFBLBQYAAAAAAgACAHgAAABiAgAAAAA=\",\n  \"name\": \"PM sales.pbit\",\n  \"folder\": \"Postman\",\n  \"pages\": [\n    0\n  ],\n  \"tables\": {\n    \"Orders\": {\n      \"dataset\": \"{{dsOrders}}\"\n    }\n  }\n}",
+              "raw": "{\n  \"content\": \"UEsDBBQAAAAIAKZweF1hfqQcfgAAABgBAAAPAAAARGF0YU1vZGVsU2NoZW1hhY8xCoNAEEXfUcTaE9jFC6SxCxbGlURQI6sWIt4931HEQrBYdvfx/h9mJqThh6Ok1jsmYNY9kPMWKel3+jLeijeiGwt54i3rzYuMFeqrGeW1N+lEuVy04Hukncg6PWWiO7m9qKeS/dFvMfuq82H7jOLDbaczc9tz7cz2s/AHUEsDBBQAAAAIAKZweF02PitejAEAAJQFAAANAAAAUmVwb3J0L0xheW91dM1Ty2rCQBQ9n1Jcu1AptHRnRZf2iVCaLiTGmBKT1KSPEPLvPXMzEyYTQdxJyDzu49xz7sxUGCBHAB8FIqRIuBvgDld4R8XVhtYcGWKsUWLJcc/oJmKAexxoSZi9o1VlDsX+y6wNEXc6cowJbjHSXhUbIeRcaP8N/cb7IxW/iRtjJowKriPOAat12f3pncktnf25PK7pM15fam8lwuit4HFMdBc8bfckeizzUO9zYRxSQ4CVpcjkNEi21leyz3qoMb05+SntAbWojijbnugzMl/TXnQqZ7Sk+HTOtFt3xjyFGdJ7YF3P6qpaf7FCIJ5nzluHkxprfLQV387KL9v82uFcyN904alF6DJf6VvQ6DK+SYu0EKR9j9HyyJmlnb7N5aZFwsCOeiDiRld1lb/QHutOuxXtk+pqmPPeZnKeeU9JpXFTZh6IGzgd7Pv7imqrs4/Sj0z4u8rs19vkmaxj3fKtmIbFlPcnFB2h3KdjSk5rvfw+TclN4ST6lO28hdj9nvrRiW7ar0B9Zq3+f1BLAQIUABQAAAAIAKZweF1hfqQcfgAAABgBAAAPAAAAAAAAAAAAAACAAQAAAABEYXRhTW9kZWxTY2hlbWFQSwECFAAUAAAACACmcHhdNj4rXowBAACUBQAADQAAAAAAAAAAAAAAgAGrAAAAUmVwb3J0L0xheW91dFBLBQYAAAAAAgACAHgAAABiAgAAAAA=\",\n  \"name\": \"PM sales.pbit\",\n  \"folder\": \"Postman\",\n  \"pages\": [\n    0\n  ],\n  \"tables\": {\n    \"Orders\": {\n      \"dataset\": \"{{dsOrders}}\"\n    }\n  }\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -8209,6 +10047,44 @@
           ]
         },
         {
+          "name": "Report Server logs: data taken out through API calls",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/server/logs/api-calls?limit=50",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "server",
+                "logs",
+                "api-calls"
+              ],
+              "query": [
+                {
+                  "key": "limit",
+                  "value": "50"
+                }
+              ]
+            },
+            "description": ""
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Report Server logs: data taken out through API calls: HTTP 200\", function () { pm.expect([200]).to.include(pm.response.code); });",
+                  "pm.test('API calls are recorded', function () { pm.expect(pm.response.json().totals.calls).to.be.above(0); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
           "name": "Report Server logs: downloads and capacity right now",
           "request": {
             "method": "GET",
@@ -8904,6 +10780,51 @@
                 "type": "text/javascript",
                 "exec": [
                   "pm.test(\"Delete API key: HTTP 200\", function () { pm.expect([200]).to.include(pm.response.code); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Delete team",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/admin/user-groups/{{groupId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "admin",
+                "user-groups",
+                "{{groupId}}"
+              ]
+            },
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Delete team: HTTP 200\", function () { pm.expect([200]).to.include(pm.response.code); });"
                 ]
               }
             }
