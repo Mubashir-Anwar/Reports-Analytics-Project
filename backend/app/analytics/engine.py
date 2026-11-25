@@ -18,7 +18,8 @@ from datetime import date, datetime, time as clock_time
 from decimal import Decimal
 from typing import Any
 
-from backend.app.analytics import importer, settings, store
+from backend.app.analytics import importer, ml, settings, store
+from backend.app.logs import LOG
 
 TYPE_PATTERN = re.compile(r"^[A-Z0-9_(), ]{1,60}$")
 AGG_SQL = {"sum": "SUM({c})", "avg": "AVG({c})", "min": "MIN({c})", "max": "MAX({c})", "count": "COUNT({c})",
@@ -247,7 +248,10 @@ def compile_query(visual: dict[str, Any], extra_filters: list[dict[str, Any]] | 
     if not order and group:
         bucketed = any(field.get("bucket") for field in visual["groupBy"])
         order = ([f"{g} ASC NULLS LAST" for g in group] if bucketed or not visual["values"] else ["v0 DESC NULLS LAST"])
-    limit = min(visual.get("limit") or settings.query_max_rows(), settings.query_max_rows())
+    analysis = visual.get("ml")
+    if analysis and analysis["model"] == "forecast":
+        order = ["g0 ASC NULLS LAST"] if group else order
+    limit = row_limit(visual)
 
     sql = f"SELECT {', '.join(select)} FROM read_parquet({importer.quote_path(base_path)}) AS t0"
     if plan.joins:
@@ -258,6 +262,8 @@ def compile_query(visual: dict[str, Any], extra_filters: list[dict[str, Any]] | 
         sql += " GROUP BY " + ", ".join(group)
     if order:
         sql += " ORDER BY " + ", ".join(order)
+    if analysis and analysis["model"] != "forecast":      # the same random sample every time
+        return f"SELECT * FROM ({sql}) USING SAMPLE reservoir({limit} ROWS) REPEATABLE (42)", params, out_columns, ignored
     sql += f" LIMIT {limit + 1}"
     return sql, params, out_columns, ignored
 
@@ -273,6 +279,24 @@ def _execute(con: Any, sql: str, params: list[Any]) -> list[tuple]:
         raise
     finally:
         timer.cancel()
+
+
+def row_limit(visual: dict[str, Any]) -> int:
+    if visual.get("ml"):
+        return ml.MAX_ROWS
+    return min(visual.get("limit") or settings.query_max_rows(), settings.query_max_rows())
+
+
+def _analyse(config: dict[str, Any], columns: list[dict[str, Any]], rows: list[tuple], ignored: list, started: float) -> dict[str, Any]:
+    try:
+        answer = ml.run(config, columns, rows)
+    except ml.MlError as exc:
+        return {"error": str(exc)}
+    except Exception:  # noqa: BLE001
+        LOG.exception("The analysis %s failed", config["model"])
+        return {"error": "The analysis could not be done with this data"}
+    return {"columns": columns, "rows": [], "rowCount": len(rows), "truncated": len(rows) >= ml.MAX_ROWS, "ml": answer,
+            "ignoredFilters": ignored, "durationMs": int((time.monotonic() - started) * 1000)}
 
 
 def run(visuals: list[dict[str, Any]], dashboard_filters: list[dict[str, Any]] | None = None) -> list[dict[str, Any]]:
@@ -294,7 +318,10 @@ def run(visuals: list[dict[str, Any]], dashboard_filters: list[dict[str, Any]] |
                 message = str(exc).split("\n")[0][:300]
                 results.append({"error": f"The query could not run: {message}"})
                 continue
-            limit = min(visual.get("limit") or settings.query_max_rows(), settings.query_max_rows())
+            if visual.get("ml"):
+                results.append(_analyse(visual["ml"], columns, rows, ignored, started))
+                continue
+            limit = row_limit(visual)
             results.append({"columns": columns, "rows": [[json_value(value) for value in row] for row in rows[:limit]],
                             "rowCount": min(len(rows), limit), "truncated": len(rows) > limit,
                             "ignoredFilters": ignored, "durationMs": int((time.monotonic() - started) * 1000)})

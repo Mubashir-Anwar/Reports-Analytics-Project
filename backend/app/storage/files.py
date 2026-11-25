@@ -15,6 +15,16 @@ def data_directory() -> Path:
     return Path(configured).expanduser().resolve() if configured else PROJECT_ROOT / "data"
 
 
+def long_path(path: Path) -> Path:
+    r"""Windows refuses paths over 259 characters (a deep install folder plus a long report ID) unless they start with \\?\ ."""
+    if os.name != "nt":
+        return path
+    text = os.path.abspath(path)
+    if text.startswith("\\\\?\\"):
+        return Path(text)
+    return Path("\\\\?\\UNC\\" + text[2:] if text.startswith("\\\\") else "\\\\?\\" + text)
+
+
 def report_definitions_directory() -> Path:
     return data_directory() / "reports"
 

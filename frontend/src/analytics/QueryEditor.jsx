@@ -274,7 +274,7 @@ export default function QueryEditor({ queryId, datasets, adapters = [], mayModel
           {live && (
             <label className="field"><span>Data adapter</span>
               <select value={connectionId} onChange={(e) => setConnectionId(e.target.value)}>
-                {fitting.length === 0 && <option value="">No {kind === 'mongo' ? 'MongoDB' : 'SQL'} data adapter (Admin → Data sources)</option>}
+                {fitting.length === 0 && <option value="">No {kind === 'mongo' ? 'MongoDB' : 'SQL'} data adapter (Analytics → Data sources)</option>}
                 {fitting.map((a) => <option key={a.id} value={a.id}>{a.name} ({a.type || 'mongodb'})</option>)}
               </select>
             </label>

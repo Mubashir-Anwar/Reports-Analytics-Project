@@ -24,6 +24,8 @@ __all__ = ['get_connection', 'test_mongo_connection', 'chosen_connection', 'acce
 def get_connection(ctx: SimpleNamespace, connection_id: str) -> tuple[MongoClient, str]:
     profiles = {item["id"]: item for item in load_connection_profiles()}
     profile = profiles.get(connection_id)
+    if profile is None and connection_id in ("", "default"):
+        raise HTTPException(status_code=422, detail="No data source is chosen yet: add one (Server > Data sources) and choose it")
     if profile is None:
         raise HTTPException(status_code=400, detail=f"MongoDB connection ID is not registered: {connection_id}")
     if profile.get("type", "mongodb") != "mongodb":
@@ -170,10 +172,14 @@ def test_mongo_connection(ctx: SimpleNamespace, uri: str, database: str, connect
 def chosen_connection(ctx: SimpleNamespace, payload: dict[str, Any], definition: ReportDefinition) -> str:
     """Data adapter for an admin preview/run: the one picked in the UI, else the report's own."""
     requested = str(payload.get("connectionId") or "").strip()
-    if not requested:
+    published = dict.get(ctx.reports_by_id, definition.ref) is definition
+    if not requested or (published and requested == definition.connection_id):
+        if not published and definition.query_language != "none":
+            ctx.require_area(definition.connection_id, "designer")
         return definition.connection_id
     if requested not in {item["id"] for item in load_connection_profiles()}:
         raise ValueError(f"Data adapter is not registered: {requested}")
+    ctx.require_area(requested, "designer")
     return requested
 
 
@@ -190,7 +196,7 @@ def connection_summary(ctx: SimpleNamespace, connection_id: str) -> dict[str, An
         return {"id": connection_id, "name": connection_id, "missing": True}
     uri, database = _profile_credentials(profile)
     return {"id": profile["id"], "name": profile["name"], "type": profile.get("type", "mongodb"), "folder": profile.get("folder", ""),
-            "storage": profile.get("storage", "env"), "configured": bool(uri and (database or profile.get("type", "mongodb") != "mongodb")),
+            "area": profile.get("area", ""), "storage": profile.get("storage", "env"), "configured": bool(uri and (database or profile.get("type", "mongodb") != "mongodb")),
             "database": profile.get("database", "") if profile.get("storage") == "file" else f"from ${profile.get('databaseEnv', '')}"}
 
 

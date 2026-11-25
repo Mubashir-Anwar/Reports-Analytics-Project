@@ -14,7 +14,7 @@ from backend.app import reset_password  # noqa: E402
 from backend.app.rendering import spool  # noqa: E402
 from backend.app.services.capacity import RunGate, caller_of  # noqa: E402
 from test_access_rights import ADMIN_HEADERS, make_user, sign_in  # noqa: E402
-from test_workspace_and_server import ADMIN, client, login  # noqa: E402,F401
+from test_workspace_and_server import ADMIN, client, login, setup_login  # noqa: E402,F401
 
 
 # ---------------------------------------------------------------- report places
@@ -118,7 +118,7 @@ def test_background_csv_over_the_row_limit_is_written_to_disk(client, monkeypatc
     monkeypatch.setattr(ctx, "iter_report_rows", many)
     runner = ctx.job_runner
     runner.inline = True
-    assert login(client, "admin", ADMIN).status_code == 200
+    assert setup_login(client).status_code == 200
     done = client.post("/api/server/reports/R1/background", json={"format": "csv", "parameters": {}})
     assert done.status_code == 200, done.text
     run = done.json()["run"]

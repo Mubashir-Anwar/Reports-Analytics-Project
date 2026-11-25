@@ -50,11 +50,6 @@ def create_context() -> SimpleNamespace:
 
     @asynccontextmanager
     async def lifespan(_app: FastAPI):
-        try:
-            ctx.get_connection("default")
-            LOG.info("Default MongoDB connection ready")
-        except HTTPException as exc:
-            LOG.warning("Default MongoDB connection unavailable: %s", exc.detail)
         ctx.analytics_refresher.recover()  # imports cut off by a restart
         ctx.job_runner.start()  # scheduled reports and background runs (its loop also starts due dataset refreshes)
         yield

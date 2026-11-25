@@ -44,7 +44,7 @@ export default function DataStart({ report, dispatch, notify, onNext, onClose })
 
   const load = async () => {
     try {
-      const [c, f] = await Promise.all([api.connections(), api.folders()]);
+      const [c, f] = await Promise.all([api.connections('designer'), api.folders()]);
       setAdapters(c.connections || []);
       setFolders([...new Set([...(f.folders || []), ...(c.connections || []).map((a) => a.folder).filter(Boolean)])].sort());
     } catch (error) { setAdapters([]); notify(`Could not load data adapters: ${error.message}`, 'error'); }
@@ -89,11 +89,11 @@ export default function DataStart({ report, dispatch, notify, onNext, onClose })
   const save = async () => {
     setBusy('save');
     try {
-      await api.saveConnection({ type, id, name: form.name.trim(), uri, database, folder: form.folder });
+      const { connection } = await api.saveConnection({ type, id, name: form.name.trim(), uri, database, folder: form.folder, area: 'designer', create: true });
       notify(`Data adapter “${form.name.trim()}” created`, 'ok');
-      use({ id, name: form.name.trim(), type });
+      use({ id: connection.id, name: form.name.trim(), type });
     } catch (error) {
-      setResult({ ok: false, text: error.status === 403 ? 'Saving a data adapter needs the admin token (Server → sign in as admin)' : error.message });
+      setResult({ ok: false, text: error.message });
       setBusy('');
     }
   };
@@ -124,7 +124,7 @@ export default function DataStart({ report, dispatch, notify, onNext, onClose })
           <button type="button" className="ds-x" onClick={onClose} title="Close (Esc): choose the adapter later in Setup" aria-label="Close">✕</button>
           <p className="ds-kicker">Step 1 of 5 · Data adapter</p>
           <h2>Where does the data live?</h2>
-          <p className="muted">Use a saved data adapter, or connect a new database. You can change it later in Setup → Data adapter.</p>
+          <p className="muted">Use a data adapter of the Designer, or connect a new database. You can change it later in Setup → Data adapter.</p>
         </header>
 
         <div className="ds-split">

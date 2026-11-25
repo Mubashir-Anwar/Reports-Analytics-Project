@@ -7,6 +7,7 @@ from typing import Any
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import Response
 
+from backend.app import fonts as own_fonts, patterns as own_patterns
 from backend.app.connectors import sql as sql_connector
 from backend.app.connectors.errors import ConnectorQueryError
 from backend.app.constants import OUTPUT_FORMATS, REPORT_ID_PATTERN
@@ -43,7 +44,9 @@ def register(app: FastAPI, ctx: SimpleNamespace) -> None:
             prepared = prepare_sql(payload.get("querySource"))
         except ValueError as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from None
-        kind, url = sql_adapter(str(payload.get("connectionId") or "").strip())
+        connection_id = str(payload.get("connectionId") or "").strip()
+        ctx.require_area(connection_id, "designer")
+        kind, url = sql_adapter(connection_id)
         try:
             columns = sql_connector.describe(kind, url, prepared)
         except ConnectorQueryError as exc:
@@ -119,6 +122,92 @@ def register(app: FastAPI, ctx: SimpleNamespace) -> None:
             return export_jrxml(payload)
         except ValueError as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from None
+
+    @app.get("/api/admin/fonts")
+    def admin_fonts(request: Request) -> dict[str, Any]:
+        """The own fonts of this server (added in the Designer, used in the canvas, PDF and Excel)."""
+        require_admin(request, "designer")
+        return {"fonts": own_fonts.list_fonts()}
+
+    @app.get("/api/admin/fonts/{font_id}/file")
+    def admin_font_file(font_id: str, request: Request) -> Response:
+        """One font file, for the designer's canvas."""
+        require_admin(request, "designer")
+        raw = own_fonts.font_file(font_id)
+        if raw is None:
+            raise HTTPException(status_code=404, detail="There is no such font")
+        return Response(raw, media_type="font/ttf", headers={"Cache-Control": "private, max-age=86400", "X-Content-Type-Options": "nosniff"})
+
+    @app.post("/api/admin/fonts")
+    async def admin_add_font(request: Request) -> dict[str, Any]:
+        """Add a TrueType font: {file: base64 or data URL, fileName, family?, style?}. The same family and style is replaced."""
+        require_admin(request, "designer")
+        payload = await json_body(request)
+        from starlette.concurrency import run_in_threadpool
+        try:
+            font = await run_in_threadpool(own_fonts.add_font, payload.get("file"), str(payload.get("fileName") or ""),
+                                           str(payload.get("family") or ""), str(payload.get("style") or ""),
+                                           getattr(request.state, "actor", ""))
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from None
+        ctx.audit_event(request, "font.added", font["family"], {"style": font["style"], "bytes": font["bytes"]})
+        return {"font": font, "fonts": own_fonts.list_fonts(fresh=True)}
+
+    @app.delete("/api/admin/fonts/{font_id}")
+    def admin_delete_font(font_id: str, request: Request) -> dict[str, Any]:
+        """Remove a font file (an administrator, or the person who added it). Reports with it print in SansSerif."""
+        role = require_admin(request, "designer")
+        found = next((item for item in own_fonts.list_fonts(fresh=True) if item["id"] == font_id), None)
+        if found is None:
+            raise HTTPException(status_code=404, detail="There is no such font")
+        if role != "admin" and found.get("by") != getattr(request.state, "actor", ""):
+            raise HTTPException(status_code=403, detail="Only an administrator or the person who added this font can remove it")
+        own_fonts.delete_font(font_id)
+        ctx.audit_event(request, "font.removed", found["family"], {"style": found["style"]})
+        return {"fonts": own_fonts.list_fonts(fresh=True)}
+
+    @app.get("/api/admin/patterns")
+    def admin_patterns(request: Request) -> dict[str, Any]:
+        """The saved format patterns of this server (Designer → Format pattern → Custom)."""
+        require_admin(request, "designer")
+        return {"patterns": own_patterns.list_patterns()}
+
+    def own_pattern(pattern_id: str, request: Request) -> dict[str, Any]:
+        """A saved pattern this person may change: an administrator, or the person who added it."""
+        role = require_admin(request, "designer")
+        found = next((item for item in own_patterns.list_patterns() if item["id"] == pattern_id), None)
+        if found is None:
+            raise HTTPException(status_code=404, detail="There is no such pattern")
+        if role != "admin" and found.get("by") != getattr(request.state, "actor", ""):
+            raise HTTPException(status_code=403, detail="Only an administrator or the person who added this pattern can change it")
+        return found
+
+    def save_own_pattern(request: Request, payload: dict[str, Any], replace: dict[str, Any] | None = None) -> dict[str, Any]:
+        try:
+            item = own_patterns.save_pattern(payload.get("name"), payload.get("pattern"), getattr(request.state, "actor", ""), replace)
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from None
+        ctx.audit_event(request, "pattern.changed" if replace else "pattern.added", item["name"], {"pattern": item["pattern"]})
+        return {"pattern": item, "patterns": own_patterns.list_patterns()}
+
+    @app.post("/api/admin/patterns")
+    async def admin_add_pattern(request: Request) -> dict[str, Any]:
+        """Save a format pattern for every report: {name, pattern}, e.g. {"name": "Bank amount", "pattern": "#,##0.00"}."""
+        require_admin(request, "designer")
+        return save_own_pattern(request, await json_body(request))
+
+    @app.put("/api/admin/patterns/{pattern_id}")
+    async def admin_change_pattern(pattern_id: str, request: Request) -> dict[str, Any]:
+        """Change a saved pattern: {name, pattern}. Reports keep the format they have."""
+        return save_own_pattern(request, await json_body(request), own_pattern(pattern_id, request))
+
+    @app.delete("/api/admin/patterns/{pattern_id}")
+    def admin_delete_pattern(pattern_id: str, request: Request) -> dict[str, Any]:
+        """Remove a saved pattern. Reports keep the format they have."""
+        found = own_pattern(pattern_id, request)
+        own_patterns.delete_pattern(pattern_id)
+        ctx.audit_event(request, "pattern.removed", found["name"], {"pattern": found["pattern"]})
+        return {"patterns": own_patterns.list_patterns()}
 
     @app.post("/api/admin/designer/import-design")
     async def admin_import_design(request: Request) -> dict[str, Any]:

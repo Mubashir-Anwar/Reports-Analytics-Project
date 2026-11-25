@@ -19,6 +19,29 @@ def _profile_credentials(profile: dict[str, str]) -> tuple[str, str]:
     return os.getenv(profile.get("uriEnv", ""), "").strip(), os.getenv(profile.get("databaseEnv", ""), "").strip()
 
 
+DEFAULT_REMOVED = "meta/default-adapter.json"
+
+
+def _env_default() -> bool:
+    if not (os.getenv("MONGODB_URI", "").strip() and os.getenv("MONGODB_DATABASE", "").strip()):
+        return False
+    return not (get_store().read_json(DEFAULT_REMOVED) or {}).get("removed")
+
+
+# The part of the product a data source belongs to: it works only there (services/adapter_areas.py).
+AREAS = ("designer", "server", "analytics", "query")
+AREA_NAMES = {"designer": "the Designer", "server": "the Report Server", "analytics": "Analytics", "query": "Query"}
+
+
+def usable(profile: dict[str, str], area: str) -> bool:
+    """May `area` use this data source? "" = one from before areas: every part may."""
+    return profile.get("area", "") in ("", area)
+
+
+def profiles_in(area: str) -> list[dict[str, str]]:
+    return [item for item in load_connection_profiles() if usable(item, area)]
+
+
 def load_connection_profiles() -> list[dict[str, str]]:
     profiles: list[dict[str, str]] = []
     raw = get_store().read_json("connections.json")
@@ -50,6 +73,8 @@ def load_connection_profiles() -> list[dict[str, str]]:
                     and ENV_KEY_PATTERN.fullmatch(profile["uriEnv"])
                     and ENV_KEY_PATTERN.fullmatch(profile["databaseEnv"])
                 )
+            if str(item.get("area") or "") in AREAS:
+                profile["area"] = str(item["area"])
             folder = str(item.get("folder", "") or "").strip()
             if folder:
                 try:
@@ -58,7 +83,9 @@ def load_connection_profiles() -> list[dict[str, str]]:
                     LOG.warning("Data adapter %s has an invalid folder; it is shown at the top level", profile["id"])
             if valid:
                 profiles.append(profile)
-    if not any(item["id"] == "default" for item in profiles):
+    # No data source is there by itself. Older installations that set MONGODB_URI / MONGODB_DATABASE keep their
+    # "default" one until somebody deletes it.
+    if not any(item["id"] == "default" for item in profiles) and _env_default():
         profiles.insert(0, {
             "id": "default",
             "name": "Default MongoDB",

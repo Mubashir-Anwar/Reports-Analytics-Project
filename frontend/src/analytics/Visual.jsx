@@ -3,13 +3,15 @@
 // Text uses the theme's text colours, never a series colour; one value axis only; a legend from 2 series on.
 import { useEffect, useMemo, useRef, useState } from 'react';
 import * as echarts from 'echarts/core';
-import { BarChart, LineChart, PieChart, ScatterChart } from 'echarts/charts';
-import { GridComponent, LegendComponent, TooltipComponent } from 'echarts/components';
+import { BarChart, EffectScatterChart, HeatmapChart, LineChart, MapChart, PieChart, ScatterChart } from 'echarts/charts';
+import { GeoComponent, GridComponent, LegendComponent, TooltipComponent, VisualMapComponent } from 'echarts/components';
 import { CanvasRenderer } from 'echarts/renderers';
 import { useLook } from '../shared/ThemeMenu.jsx';
 import { formatNumber } from './api.js';
+import MlResult, { mlOption } from './MlResult.jsx';
+import { countryOf, loadWorld, placeOf } from './worldMap.js';
 
-echarts.use([BarChart, LineChart, PieChart, ScatterChart, GridComponent, LegendComponent, TooltipComponent, CanvasRenderer]);
+echarts.use([BarChart, EffectScatterChart, HeatmapChart, LineChart, MapChart, PieChart, ScatterChart, GeoComponent, GridComponent, LegendComponent, TooltipComponent, VisualMapComponent, CanvasRenderer]);
 
 const SERIES = {
   light: ['#2a78d6', '#eb6834', '#1baf7a', '#eda100', '#e87ba4', '#008300', '#6250d6', '#e34948'],
@@ -54,7 +56,63 @@ function shape(result) {
   };
 }
 
-function chartOption(tile, result, colors) {
+/** Map: countries coloured by value, and bubbles (latitude / longitude columns, or well-known places by name). */
+export function mapData(tile, result) {
+  const g = result.columns.filter((c) => c.role === 'group').length;
+  const countries = new Map(); const points = []; const unknown = [];
+  for (const row of result.rows) {
+    const value = row[g];
+    if (tile.options?.mapBy === 'points') {
+      const lat = Number(row[0]); const lon = Number(row[1]);
+      if (row[0] === null || row[1] === null || !(Math.abs(lat) <= 90) || !(Math.abs(lon) <= 180)) { unknown.push(`${label(row[0])}, ${label(row[1])}`); continue; }
+      points.push({ name: g > 2 ? label(row[2]) : `${lat}, ${lon}`, value: [lon, lat, value] });
+      continue;
+    }
+    const country = countryOf(row[0]);
+    const place = country ? null : placeOf(row[0]);
+    if (country) {
+      const found = countries.get(country);
+      countries.set(country, found ? { ...found, value: (found.value || 0) + (value || 0) } : { name: country, value, raw: row[0] });
+    } else if (place) points.push({ name: label(row[0]), raw: row[0], value: [...place, value] });
+    else unknown.push(label(row[0]));
+  }
+  return { countries: [...countries.values()], points, unknown };
+}
+
+function mapOption(tile, result, colors, dark) {
+  const { countries, points } = mapData(tile, result);
+  const fmt = (v) => formatNumber(v, tile.options?.format);
+  const name = result.columns.find((c) => c.role === 'value')?.label || '';
+  const spread = (list) => { const n = list.filter((v) => typeof v === 'number'); return [Math.min(0, ...n), Math.max(...n, 1e-9)]; };
+  const [low, high] = spread(countries.map((c) => c.value));
+  const [, most] = spread(points.map((p) => Math.abs(p.value[2] || 0)));
+  // points only: zoom to where they are
+  let zoom = {};
+  if (points.length && !countries.length) {
+    const lons = points.map((p) => p.value[0]); const lats = points.map((p) => p.value[1]);
+    const pad = Math.max(3, (Math.max(...lons) - Math.min(...lons)) * 0.2, (Math.max(...lats) - Math.min(...lats)) * 0.2);
+    zoom = { boundingCoords: [[Math.max(-180, Math.min(...lons) - pad), Math.min(85, Math.max(...lats) + pad)], [Math.min(180, Math.max(...lons) + pad), Math.max(-60, Math.min(...lats) - pad)]] };
+  }
+  const land = dark ? '#2b3347' : '#e6eaf2';
+  const tip = { backgroundColor: colors.panel, borderColor: colors.line, textStyle: { color: colors.text, fontSize: 12 } };
+  return {
+    tooltip: { ...tip, trigger: 'item', formatter: (p) => { const v = Array.isArray(p.value) ? p.value[2] : p.value; return Number.isFinite(v) ? `${p.name}<br>${name}: <b>${fmt(v)}</b>` : p.name; } },
+    visualMap: countries.length ? { type: 'continuous', min: low, max: high, seriesIndex: 0, left: 6, bottom: 6, itemHeight: 70, itemWidth: 10, calculable: false, text: [fmt(high), fmt(low)],
+      textStyle: { color: colors.muted, fontSize: 11 }, inRange: { color: dark ? ['#1c3a63', '#6db1ff'] : ['#cfe2fa', '#1551a3'] } } : undefined,
+    geo: { map: 'world', roam: true, scaleLimit: { min: 0.8, max: 40 }, top: 4, bottom: 4, left: 4, right: 4, ...(zoom.boundingCoords ? zoom : { boundingCoords: [[-170, 80], [190, -56]] }),
+      itemStyle: { areaColor: land, borderColor: colors.panel, borderWidth: 0.6 }, emphasis: { itemStyle: { areaColor: undefined }, label: { show: false } }, select: { disabled: true }, label: { show: false } },
+    series: [
+      { type: 'map', geoIndex: 0, data: countries },
+      { type: 'scatter', coordinateSystem: 'geo', data: points, symbolSize: (v) => 7 + 25 * Math.sqrt(Math.abs(v[2] || 0) / most),
+        itemStyle: { color: colors.series[1], opacity: 0.75, borderColor: colors.panel, borderWidth: 1 },
+        label: { show: points.length <= 15 && tile.options?.labels !== false, formatter: '{b}', position: 'right', color: colors.text, fontSize: 11 }, emphasis: { itemStyle: { opacity: 1 } } },
+    ],
+  };
+}
+
+function chartOption(tile, result, colors, dark) {
+  if (tile.type === 'ml') return mlOption(result.ml, colors);
+  if (tile.type === 'map') return mapOption(tile, result, colors, dark);
   const format = tile.options?.format || '';
   const fmt = (v) => formatNumber(v, format);
   const axisText = { color: colors.muted, fontSize: 11 };
@@ -130,7 +188,7 @@ function Chart({ tile, result, selected, onPick }) {
   const [look] = useLook();
   const dark = look.mode === 'dark' || (look.mode === 'system' && window.ReportingLook.isDark());
   // eslint-disable-next-line react-hooks/exhaustive-deps -- look: the theme's CSS colours changed
-  const option = useMemo(() => chartOption(tile, result, themeColors(dark)), [tile, result, dark, look]);
+  const option = useMemo(() => chartOption(tile, result, themeColors(dark), dark), [tile, result, dark, look]);
 
   useEffect(() => {
     chart.current = echarts.init(box.current, null, { renderer: 'canvas' });
@@ -143,7 +201,8 @@ function Chart({ tile, result, selected, onPick }) {
     const instance = chart.current;
     if (!instance) return undefined;
     const handler = (params) => {
-      if (!onPick || tile.type === 'scatter') return;
+      if (!onPick || tile.type === 'scatter' || tile.type === 'ml') return;
+      if (tile.type === 'map') { if (params.data && 'raw' in params.data) onPick(params.data.raw); return; }
       if (tile.type === 'pie' || tile.type === 'donut') { if (!params.data?.other) onPick(params.data?.raw ?? null); return; }
       const { raw } = shape(result);
       onPick(raw[params.dataIndex] ?? null);
@@ -156,7 +215,7 @@ function Chart({ tile, result, selected, onPick }) {
     const instance = chart.current;
     if (!instance) return;
     instance.dispatchAction({ type: 'downplay' });
-    if (selected !== undefined) {
+    if (selected !== undefined && tile.type !== 'ml' && tile.type !== 'map') {
       const { raw } = shape(result);
       const index = tile.type === 'pie' || tile.type === 'donut'
         ? (option.series[0].data || []).findIndex((item) => item.raw === selected)
@@ -165,6 +224,19 @@ function Chart({ tile, result, selected, onPick }) {
     }
   }, [selected, result, option, tile.type]);
   return <div ref={box} className="viz-chart" role="img" aria-label={tile.title || 'Chart'} />;
+}
+
+function MapVisual(props) {
+  const [state, setState] = useState('loading');
+  useEffect(() => { loadWorld().then(() => setState('ready')).catch(() => setState('failed')); }, []);
+  if (state !== 'ready') return <div className="viz-empty">{state === 'failed' ? 'The map could not be loaded. Reload the page.' : 'Loading the map…'}</div>;
+  const { unknown, countries, points } = mapData(props.tile, props.result);
+  return (
+    <div className="viz-map">
+      <Chart {...props} />
+      {unknown.length > 0 && <small className="muted" title={unknown.slice(0, 40).join(', ')}>{countries.length + points.length === 0 ? 'None of these places is known. Use country names, or latitude and longitude columns. ' : ''}Not on the map: {unknown.slice(0, 3).join(', ')}{unknown.length > 3 ? ` and ${unknown.length - 3} more` : ''}</small>}
+    </div>
+  );
 }
 
 function Kpi({ tile, result }) {
@@ -221,12 +293,14 @@ function Slicer({ result, chosen, onChange }) {
 }
 
 /** The body of a tile. `picked` = the value this tile filtered the dashboard by (cross-filter), `onPick(value)` to change it. */
-export default function Visual({ tile, result, picked, onPick, slicerValues, onSlicer }) {
+export default function Visual({ tile, result, picked, onPick, slicerValues, onSlicer, full }) {
   if (!result) return <div className="viz-empty">Loading…</div>;
   if (result.error) return <div className="viz-empty error" role="alert">{result.error}</div>;
+  if (tile.type === 'ml') return result.ml ? <MlResult ml={result.ml} full={full} truncated={result.truncated} chart={<Chart tile={tile} result={result} />} /> : <div className="viz-empty">Choose an analysis</div>;
   if (!result.rows.length && tile.type !== 'slicer') return <div className="viz-empty">No data for these filters</div>;
   if (tile.type === 'kpi') return <Kpi tile={tile} result={result} />;
   if (tile.type === 'table') return <Table tile={tile} result={result} selected={picked} onPick={onPick} />;
   if (tile.type === 'slicer') return <Slicer result={result} chosen={slicerValues} onChange={onSlicer} />;
+  if (tile.type === 'map') return <MapVisual tile={tile} result={result} selected={picked} onPick={tile.options?.mapBy === 'points' ? undefined : onPick} />;
   return <Chart tile={tile} result={result} selected={picked} onPick={onPick} />;
 }

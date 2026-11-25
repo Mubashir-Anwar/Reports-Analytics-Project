@@ -1,6 +1,7 @@
 // "Publish to server": choose the repository folder in a tree (like Jaspersoft Studio's publish wizard)
 // and check a summary of what goes to the server.
 import { useMemo, useState } from 'react';
+import { TargetPicker } from './shared/TakeAdapter.jsx';
 import { bandKeys, bandLabel, bandPresent, getBand } from './designModel.js';
 
 /** All folders and their parents, sorted, as tree rows { path, name, depth }. */
@@ -76,6 +77,11 @@ export default function PublishDialog({ publishing, setPublishing, report, desig
               {summary.subreports.length > 0 && <><dt>Subreports</dt><dd>{summary.subreports.join(', ')} <small>(must be on the server too)</small></dd></>}
               <dt>Run it at</dt><dd><code>/server</code> · <code>/generate/{report.id}.pdf{folder ? `?Folder=${folder}` : ''}</code></dd>
             </dl>
+            {publishing.sources?.length > 0 && <div className="publish-sources">
+              <div className="prop-section">Data source on the Server</div>
+              <small className="muted">The Designer’s data adapters work only in the Designer. Choose what the report reads from on the Server.</small>
+              {publishing.sources.map((source) => <TargetPicker key={source.id} source={source} area="server" value={publishing.picked[source.id]} onChange={(value) => set({ picked: { ...publishing.picked, [source.id]: value } })} />)}
+            </div>}
             {publishing.onServer && (
               <label className="modal-check warn-box"><input type="checkbox" checked={publishing.replace} onChange={(e) => set({ replace: e.target.checked })} /> {report.id} is already on the server — replace that version</label>
             )}
@@ -84,7 +90,7 @@ export default function PublishDialog({ publishing, setPublishing, report, desig
         {publishing.error && <p className="err">{publishing.error}</p>}
         <div className="row">
           <button className="btn" disabled={publishing.busy} onClick={() => setPublishing(null)}>Cancel</button>
-          <button className="btn primary" disabled={publishing.busy || !folder || (publishing.onServer && !publishing.replace)} onClick={onConfirm}>{publishing.busy ? 'Publishing…' : 'Publish'}</button>
+          <button className="btn primary" disabled={publishing.busy || !folder || (publishing.sources || []).some((s) => !publishing.picked[s.id]) || (publishing.onServer && !publishing.replace)} onClick={onConfirm}>{publishing.busy ? 'Publishing…' : 'Publish'}</button>
         </div>
       </div>
     </div>

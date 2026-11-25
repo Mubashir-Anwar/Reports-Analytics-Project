@@ -28,7 +28,7 @@ export default function DatasetsEditor({ state, dispatch, notify, initialName })
   const [adapters, setAdapters] = useState([]);
   const [busy, setBusy] = useState(false);
   const [nameDraft, setNameDraft] = useState('');
-  useEffect(() => { api.connections().then((r) => setAdapters(r.connections || [])).catch(() => setAdapters([])); }, []);
+  useEffect(() => { api.connections('designer').then((r) => setAdapters(r.connections || [])).catch(() => setAdapters([])); }, []);
   const dataset = datasets.find((d) => d.name === current) || null;
   useEffect(() => { setNameDraft(dataset?.name || ''); }, [dataset?.name]);
 

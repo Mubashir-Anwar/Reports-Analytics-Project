@@ -8,7 +8,7 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from test_workspace_and_server import ADMIN, PUBLISHED, client, login, token  # noqa: E402,F401
+from test_workspace_and_server import ADMIN, PUBLISHED, client, login, setup_login, token  # noqa: E402,F401
 
 PASSWORD = "Passw0rd-long-enough"
 ADMIN_HEADERS = {"X-Admin-Token": ADMIN}
@@ -23,7 +23,8 @@ def publish(client, report_id, folder, **extra):
 def as_user(client, username):
     client.post("/api/server/logout", json={})
     client.cookies.clear()
-    assert login(client, username, ADMIN if username == "admin" else PASSWORD).status_code == 200
+    signed_in = setup_login(client) if username == "admin" else login(client, username, PASSWORD)
+    assert signed_in.status_code == 200
 
 
 def set_rules(client, path, users=None, roles=None):

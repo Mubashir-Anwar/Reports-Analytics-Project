@@ -78,7 +78,13 @@ export const api = {
       ? request('/api/admin/reports', { method: 'POST', body: definition })
       : request(`/api/admin/reports/${encodeURIComponent(definition.id)}`, { method: 'PUT', body: definition }),
   deleteReport: (id, folder) => request(withQuery(`/api/admin/reports/${encodeURIComponent(id)}`, inFolder(folder)), { method: 'DELETE' }),
-  connections: () => request('/api/data-sources'),
+  /** The data sources of one part (designer, server, analytics, query); without an area all this account may see. */
+  connections: (area) => request(`/api/data-sources${area ? `?area=${area}` : ''}`),
+  copyConnection: (id, area, name) => request(`/api/data-sources/${encodeURIComponent(id)}/copy`, { method: 'POST', body: { area, name } }),
+  connectionTargets: (id, area) => request(`/api/data-sources/${encodeURIComponent(id)}/targets?area=${area}`),
+  useConnectionIn: (id, area, connectionId) => request(`/api/data-sources/${encodeURIComponent(id)}/use-in`, { method: 'POST', body: { area, connectionId } }),
+  setConnectionArea: (id, area) => request(`/api/data-sources/${encodeURIComponent(id)}/area`, { method: 'PUT', body: { area } }),
+  splitConnection: (id) => request(`/api/data-sources/${encodeURIComponent(id)}/split`, { method: 'POST', body: {} }),
   systemStatus: () => request('/api/admin/system/status'),
   saveConnection: (payload) => request('/api/data-sources', { method: 'POST', body: payload }),
   testConnectionValues: (payload) => request('/api/data-sources/test', { method: 'POST', body: payload }),
@@ -86,6 +92,15 @@ export const api = {
   deleteConnection: (id) => request(`/api/data-sources/${encodeURIComponent(id)}`, { method: 'DELETE' }),
   /** A .jrxml and the pictures it uses ({ 'logo.png': dataURL }): image elements get the matching file. */
   importJrxml: (xml, resources = {}) => request('/api/admin/jrxml/import', { method: 'POST', body: { xml, resources } }),
+  /** Own fonts of this server (TrueType files): used on the canvas, in PDF and Excel. */
+  fonts: () => request('/api/admin/fonts'),
+  addFont: (payload) => request('/api/admin/fonts', { method: 'POST', body: payload }),
+  /** Saved format patterns, shared by everyone who designs reports. */
+  patterns: () => request('/api/admin/patterns'),
+  addPattern: (payload) => request('/api/admin/patterns', { method: 'POST', body: payload }),
+  changePattern: (id, payload) => request(`/api/admin/patterns/${encodeURIComponent(id)}`, { method: 'PUT', body: payload }),
+  deletePattern: (id) => request(`/api/admin/patterns/${encodeURIComponent(id)}`, { method: 'DELETE', body: {} }),
+  deleteFont: (id) => request(`/api/admin/fonts/${encodeURIComponent(id)}`, { method: 'DELETE', body: {} }),
   /** Query workspace (/query): browse a data adapter and run read-only queries. */
   mongoCollections: (connectionId) => request('/api/query/mongo/collections', { method: 'POST', body: { connectionId } }),
   mongoFind: (body) => request('/api/query/mongo/find', { method: 'POST', body }),

@@ -1,9 +1,7 @@
 // The query helper panel on the right of a result: drop a column header on Filter, Columns or Sort.
 // Filter rows get an operator and a value; Apply writes the query (Mongo find or SQL) and runs it.
 import { useState } from 'react';
-import { FIELD_MIME, NO_VALUE, OPS, newFilter } from './queryHelper.js';
-
-const dropped = (event) => event.dataTransfer.getData(FIELD_MIME) || '';
+import { FIELD_MIME, NO_VALUE, OPS, TYPES, newFilter, readDrag, withType } from './queryHelper.js';
 
 function Zone({ title, hint, icon, onDropField, empty, children, count }) {
   const [over, setOver] = useState(false);
@@ -11,7 +9,7 @@ function Zone({ title, hint, icon, onDropField, empty, children, count }) {
     <section className={`qh-zone ${over ? 'over' : ''}`}
       onDragOver={(e) => { if (e.dataTransfer.types.includes(FIELD_MIME)) { e.preventDefault(); e.dataTransfer.dropEffect = 'copy'; setOver(true); } }}
       onDragLeave={(e) => { if (!e.currentTarget.contains(e.relatedTarget)) setOver(false); }}
-      onDrop={(e) => { e.preventDefault(); setOver(false); const field = dropped(e); if (field) onDropField(field); }}>
+      onDrop={(e) => { e.preventDefault(); setOver(false); const what = readDrag(e); if (what) onDropField(what); }}>
       <header><span className="qh-ico" aria-hidden="true">{icon}</span><b>{title}</b>{count > 0 && <span className="qh-count">{count}</span>}</header>
       {children}
       {empty && <div className="qh-drop">{hint}</div>}
@@ -19,11 +17,11 @@ function Zone({ title, hint, icon, onDropField, empty, children, count }) {
   );
 }
 
-export default function QueryHelper({ helper, onChange, onApply, onClear, columns = [], kind, preview, onClose }) {
+export default function QueryHelper({ helper, onChange, onApply, onClear, columns = [], types = {}, kind, preview, onClose }) {
   const set = (patch) => onChange({ ...helper, ...patch });
-  const addFilter = (field) => set({ filters: [...helper.filters, newFilter(field)] });
-  const addField = (field) => { if (!helper.fields.includes(field)) set({ fields: [...helper.fields, field] }); };
-  const addSort = (field) => { if (!helper.sort.some((s) => s.field === field)) set({ sort: [...helper.sort, { field, dir: 'asc' }] }); };
+  const addFilter = (what) => set({ filters: [...helper.filters, newFilter(what)] });
+  const addField = (what) => { const field = what.field || what; if (!helper.fields.includes(field)) set({ fields: [...helper.fields, field] }); };
+  const addSort = (what) => { const field = what.field || what; if (!helper.sort.some((s) => s.field === field)) set({ sort: [...helper.sort, { field, dir: 'asc' }] }); };
   const editFilter = (id, patch) => set({ filters: helper.filters.map((f) => (f.id === id ? { ...f, ...patch } : f)) });
   const pick = (onPick) => (
     <select className="qh-add" value="" onChange={(e) => { if (e.target.value) onPick(e.target.value); }} aria-label="Add a column">
@@ -40,9 +38,9 @@ export default function QueryHelper({ helper, onChange, onApply, onClear, column
         <span className="grow" />
         <button type="button" className="icon-btn" title="Hide the helper" onClick={onClose}>✕</button>
       </div>
-      <p className="qh-tip">Drag a column header from the result and drop it here.</p>
+      <p className="qh-tip">Drag a column, or a value itself, from the result and drop it here. Its data type comes along.</p>
 
-      <Zone title={kind === 'sql' ? 'Where' : 'Filter'} icon="⚲" hint="Drop a column to filter by it" empty={!helper.filters.length} onDropField={addFilter} count={helper.filters.length}>
+      <Zone title={kind === 'sql' ? 'Where' : 'Filter'} icon="⚲" hint="Drop a column or a value to filter by it" empty={!helper.filters.length} onDropField={addFilter} count={helper.filters.length}>
         {helper.filters.length > 1 && (
           <div className="qh-match">
             Rows that match
@@ -56,12 +54,15 @@ export default function QueryHelper({ helper, onChange, onApply, onClear, column
           <div key={f.id} className="qh-filter">
             <div className="qh-row">
               <code title={f.field}>{f.field}</code>
+              <select className={`qh-type t-${withType(f, types).type}`} aria-label={`Data type of ${f.field}`} title="Data type of the value" value={f.type || ''} onChange={(e) => editFilter(f.id, { type: e.target.value })}>
+                {TYPES.map(([key, label]) => <option key={key} value={key}>{key ? label : `${label}${withType({ ...f, type: '' }, types).type ? `: ${TYPES.find(([k]) => k === withType({ ...f, type: '' }, types).type)[1]}` : ''}`}</option>)}
+              </select>
               <button type="button" className="icon-btn danger" aria-label={`Remove ${f.field}`} onClick={() => set({ filters: helper.filters.filter((x) => x.id !== f.id) })}>✕</button>
             </div>
             <div className="qh-row">
               <select value={f.op} onChange={(e) => editFilter(f.id, { op: e.target.value })}>{OPS.map(([key, label]) => <option key={key} value={key}>{label}</option>)}</select>
               {!NO_VALUE.has(f.op) && (
-                <input value={f.value} placeholder={f.op === 'in' ? 'a, b, c' : 'value'} onChange={(e) => editFilter(f.id, { value: e.target.value })}
+                <input value={f.value} placeholder={f.op === 'in' ? 'a, b, c' : withType(f, types).type === 'date' ? '2026-01-31' : 'value'} onChange={(e) => editFilter(f.id, { value: e.target.value })}
                   onKeyDown={(e) => { if (e.key === 'Enter') onApply(); }} />
               )}
             </div>

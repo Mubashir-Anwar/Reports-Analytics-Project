@@ -12,7 +12,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from backend.app.security.users import save_users  # noqa: E402
-from test_workspace_and_server import ADMIN, client, login, token  # noqa: E402,F401
+from test_workspace_and_server import ADMIN, client, login, setup_login, token  # noqa: E402,F401
 
 PASSWORD = "Passw0rd-long-enough"
 ADMIN_HEADERS = {"X-Admin-Token": ADMIN}
@@ -54,7 +54,7 @@ def test_query_right_opens_only_the_query_workspace(client):
     assert client.get("/query").status_code == 200
     assert client.post("/api/query/mongo/collections", json={"connectionId": ""}).status_code == 422   # past the right check
     assert client.get("/designer").status_code == 403 and client.get("/api/admin/workspace").status_code == 403
-    assert client.get("/", follow_redirects=False).headers["location"] == "/query"
+    assert client.get("/", follow_redirects=False).headers["location"] == "/home"
     assert make_user(client, "dora", ["designer"]).status_code == 200       # Designer alone no longer opens /query
     sign_in(client, "dora")
     assert client.get("/query").status_code == 403
@@ -88,7 +88,7 @@ def test_designer_only_user_sees_only_the_designer(client):
     for page in ("/admin", "/server", "/analytics"):
         response = client.get(page)
         assert response.status_code == 403 and "No access" in response.text and "/designer" in response.text
-    assert client.get("/", follow_redirects=False).headers["location"] == "/designer"
+    assert client.get("/", follow_redirects=False).headers["location"] == "/home"
     me = client.get("/api/server/me").json()
     assert me["rights"] == ["designer"] and me["superAdmin"] is False
 
@@ -128,7 +128,7 @@ def test_runner_sees_only_reports_its_folder_permissions_allow(client):
     publish(client, "HR1", "HR")
     make_user(client, "rana", ["runner", "server"])
     client.cookies.clear()
-    assert login(client, "admin", ADMIN).status_code == 200            # first-setup sign-in = super admin
+    assert setup_login(client).status_code == 200            # first-setup sign-in = super admin
     assert client.put("/api/server/permissions", json={"path": "HR", "rules": {"users": {"rana": "none"}, "roles": {}}}).status_code == 200
     sign_in(client, "rana")
     ids = {item["id"] for item in client.get("/reports").json()["reports"]}
@@ -276,14 +276,16 @@ def test_the_old_run_reports_page_goes_home_and_urls_still_run(client, key):
 
 def test_data_sources_need_no_admin_right(client):
     """Users with the Designer, Query or Server right connect data sources themselves (no Admin right); on the
-    Server a report is linked to any of them, from any folder, by whoever may Manage that report."""
+    Server a report is linked to any of the Server's, from any folder, by whoever may Manage that report."""
     make_user(client, "sara", ["server"])
     make_user(client, "dave", ["server", "designer"])
     make_user(client, "rana", ["runner"])
     sign_in(client, "rana")
     assert client.get("/api/data-sources").status_code == 403                   # the Runner right alone is not enough
     sign_in(client, "sara")
-    saved = client.post("/api/data-sources", json={"name": "Sales DB", "uri": "mongodb://127.0.0.1:1/sales", "folder": "Team/Sources"})
+    assert client.post("/api/data-sources", json={"name": "X", "uri": "mongodb://127.0.0.1:1/x"}).status_code == 422                 # for which part?
+    assert client.post("/api/data-sources", json={"name": "X", "uri": "mongodb://127.0.0.1:1/x", "area": "query"}).status_code == 403
+    saved = client.post("/api/data-sources", json={"name": "Sales DB", "uri": "mongodb://127.0.0.1:1/sales", "folder": "Team/Sources", "area": "server"})
     assert saved.status_code == 200 and saved.json()["connection"]["folder"] == "Team/Sources"
     listed = {item["id"]: item for item in client.get("/api/server/connections").json()["connections"]}
     assert listed["sales_db"]["folder"] == "Team/Sources"

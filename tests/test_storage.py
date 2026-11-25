@@ -16,7 +16,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 import service_names as core  # noqa: E402
 from backend.app.storage import store as store_module  # noqa: E402
-from test_workspace_and_server import ADMIN, PUBLISHED, FakeMongoClient, client, login, token  # noqa: E402,F401
+from test_workspace_and_server import ADMIN, PUBLISHED, FakeMongoClient, client, login, setup_login, token  # noqa: E402,F401
 
 PG_URL = os.getenv("PG_TEST_URL", "")
 
@@ -90,7 +90,7 @@ def test_whole_service_on_the_postgresql_store(pg_schema_url, tmp_path, monkeypa
     assert app.post("/api/admin/workspace/PGR/publish", headers=token(ADMIN), json={}).status_code == 200
     assert store.read_json("reports/Sales/PGR.json")["id"] == "PGR"
     assert app.get("/generate/PGR.csv", headers={"X-Admin-Token": ADMIN}).status_code == 200
-    assert login(app, "admin", ADMIN).status_code == 200
+    assert setup_login(app).status_code == 200
     versions = app.get("/api/server/reports/PGR/versions").json()["versions"]
     assert [v["version"] for v in versions] == [1] and versions[0]["action"] == "published"
     from backend.app.db import get_records
@@ -102,11 +102,11 @@ def test_whole_service_on_the_postgresql_store(pg_schema_url, tmp_path, monkeypa
 def test_versions_restore_and_history(client):
     assert client.put("/api/admin/workspace/V1?create=true", headers=token(), json={**PUBLISHED, "id": "V1", "title": "First"}).status_code == 200
     assert client.post("/api/admin/workspace/V1/publish", headers=token(), json={}).status_code == 200
-    assert login(client, "admin", ADMIN).status_code == 200
+    assert setup_login(client).status_code == 200
     assert client.put("/api/server/reports/V1", json={"title": "Second"}).status_code == 200
     versions = client.get("/api/server/reports/V1/versions").json()["versions"]
     assert [(v["version"], v["title"], v["action"]) for v in versions] == [(2, "Second", "edited"), (1, "First", "published")]
-    assert versions[0]["user"] == "admin"
+    assert versions[0]["user"] == "setup_admin"
     old = client.get("/api/server/reports/V1/versions/1").json()
     assert old["definition"]["title"] == "First"
     restored = client.post("/api/server/reports/V1/versions/1/restore", json={})
@@ -145,7 +145,7 @@ def test_migrate_the_data_directory_into_postgresql(client, pg_schema_url):
     import io
 
     from backend.app.storage.migrate import migrate
-    assert login(client, "admin", ADMIN).status_code == 200
+    assert setup_login(client).status_code == 200
     client.get("/generate/R1.csv", headers={"X-Admin-Token": ADMIN})  # one run record
     from backend.app.db.sql import SqlRecords
     target, records = store_module.PostgresStore(pg_schema_url), SqlRecords(pg_schema_url)
@@ -181,7 +181,7 @@ def test_security_headers_ready_and_size_limit(client, monkeypatch):
 
 def test_sign_out_and_sign_in_limit_hold_on_every_instance(client):
     other = TestClient(core.make_app())
-    assert login(client, "admin", ADMIN).status_code == 200
+    assert setup_login(client).status_code == 200
     cookie = client.cookies.get("reporting_session") or next(iter(client.cookies.values()))
     other.cookies.set(next(iter(client.cookies.keys())), cookie)
     assert other.get("/api/server/me").status_code == 200
@@ -190,3 +190,24 @@ def test_sign_out_and_sign_in_limit_hold_on_every_instance(client):
     for _ in range(10):
         login(client, "admin", "wrong")
     assert login(other, "admin", ADMIN).status_code == 429          # the limit is shared too
+
+
+def test_a_data_folder_with_a_very_long_path(tmp_path, monkeypatch):
+    """Windows stops at 259 characters by itself: drafts with a long ID could not be saved in a deep folder."""
+    from backend.app.db import entities as ent
+    from backend.app.storage.files import long_path
+    from backend.app.storage.store import FileStore
+    deep = tmp_path
+    while len(str(deep)) < 200:
+        deep = deep / "a-folder-with-a-long-name"
+    monkeypatch.setenv("REPORTING_DATA_DIR", str(deep))
+    store = FileStore()
+    key = "workspace/General/" + "R" * 70 + ".json"
+    store.write_json(key, {"id": "R" * 70, "title": "Long", "folder": "General"})
+    store.write_json(key, {"id": "R" * 70, "title": "Long again", "folder": "General"})
+    assert store.read_json(key)["title"] == "Long again"
+    assert key in store.keys("workspace")
+    assert not list(long_path(deep).rglob("*.tmp"))
+    backend = ent.FileEntities(deep)
+    entity = next(e for e in ent.ENTITIES if e.row_files)
+    assert backend.find(entity)

@@ -1,4 +1,4 @@
-"""HTML pages: /, /admin, /designer, /query, /server, /analytics (/ui, the old Run reports page, now goes to /).
+"""HTML pages: /, /home, /admin, /designer, /query, /server, /analytics (/ui, the old Run reports page, now goes to /).
 
 Each page needs a signed-in user with the matching right. Signed out: the browser is sent to the /login
 sign-in page, which comes back to the page afterwards (?next=). Signed in without the right: a short
@@ -16,7 +16,7 @@ from fastapi.responses import HTMLResponse, RedirectResponse, Response
 from backend.app.branding import brand_name
 from backend.app.constants import RIGHT_LABELS
 
-# Which page each right opens, in the order the home page picks the first one.
+# Which page each right opens.
 APP_PAGES = (("designer", "/designer"), ("query", "/query"), ("server", "/server"), ("analytics", "/analytics"), ("admin", "/admin"))
 
 _STYLE = """
@@ -65,16 +65,19 @@ def register(app: FastAPI, ctx: SimpleNamespace) -> None:
         return page
 
     @app.get("/", include_in_schema=False)
-    def home(request: Request) -> RedirectResponse:
-        session = current_session(request)
-        if session is None:
-            return RedirectResponse(url="/login", status_code=303)
-        first = next((path for right, path in APP_PAGES if right in session["rights"]), "/server")
-        return RedirectResponse(url=first, status_code=303)
+    def start(request: Request) -> RedirectResponse:
+        return RedirectResponse(url="/login" if current_session(request) is None else "/home", status_code=303)
+
+    @app.get("/home", include_in_schema=False)
+    def home_ui(request: Request) -> Response:
+        """Where everyone lands after signing in: what this account can do, with links."""
+        if current_session(request) is None:
+            return RedirectResponse(url="/login?next=%2Fhome", status_code=303)
+        return react_page("home.html")
 
     @app.get("/ui", include_in_schema=False)
     def old_runner_page() -> RedirectResponse:
-        """The Run reports page is gone; old links land on the first page the user may open.
+        """The Run reports page is gone; old links land on Home.
         Running reports by URL (/reports, /generate, /api/v1) still works with the runner right or a key."""
         return RedirectResponse(url="/", status_code=303)
 

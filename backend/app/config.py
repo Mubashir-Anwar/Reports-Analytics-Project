@@ -33,9 +33,6 @@ class Settings:
         load_local_env_file()
         uri = os.getenv("MONGODB_URI", "")
         database = os.getenv("MONGODB_DATABASE", "")
-        if not uri or not database:
-            # Permit importing the app without configured secrets; first DB request returns a clear error.
-            LOG.warning("MONGODB_URI/MONGODB_DATABASE are not configured; report execution is disabled")
         return cls(
             mongo_uri=uri,
             mongo_database=database,

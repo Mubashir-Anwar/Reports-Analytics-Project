@@ -2,6 +2,7 @@
 // Data Adapter Wizard (MongoDB, PostgreSQL, MySQL/MariaDB, SQL Server, Oracle).
 import PasswordInput from './PasswordInput.jsx';
 import { useState } from 'react';
+import { createPortal } from 'react-dom';
 import { api } from '../api.js';
 import './adapters.css';
 
@@ -49,6 +50,14 @@ export function DbLogo({ type = 'mongodb', size = 14 }) {
   );
 }
 
+/** The parts of the product; a data source belongs to one of them and works only there. */
+export const AREAS = {
+  designer: { name: 'Designer', use: 'reports you design' },
+  server: { name: 'Server', use: 'published reports' },
+  analytics: { name: 'Analytics', use: 'datasets and dashboards' },
+  query: { name: 'Query', use: 'looking into a database' },
+};
+
 export const ADAPTER_TYPES = [
   { id: 'mongodb', name: 'MongoDB Connection', text: 'A MongoDB server (mongodb:// or mongodb+srv:// URL). Reports run their aggregation query on it.' },
   { id: 'postgresql', name: 'PostgreSQL', text: 'SQL SELECT queries on PostgreSQL (read-only), with $P{…} parameters like Jaspersoft Studio.' },
@@ -79,8 +88,10 @@ export function sqlUrl(type, { host, port, database, user, password, sslmode }) 
 }
 
 /** Like Jaspersoft Studio's "Data Adapter Wizard": 1) pick the type, 2) fill in the connection, Test, Finish. */
-export function AdapterWizard({ initial, folders, existingIds, onClose, onSaved, notify }) {
+/** area: the part the new data source is for; areas: let the person choose it (Admin). onSaved gets { id, name, type, area }. */
+export function AdapterWizard({ initial, folders = [], existingIds = [], area: ownArea = '', areas = null, onClose, onSaved, notify = () => {} }) {
   const editing = Boolean(initial?.id);
+  const [area, setArea] = useState(initial?.area || ownArea || areas?.[0] || '');
   const [step, setStep] = useState(initial?.id || initial?.name ? 2 : 1); // edit / duplicate skip the type page
   const [type, setType] = useState(initial?.type || 'mongodb');
   const [form, setForm] = useState({ name: '', uri: '', database: '', folder: '', ...initial, id: initial?.id || '' });
@@ -109,18 +120,24 @@ export function AdapterWizard({ initial, folders, existingIds, onClose, onSaved,
   const finish = async () => {
     setBusy('save');
     try {
-      await api.saveConnection({ type, id, name: form.name.trim(), uri, database: isSql ? pg.database.trim() : form.database.trim(), folder: form.folder });
+      const saved = await api.saveConnection({ type, id, name: form.name.trim(), uri, database: isSql ? pg.database.trim() : form.database.trim(), folder: form.folder || '',
+        ...(editing ? {} : { area, create: true }) });
       notify(`Data adapter “${form.name.trim()}” ${editing ? 'updated' : 'created'}`, 'ok');
-      onSaved();
-    } catch (error) { setResult({ ok: false, text: error.status === 403 ? 'Saving a data adapter needs the admin token' : error.message }); setBusy(''); }
+      onSaved(saved.connection);
+    } catch (error) { setResult({ ok: false, text: error.message }); setBusy(''); }
   };
 
-  return (
+  // in <body>: a fixed box inside an animated panel would be cut to that panel
+  return createPortal(
     <div className="aw-back" onMouseDown={(e) => e.target === e.currentTarget && !busy && onClose()}>
       <div className="aw-modal" role="dialog" aria-label="Data Adapter Wizard">
         <div className="wizard-head">
           <h3>{editing ? `Edit Data Adapter — ${initial.name}` : 'Data Adapter Wizard'}</h3>
           <p className="muted">{step === 1 ? 'Create a new data adapter: choose its type.' : `${typeInfo.name}: enter the connection details, test them, then Finish.`}</p>
+          {area && (areas && !editing
+            ? <div className="aw-areas" role="radiogroup" aria-label="Where it is used">{areas.map((key) => (
+              <button key={key} type="button" role="radio" aria-checked={area === key} className={area === key ? 'on' : ''} onClick={() => setArea(key)}><b>{AREAS[key].name}</b><small>{AREAS[key].use}</small></button>))}</div>
+            : <span className="aw-area">Only for {AREAS[area].name}</span>)}
         </div>
         {step === 1 && (
           <ul className="wizard-types" role="listbox" aria-label="Data adapter type">
@@ -165,12 +182,12 @@ export function AdapterWizard({ initial, folders, existingIds, onClose, onSaved,
                 <label className="aw-field">Database <small>(optional when the URL has one)</small><input value={form.database} onChange={(e) => setForm({ ...form, database: e.target.value })} /></label>
               </>
             )}
-            <label className="aw-field">Folder
+            {folders.length > 0 && area !== 'analytics' && area !== 'query' && <label className="aw-field">Folder
               <select value={form.folder || ''} onChange={(e) => setForm({ ...form, folder: e.target.value })}>
                 <option value="">Data Adapters (top level)</option>
                 {folders.map((f) => <option key={f} value={f}>{f.split('/').join(' / ')}</option>)}
               </select>
-            </label>
+            </label>}
             {result && <p className={`aw-result ${result.ok ? 'ok' : 'err'}`}>{result.ok ? '✓ ' : '✕ '}{result.text}</p>}
           </div>
         )}
@@ -182,8 +199,7 @@ export function AdapterWizard({ initial, folders, existingIds, onClose, onSaved,
           <button className="btn" disabled={Boolean(busy)} onClick={onClose}>Cancel</button>
         </div>
       </div>
-    </div>
-  );
+    </div>, document.body);
 }
 
 

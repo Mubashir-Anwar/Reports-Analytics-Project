@@ -4,9 +4,9 @@
 import { useEffect, useRef, useState } from 'react';
 import { api } from '../api.js';
 import Grid, { shellJson } from './Grid.jsx';
-import { sendToDesigner } from './handoff.js';
+import UseQuery from './UseQuery.jsx';
 import QueryHelper from './QueryHelper.jsx';
-import { FIELD_MIME, buildMongo, emptyHelper, newFilter } from './queryHelper.js';
+import { FIELD_MIME, addToText, buildMongo, emptyHelper, fieldTypes, newFilter, readDrag } from './queryHelper.js';
 
 export const STAGES = {
   $match: '{\n  Field: "value"\n}',
@@ -27,13 +27,26 @@ export const STAGES = {
   $facet: '{\n  byBranch: [{ $sortByCount: "$Branch" }]\n}',
   $sample: '{ size: 20 }',
 };
+/** The type names of the Fields sample → the types of the query helper. */
+const FIELD_TYPE = { string: 'str', str: 'str', int: 'num', long: 'num', double: 'num', decimal: 'num', number: 'num', bool: 'bool', boolean: 'bool', date: 'date', objectId: 'oid', ObjectId: 'oid' };
 let nextId = 1;
 export const newStage = (op = '$match', body) => ({ id: `s${Date.now().toString(36)}${nextId++}`, op, body: body ?? STAGES[op] ?? '{}', on: true });
 const stageText = (s) => `{ ${s.op}: ${s.body.trim() || '{}'} }`;
 
-function Field({ label, value, onChange, placeholder, onEnter }) {
+/** Props for a text box that takes a dragged field or value. */
+function useDrop(onDropField) {
+  const [over, setOver] = useState(false);
+  return [over, {
+    onDragOver: (e) => { if (e.dataTransfer.types.includes(FIELD_MIME)) { e.preventDefault(); e.dataTransfer.dropEffect = 'copy'; setOver(true); } },
+    onDragLeave: () => setOver(false),
+    onDrop: (e) => { const what = readDrag(e); setOver(false); if (what) { e.preventDefault(); onDropField(what); } },
+  }];
+}
+
+function Field({ label, value, onChange, placeholder, onEnter, kind }) {
+  const [over, drop] = useDrop((what) => onChange(addToText(value, what, kind)));
   return (
-    <label className="qm-field">
+    <label className={`qm-field ${over ? 'over' : ''}`} {...drop}>
       <span>{label}</span>
       <input className="mono" value={value} placeholder={placeholder} spellCheck={false}
         onChange={(e) => onChange(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') onEnter(); }} />
@@ -58,17 +71,22 @@ function Documents({ tab, onChange }) {
   const shown = result?.documents?.length || 0;
   const helper = tab.helper || emptyHelper();
   const helperOpen = tab.helperOpen ?? true;
-  const built = buildMongo(helper);
-  const columns = [...new Set((result?.documents || []).flatMap((d) => Object.keys(d || {})))];
+  // the types seen so far: a filter that finds nothing must not forget them
+  const [types, setTypes] = useState({});
+  useEffect(() => { if (result?.documents?.length) setTypes((old) => ({ ...old, ...fieldTypes(result.documents) })); }, [result]);
+  useEffect(() => { setTypes({}); }, [tab.connectionId, tab.collection]);
+  const built = buildMongo(helper, types);
+  const columns = Object.keys(types);
+  const addFilter = (what) => onChange({ helperOpen: true, helper: { ...helper, filters: [...helper.filters, newFilter(what)] } });
   const apply = () => { const next = { ...q, ...built }; onChange({ find: next }); run(0, next); };
-  const grid = <Grid documents={result?.documents || []} busy={busy} name={tab.collection} empty="No documents match"
-    extra={!helperOpen && <HelperButton onOpen={() => onChange({ helperOpen: true })} onDropField={(field) => onChange({ helperOpen: true, helper: { ...helper, filters: [...helper.filters, newFilter(field)] } })} />} />;
+  const grid = <Grid documents={result?.documents || []} busy={busy} name={tab.collection} empty="No documents match" onFilter={addFilter}
+    extra={!helperOpen && <HelperButton onOpen={() => onChange({ helperOpen: true })} onDropField={addFilter} />} />;
   return (
     <div className="qm-docs">
       <div className="qm-find">
-        <Field label="Filter" value={q.filter} onChange={(v) => set({ filter: v })} placeholder='{ Branch: "KHI", Amount: { $gt: 100 } }' onEnter={() => run(0)} />
-        <Field label="Projection" value={q.projection} onChange={(v) => set({ projection: v })} placeholder="{ Name: 1, Amount: 1 }" onEnter={() => run(0)} />
-        <Field label="Sort" value={q.sort} onChange={(v) => set({ sort: v })} placeholder="{ Amount: -1 }" onEnter={() => run(0)} />
+        <Field kind="filter" label="Filter" value={q.filter} onChange={(v) => set({ filter: v })} placeholder='{ Branch: "KHI", Amount: { $gt: 100 } }' onEnter={() => run(0)} />
+        <Field kind="projection" label="Projection" value={q.projection} onChange={(v) => set({ projection: v })} placeholder="{ Name: 1, Amount: 1 }" onEnter={() => run(0)} />
+        <Field kind="sort" label="Sort" value={q.sort} onChange={(v) => set({ sort: v })} placeholder="{ Amount: -1 }" onEnter={() => run(0)} />
         <label className="qm-field small"><span>Limit</span>
           <select value={q.limit} onChange={(e) => set({ limit: Number(e.target.value) })}>{[20, 50, 100, 500].map((n) => <option key={n}>{n}</option>)}</select>
         </label>
@@ -85,7 +103,7 @@ function Documents({ tab, onChange }) {
       <div className={`q-work ${helperOpen ? 'with-helper' : ''}`}>
         {grid}
         {helperOpen && (
-          <QueryHelper kind="mongo" helper={helper} columns={columns} onChange={(h) => onChange({ helper: h })}
+          <QueryHelper kind="mongo" helper={helper} columns={columns} types={types} onChange={(h) => onChange({ helper: h })}
             preview={[built.filter && `filter: ${built.filter}`, built.projection && `projection: ${built.projection}`, built.sort && `sort: ${built.sort}`].filter(Boolean).join('\n')}
             onApply={apply} onClear={() => { onChange({ helper: emptyHelper() }); }} onClose={() => onChange({ helperOpen: false })} />
         )}
@@ -101,7 +119,20 @@ export function HelperButton({ onOpen, onDropField }) {
     <button type="button" className={`btn sm qh-open ${over ? 'over' : ''}`} onClick={onOpen} title="Open the query helper (or drop a column here)"
       onDragOver={(e) => { if (e.dataTransfer.types.includes(FIELD_MIME)) { e.preventDefault(); setOver(true); } }}
       onDragLeave={() => setOver(false)}
-      onDrop={(e) => { e.preventDefault(); setOver(false); const f = e.dataTransfer.getData(FIELD_MIME); if (f) onDropField(f); }}>🧩 Helper</button>
+      onDrop={(e) => { e.preventDefault(); setOver(false); const what = readDrag(e); if (what) onDropField(what); }}>🧩 Helper</button>
+  );
+}
+
+/** A dropped field in a stage: a condition, a projection or a sort; in any other stage its "$name" at the cursor. */
+function StageText({ stage, onChange, onFocus }) {
+  const [over, drop] = useDrop((what) => {
+    if (stage.op === '$match') onChange(addToText(stage.body, what, 'filter'));
+    else if (['$project', '$sort'].includes(stage.op)) onChange(addToText(stage.body, what, 'sort'));
+    else onChange(`${stage.body.trim()}${stage.body.trim() ? ' ' : ''}"$${what.field}"`);
+  });
+  return (
+    <textarea className={`mono ${over ? 'over' : ''}`} spellCheck={false} rows={Math.min(10, Math.max(2, stage.body.split('\n').length))} value={stage.body}
+      onFocus={onFocus} onChange={(e) => onChange(e.target.value)} {...drop} />
   );
 }
 
@@ -152,6 +183,7 @@ function Aggregate({ tab, onChange, notify }) {
         <div className="qm-stages-head">
           <b>Pipeline</b><span className="muted">{stages.filter((s) => s.on).length} stages</span>
           <span className="grow" />
+          <UseQuery query={() => ({ connectionId: tab.connectionId, collection: tab.collection, queryLanguage: 'mongosh', querySource: code })} />
           <button type="button" className="btn sm" onClick={() => setShowCode(!showCode)}>{showCode ? 'Stages' : '</> Code'}</button>
         </div>
         {showCode ? (
@@ -159,7 +191,6 @@ function Aggregate({ tab, onChange, notify }) {
             <pre>{code}</pre>
             <div className="qm-code-actions">
               <button type="button" className="btn sm" onClick={() => { navigator.clipboard?.writeText(code); notify('Copied the Mongo Shell code'); }}>Copy</button>
-              <button type="button" className="btn sm primary" onClick={() => sendToDesigner({ connectionId: tab.connectionId, collection: tab.collection, queryLanguage: 'mongosh', querySource: code })}>New report from this ↗</button>
             </div>
           </div>
         ) : (
@@ -177,8 +208,7 @@ function Aggregate({ tab, onChange, notify }) {
                   <button type="button" className="icon-btn" title="Move down" onClick={(e) => { e.stopPropagation(); move(i, 1); }}>↓</button>
                   <button type="button" className="icon-btn danger" title="Remove" onClick={(e) => { e.stopPropagation(); remove(i); }}>✕</button>
                 </div>
-                <textarea className="mono" spellCheck={false} rows={Math.min(10, Math.max(2, s.body.split('\n').length))} value={s.body}
-                  onFocus={() => setSelected(i)} onChange={(e) => update(s.id, { body: e.target.value })} />
+                <StageText stage={s} onFocus={() => setSelected(i)} onChange={(body) => update(s.id, { body })} />
                 <button type="button" className="qm-add" title="Add a stage after this one" onClick={(e) => { e.stopPropagation(); add(i); }}>＋ stage</button>
               </li>
             ))}
@@ -220,7 +250,7 @@ function Fields({ tab, onUse }) {
         <thead><tr><th>Field</th><th>Types</th><th>In</th><th>Example</th></tr></thead>
         <tbody>
           {data.fields.map((f) => (
-            <tr key={f.path} onClick={() => onUse(f.path)}>
+            <tr key={f.path} onClick={() => onUse(f)}>
               <td className="mono" style={{ paddingLeft: 10 + f.path.split('.').length * 10 - 10 }}>{f.path.split('.').pop()}<small>{f.path.includes('.') ? ` ${f.path}` : ''}</small></td>
               <td>{Object.entries(f.types).map(([t, n]) => <span key={t} className={`q-type t-${t}`}>{t}{Object.keys(f.types).length > 1 ? ` ${Math.round((n / f.count) * 100)}%` : ''}</span>)}</td>
               <td><span className="q-share"><i style={{ width: `${Math.round(f.share * 100)}%` }} /></span>{Math.round(f.share * 100)}%</td>
@@ -246,7 +276,7 @@ export default function MongoView({ tab, onChange, notify }) {
       <div className="q-mode-body" key={mode}>
         {mode === 'docs' && <Documents tab={tab} onChange={onChange} />}
         {mode === 'aggregate' && <Aggregate tab={tab} onChange={onChange} notify={notify} />}
-        {mode === 'fields' && <Fields tab={tab} onUse={(path) => onChange({ mode: 'docs', find: { ...(tab.find || { projection: '', sort: '', limit: 50 }), filter: `{ "${path}": { $exists: true } }` } })} />}
+        {mode === 'fields' && <Fields tab={tab} onUse={(f) => { const helper = tab.helper || emptyHelper(); onChange({ mode: 'docs', helperOpen: true, helper: { ...helper, filters: [...helper.filters, newFilter({ field: f.path, type: FIELD_TYPE[Object.keys(f.types)[0]] && Object.keys(f.types).length === 1 ? FIELD_TYPE[Object.keys(f.types)[0]] : '' })] } }); }} />}
       </div>
     </div>
   );

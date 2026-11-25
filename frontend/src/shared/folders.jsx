@@ -266,3 +266,54 @@ export function FolderDeleteDialog({ path, contents, folders, onConfirm, onClose
     document.body,
   );
 }
+
+/**
+ * Choose a folder: a button that opens the tree right under it (with a search). With allowNew a folder that is not
+ * there yet can be typed: it is made when the form is saved. '' = the top level.
+ */
+export function FolderPicker({ folders, value, onChange, rootLabel = 'Top level', rootHint = 'not in a folder', allowNew = false, disabled = false, label = 'Folder', storageKey = 'fd-pick-open' }) {
+  const [open, setOpen] = useState(false);
+  const [find, setFind] = useState('');
+  const box = useRef(null);
+  const button = useRef(null);
+  const all = useMemo(() => withParents(folders), [folders]);
+  useEffect(() => {
+    if (!open) return undefined;
+    const outside = (event) => { if (!box.current?.contains(event.target)) setOpen(false); };
+    document.addEventListener('pointerdown', outside);
+    box.current?.querySelector('.fd-pick-panel')?.scrollIntoView({ block: 'nearest' });
+    return () => document.removeEventListener('pointerdown', outside);
+  }, [open]);
+  const close = () => { setOpen(false); setFind(''); button.current?.focus(); };
+  const pick = (path) => { onChange(path); close(); };
+  const typed = find.trim().split('/').map((part) => part.trim()).filter(Boolean).join('/');
+  const known = all.find((path) => path.toLowerCase() === typed.toLowerCase());
+  const problem = typed && !known ? typed.split('/').map((part) => folderNameProblem(part)).find(Boolean) || '' : '';
+  const parts = value ? value.split('/') : [];
+  const isNew = allowNew && Boolean(value) && !all.includes(value);
+  return (
+    <div className={`fd-pick ${open ? 'open' : ''}`} ref={box} onKeyDown={(event) => { if (event.key === 'Escape' && open) { event.stopPropagation(); close(); } }}>
+      <button type="button" className="fd-pick-button" ref={button} disabled={disabled} aria-haspopup="tree" aria-expanded={open} aria-label={`${label}: ${value || rootLabel}`}
+        onClick={() => { setOpen(!open); setFind(''); }}>
+        <FolderIcon open={open} size={22} tone={value ? 'tile' : 'root'} />
+        <span><b>{parts.length ? parts[parts.length - 1] : rootLabel}</b><small>{value ? `/${value}` : rootHint}</small></span>
+        {isNew && <em>new</em>}
+        <i aria-hidden="true">▾</i>
+      </button>
+      {open && (
+        <div className="fd-pick-panel">
+          <input autoFocus value={find} onChange={(event) => setFind(event.target.value)} aria-label="Find a folder" placeholder={allowNew ? 'Find a folder, or type a new one' : 'Find a folder'}
+            onKeyDown={(event) => {
+              if (event.key !== 'Enter') return;
+              event.preventDefault();
+              if (known) pick(known); else if (allowNew && typed && !problem) pick(typed);
+            }} />
+          <div className="fd-pick-list"><FolderTree folders={folders} selected={value} onSelect={pick} storageKey={storageKey} filter={find} rootLabel={rootLabel} /></div>
+          {allowNew && typed && !known && (problem
+            ? <p className="fd-error">{problem}</p>
+            : <button type="button" className="fd-pick-new" onClick={() => pick(typed)}>＋ New folder <b>/{typed}</b></button>)}
+        </div>
+      )}
+    </div>
+  );
+}

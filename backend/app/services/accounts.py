@@ -9,7 +9,7 @@ from typing import Any
 from fastapi import HTTPException
 
 from backend.app.constants import MIN_PASSWORD_LENGTH, USER_RIGHTS, USER_ROLES
-from backend.app.security.users import derived_role, is_super_admin, user_rights
+from backend.app.security.users import derived_role, is_expired, is_permanent_super_admin, is_super_admin, is_temporary, user_rights
 
 __all__ = ['user_view', 'valid_role', 'valid_rights', 'valid_password', 'admins_left', 'super_admins_left']
 
@@ -20,7 +20,8 @@ def user_view(ctx: SimpleNamespace, user: dict[str, Any]) -> dict[str, Any]:
             "superAdmin": super_admin, "disabled": bool(user.get("disabled")),
             "fullName": user.get("fullName") or "", "email": user.get("email") or "", "phone": user.get("phone") or "",
             "mustChangePassword": bool(user.get("mustChangePassword")),
-            "createdAt": user.get("createdAt", ""), "lastLoginAt": user.get("lastLoginAt", "")}
+            "createdAt": user.get("createdAt", ""), "lastLoginAt": user.get("lastLoginAt", ""),
+            "temporary": is_temporary(user), "expiresAt": user.get("expiresAt") or "", "expired": is_expired(user)}
 
 
 def valid_role(ctx: SimpleNamespace, value: Any) -> str:
@@ -47,7 +48,8 @@ def valid_password(ctx: SimpleNamespace, value: Any) -> str:
 
 
 def super_admins_left(ctx: SimpleNamespace, users: list[dict[str, Any]]) -> int:
-    return sum(1 for item in users if is_super_admin(item) and not item.get("disabled"))
+    """Active super admins that stay (the temporary setup admin does not count)."""
+    return sum(1 for item in users if is_permanent_super_admin(item))
 
 
 def admins_left(ctx: SimpleNamespace, users: list[dict[str, Any]]) -> int:

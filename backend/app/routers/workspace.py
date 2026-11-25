@@ -1,11 +1,13 @@
 """The designer's workspace (drafts) and Publish to server."""
 from __future__ import annotations
 
+import copy
 from types import SimpleNamespace
 from typing import Any
 
 from fastapi import FastAPI, HTTPException, Request
 
+from backend.app.connectors.profiles import load_connection_profiles
 from backend.app.constants import REPORT_ID_PATTERN, WORKSPACE_META
 from backend.app.db import model
 from backend.app.definitions import _dynamic_report, clean_folder
@@ -124,6 +126,7 @@ def register(app: FastAPI, ctx: SimpleNamespace) -> None:
         meta["updatedBy"] = actor(request)
         clean = strip_workspace_meta(payload)
         clean["folder"] = folder
+        switched = ctx.draft_connections(clean)                # opened from the server: data sources of the Designer instead
         clean[WORKSPACE_META] = meta
         target = workspace_file(report_id, folder)
         store = get_store()
@@ -136,7 +139,8 @@ def register(app: FastAPI, ctx: SimpleNamespace) -> None:
             _dynamic_report(strip_workspace_meta(clean))
         except (TypeError, ValueError, KeyError) as exc:
             problem = str(exc)
-        return {"report": {**workspace_summary(clean), **draft_state(target, actor(request))}, "readyToPublish": not problem, "problem": problem}
+        return {"report": {**workspace_summary(clean), **draft_state(target, actor(request))}, "readyToPublish": not problem, "problem": problem,
+                "connectionId": clean.get("connectionId", ""), "switchedConnections": switched}
 
     @app.delete("/api/admin/workspace/{report_id}")
     def workspace_delete(report_id: str, request: Request) -> dict[str, Any]:
@@ -223,6 +227,31 @@ def register(app: FastAPI, ctx: SimpleNamespace) -> None:
         return {"deleted": folder, "folders": workspace_folders(workspace_entries()), "drafts": len(drafts),
                 "subfolders": len(subfolders), "movedTo": move_to}
 
+    def server_connections(payload: dict[str, Any], chosen: Any) -> None:
+        """The draft reads from data sources of the Designer; on the server it reads from data sources of the server.
+        `chosen` = {designer id: server id}; without it the one used last time, or one with the same connection."""
+        chosen = chosen if isinstance(chosen, dict) else {}
+        profiles = {item["id"]: item for item in load_connection_profiles()}
+        ids: dict[str, str] = {}
+        for connection_id in ctx.report_connection_ids(payload):
+            source = profiles.get(connection_id)
+            if source is None:
+                continue                                       # save_report_payload says what is wrong
+            picked = str(chosen.get(connection_id) or "").strip()
+            if picked:
+                target = profiles.get(picked)
+                if target is None:
+                    raise HTTPException(status_code=422, detail=f"There is no data source {picked} on the Report Server")
+                ctx.require_area(picked, "server")
+                if target.get("type", "mongodb") != source.get("type", "mongodb"):
+                    raise HTTPException(status_code=422, detail=f"“{target['name']}” is another kind of database than “{source['name']}”")
+                ctx.remember_counterpart(connection_id, "server", picked)
+            ids[connection_id] = picked or ctx.counterpart(connection_id, "server")
+            if not ids[connection_id]:
+                raise HTTPException(status_code=422, detail=f"Choose the Report Server's data source in place of “{source['name']}” "
+                                                            "(the Designer's data sources work only in the Designer)")
+        ctx.switch_connections(payload, ids)
+
     @app.post("/api/admin/workspace/{report_id}/publish")
     async def workspace_publish(report_id: str, request: Request) -> dict[str, Any]:
         """Publish a workspace report to the server repository (like Jaspersoft Studio → JasperReports Server)."""
@@ -232,7 +261,7 @@ def register(app: FastAPI, ctx: SimpleNamespace) -> None:
         if entry is None:
             raise HTTPException(status_code=404, detail="Save the report in the designer first, then publish it")
         path, data = entry
-        payload = strip_workspace_meta(data)
+        payload = copy.deepcopy(strip_workspace_meta(data))
         last = (data.get(WORKSPACE_META) or {}).get("publishedFolder")
         if not options.get("folder") and last:
             payload["folder"] = last                                     # no folder given: where it was published last
@@ -245,6 +274,7 @@ def register(app: FastAPI, ctx: SimpleNamespace) -> None:
         existing = dict.get(reports_by_id, f"{target}/{report_id}")   # only the report in the target folder is replaced
         if existing is not None and options.get("replace") is not True:
             raise HTTPException(status_code=409, detail=f"{report_id} is already published in /{target}; confirm that the server copy should be replaced")
+        server_connections(payload, options.get("connections"))
         saved = save_report_payload(payload, expected_id=report_id if existing is not None else None, previous=existing,
                                     action="published", user=request.state.actor or f"designer ({role})")
         folder = saved.editor_config.get("folder", "General") if saved.editor_config else payload.get("folder", "General")

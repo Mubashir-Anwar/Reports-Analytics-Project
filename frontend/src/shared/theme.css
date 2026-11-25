@@ -152,4 +152,49 @@ code, pre, .mono { font-family: var(--mono); }
 .radio-line small { display: inline; }
 .link-btn { align-self: center; text-decoration: underline; }
 .selectable { user-select: all; word-break: break-all; }
-.account-dialog { max-width: 640px; }
+
+/* My account (own colours: it opens over every part, each with its own stylesheet) */
+.acct-back { --ac-panel: #fff; --ac-text: #111827; --ac-muted: #4b5563; --ac-line: #d5dae3; --ac-field: #f7f8fb; --ac-accent: #4f46e5; --ac-soft: #eef0ff;
+  position: fixed; inset: 0; z-index: 1200; display: grid; place-items: center; padding: 16px; overflow: auto; background: rgb(10 15 28 / .6); backdrop-filter: blur(3px); }
+:root[data-theme="dark"] .acct-back { --ac-panel: #151c2c; --ac-text: #f1f4fa; --ac-muted: #aab6c9; --ac-line: #35425a; --ac-field: #0e1422; --ac-accent: #7c83ff; --ac-soft: #232b4a; }
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) .acct-back { --ac-panel: #151c2c; --ac-text: #f1f4fa; --ac-muted: #aab6c9; --ac-line: #35425a; --ac-field: #0e1422; --ac-accent: #7c83ff; --ac-soft: #232b4a; }
+}
+.acct, .acct * { box-sizing: border-box; }
+.acct { width: min(560px, 100%); max-height: calc(100vh - 32px); overflow: auto; border-radius: 18px; background: var(--ac-panel); color: var(--ac-text);
+  box-shadow: 0 24px 70px rgb(0 0 0 / .35); text-align: left; font-size: 14px; }
+.acct-head { display: flex; align-items: center; gap: 14px; padding: 20px 22px; border-bottom: 1px solid var(--ac-line); }
+.acct-head > div { flex: 1; min-width: 0; }
+.acct-head small { color: var(--ac-muted); font-size: 13px; }
+.acct-head h2 { margin: 0; color: var(--ac-text); font-size: 20px; line-height: 1.25; overflow-wrap: anywhere; }
+.acct-avatar { flex: none; display: grid; place-items: center; width: 46px; height: 46px; border-radius: 14px; background: var(--ac-accent); color: #fff; font-weight: 700; font-size: 16px; }
+.acct-chips { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 6px; }
+.acct-chips span { padding: 2px 9px; border-radius: 99px; background: var(--ac-soft); color: var(--ac-text); font-size: 12px; text-transform: capitalize; }
+.acct-x { align-self: flex-start; width: 34px; height: 34px; border: 1px solid var(--ac-line); border-radius: 10px; background: transparent; color: var(--ac-text); cursor: pointer; font-size: 14px; }
+.acct-x:hover { background: var(--ac-field); }
+.acct-part { display: grid; gap: 12px; padding: 18px 22px; }
+.acct-part + .acct-part { border-top: 1px solid var(--ac-line); }
+.acct-part h3 { margin: 0; color: var(--ac-text); font-size: 15px; }
+.acct-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px; }
+.acct-grid .wide { grid-column: 1 / -1; }
+.acct-grid label { display: grid; gap: 5px; min-width: 0; }
+.acct-grid label > span:first-child { color: var(--ac-muted); font-size: 13px; font-weight: 600; }
+.acct input { width: 100%; height: 42px; padding: 0 12px; border: 1px solid var(--ac-line); border-radius: 10px; background: var(--ac-field); color: var(--ac-text); font: inherit; }
+.acct .pw-box > input { padding-right: 42px; }
+.acct input::placeholder { color: var(--ac-muted); opacity: .75; }
+.acct input:focus-visible, .acct-btn:focus-visible, .acct-x:focus-visible { outline: 2px solid var(--ac-accent); outline-offset: 1px; }
+.acct .pw-eye { right: 6px; color: var(--ac-text); opacity: .75; }
+.acct .pw-eye:hover { opacity: 1; }
+.acct-hint { color: var(--ac-muted); }
+.acct-btn { justify-self: start; min-height: 42px; padding: 0 18px; border: 1px solid var(--ac-line); border-radius: 10px; background: var(--ac-panel); color: var(--ac-text); font: inherit; font-weight: 600; cursor: pointer; }
+.acct-btn:hover { background: var(--ac-field); }
+.acct-btn.primary { border-color: transparent; background: var(--ac-accent); color: #fff; }
+.acct-btn.primary:hover { filter: brightness(1.08); background: var(--ac-accent); }
+.acct-btn:disabled { opacity: .6; cursor: default; }
+.acct-note { margin: 0; padding: 10px 12px; border-radius: 10px; background: #e8f6ee; color: #14532d; }
+.acct > .acct-note { margin: 16px 22px 0; }
+.acct-note.error { background: #fdeaea; color: #8f1d1d; }
+.acct-note.warn { background: #fff4d6; color: #6b4700; }
+.acct-done { position: fixed; left: 50%; top: 76px; transform: translateX(-50%); z-index: 1300; display: flex; align-items: center; gap: 10px; padding: 12px 18px; border-radius: 12px;
+  background: #14532d; color: #fff; font-weight: 600; box-shadow: 0 12px 36px rgb(0 0 0 / .3); }
+@media (max-width: 520px) { .acct-btn { width: 100%; } }

@@ -4,10 +4,10 @@ import { useEffect, useRef, useState } from 'react';
 import { api } from '../api.js';
 import CodeArea from '../CodeArea.jsx';
 import Grid from './Grid.jsx';
-import { sendToDesigner } from './handoff.js';
+import UseQuery from './UseQuery.jsx';
 import QueryHelper from './QueryHelper.jsx';
 import { HelperButton } from './MongoView.jsx';
-import { buildSql, emptyHelper, newFilter } from './queryHelper.js';
+import { buildSql, emptyHelper, fieldTypes, newFilter } from './queryHelper.js';
 
 const PARAM = /\$[PX]!?\{(?:IN|NOTIN)?\s*,?[^,}]*,?\s*([A-Za-z_]\w*)\}/g;
 
@@ -23,7 +23,10 @@ export default function SqlView({ tab, onChange, notify }) {
   const helper = tab.helper || emptyHelper();
   const helperOpen = tab.helperOpen ?? true;
   // the helper's FROM: the table this tab was opened from, else the query the rows came from (as a sub-query)
-  const helperSql = buildSql(helper, { source: tab.source, base: tab.helperBase ?? sql, dialect: tab.dialect });
+  const [types, setTypes] = useState({});
+  useEffect(() => { if (result?.rows?.length) setTypes((old) => ({ ...old, ...fieldTypes(result.rows.map((row) => Object.fromEntries(result.columns.map((c, i) => [c, row[i]])))) })); }, [result]);
+  const helperSql = buildSql(helper, { source: tab.source, base: tab.helperBase ?? sql, dialect: tab.dialect, types });
+  const addFilter = (what) => onChange({ helperOpen: true, helper: { ...helper, filters: [...helper.filters, newFilter(what)] } });
   const apply = () => {
     onChange({ sql: helperSql, helperBase: tab.source ? undefined : (tab.helperBase ?? sql) });
     run(helperSql);
@@ -48,7 +51,7 @@ export default function SqlView({ tab, onChange, notify }) {
         <label className="qs-limit">Rows <select value={tab.limit || 200} onChange={(e) => onChange({ limit: Number(e.target.value) })}>{[50, 200, 1000, 5000].map((n) => <option key={n}>{n}</option>)}</select></label>
         <span className="grow" />
         <button type="button" className="btn sm" disabled={!sql.trim()} onClick={() => { navigator.clipboard?.writeText(sql); notify('Copied the SQL'); }}>Copy</button>
-        <button type="button" className="btn sm" disabled={!sql.trim()} onClick={() => sendToDesigner({ connectionId: tab.connectionId, queryLanguage: 'sql', querySource: sql })}>New report from this ↗</button>
+        <UseQuery disabled={!sql.trim()} query={() => ({ connectionId: tab.connectionId, queryLanguage: 'sql', querySource: sql })} />
       </div>
       <CodeArea ref={area} rows={9} value={sql} onChange={(e) => onChange({ sql: e.target.value })}
         placeholder={'SELECT *\nFROM orders\nWHERE branch = $P{Branch}\nORDER BY placed_on DESC'}
@@ -64,10 +67,10 @@ export default function SqlView({ tab, onChange, notify }) {
       {error && <div className="q-error" role="alert">{error}</div>}
       {result && <div className="qs-status">✓ {result.rows.length}{result.more ? '+' : ''} rows · {result.columns.length} columns · {result.ms} ms{result.more ? ` · stopped at ${tab.limit || 200}` : ''}</div>}
       <div className={`q-work ${helperOpen ? 'with-helper' : ''}`}>
-        <Grid columns={result?.columns} rows={result?.rows} busy={busy} name="query" empty={result ? 'The query returned no rows' : 'Write a SELECT and press Run (Ctrl+Enter)'}
-          extra={!helperOpen && <HelperButton onOpen={() => onChange({ helperOpen: true })} onDropField={(field) => onChange({ helperOpen: true, helper: { ...helper, filters: [...helper.filters, newFilter(field)] } })} />} />
+        <Grid onFilter={addFilter} columns={result?.columns} rows={result?.rows} busy={busy} name="query" empty={result ? 'The query returned no rows' : 'Write a SELECT and press Run (Ctrl+Enter)'}
+          extra={!helperOpen && <HelperButton onOpen={() => onChange({ helperOpen: true })} onDropField={addFilter} />} />
         {helperOpen && (
-          <QueryHelper kind="sql" helper={helper} columns={result?.columns || []} onChange={(h) => onChange({ helper: h })} preview={helperSql}
+          <QueryHelper kind="sql" helper={helper} columns={result?.columns || []} types={types} onChange={(h) => onChange({ helper: h })} preview={helperSql}
             onApply={apply} onClear={() => onChange({ helper: emptyHelper(), ...(tab.helperBase != null ? { sql: tab.helperBase, helperBase: undefined } : {}) })}
             onClose={() => onChange({ helperOpen: false })} />
         )}

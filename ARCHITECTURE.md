@@ -64,14 +64,14 @@ tests/                     pytest suite (≈430 tests), JRXML fixture, service_n
                            namespace, for the older tests)
 postman/                   Collection + environment for every endpoint (Admin → Tools offers them for download)
 tools/                     postman/ (collection builder, demo data), embed/ (example page), theme/ (runner dark CSS)
-deploy/                    docker-compose.yml (PostgreSQL + 2 instances + nginx HTTPS), nginx.conf, .env.example
+deploy/                    docker-compose.yml (PostgreSQL + 2 instances + nginx HTTPS), nginx.conf
 data/                      Runtime data — never in git or in the Docker image (see §6)
 .github/workflows/ci.yml   CI: ruff + pytest (with PostgreSQL, MySQL, MongoDB, SQL Server, Oracle), frontend build,
                            Docker build and start
 pyproject.toml             Project metadata, ruff (lint) and pytest settings
 requirements*.txt          Runtime / development dependencies
 Dockerfile, .dockerignore  Multi-stage image: builds the frontend, then the Python service (no data inside)
-.env.example               Every setting with a comment (copy to .env; .env is never committed)
+docs/SETTINGS.md           Every setting with a comment (.env is made by python -m backend.app.setup and never committed)
 README.md, ARCHITECTURE.md, DEPLOYMENT.md, TESTING.md, README_roman_urdu.md   Documentation
 ```
 
@@ -99,13 +99,14 @@ backend/app/
     pages.py               /, /login, /ui, /admin, /designer, /server, /analytics
     designer.py            query parse, JRXML import, design validate/render, draft preview/run, local bootstrap
     repository.py          /api/admin/reports…, /api/admin/folders… (token access)
-    connections.py         /api/admin/connections… (data adapters)
+    connections.py         /api/data-sources… (data sources; each belongs to one part)
     workspace.py           /api/admin/workspace… and Publish
     server_portal.py       /api/server/… (login session: repository, resources, copy/move, upload/download, versions)
     jobs.py                /api/server/schedules…, /api/server/runs…, run in background
     users.py               /api/admin/users…
     system.py              /health, /ready, adapter status, whoami, logs, audit
     generate.py            /reports and /generate/<ID>.<format>
+    home.py                /api/home (summary by right for /home)
     analytics.py           /api/analytics/… (datasets, relationships, dashboards, query, .mdash and Power BI import),
                            /api/server/dashboards/…, /api/admin/analytics/… and /api/v1/analytics/…
     api_keys.py, public_api.py, embed.py   API keys, the public API v1 (/api/v1/…), embedding
@@ -181,6 +182,11 @@ router sees the same objects. Lower layers (`storage`, `security`, `connectors`,
 * `_Render` — Jasper's fill engine, simplified:
   * rows → calculated fields → **dataset filter expression** → sort → groups;
   * variables (Sum/Count/Average/Min/Max/First, reset per report or group);
+  * a section can have several bands: `bands.detail.more: [{height, elements, printWhenExpression}]` is Detail 2, 3… (the
+    same for Summary, Title, headers, footers and groups); each band may have its own `printWhenExpression`
+  * own fonts (`app/fonts.py`, TrueType files in the system database) and Urdu / Arabic text (`rendering/rtl.py` orders each
+    line, `rendering/shaping.py` joins letters with HarfBuzz by the font's own tables, Nastaliq too; without the `uharfbuzz`
+    package `rtl.py` joins Naskh letters itself)
   * bands in Jasper order: Background, Title, Page Header, Column Header, group headers, Detail, group
     footers, Column Footer, Page Footer / Last Page Footer, Summary, No Data;
   * report properties: When No Data Type, Title / Summary on a new page, Float column footer, Ignore pagination;
@@ -206,11 +212,11 @@ MongoDB query) and returns our report + design plus a list of warnings for what 
 | Group | Paths | Who |
 |---|---|---|
 | Report access | `/generate/{ID}.{pdf,xlsx,csv}`, `/reports`, `/reports/connections/{id}/status` | Websites (signed link, `X-Report-Token`) or admin token |
-| Pages | `/login`, `/designer`, `/server`, `/admin`, `/analytics`, `/ui` | Browser (signed in; each page needs its right) |
+| Pages | `/login`, `/home`, `/designer`, `/server`, `/admin`, `/analytics`, `/ui` | Browser (signed in; each page needs its right) |
 | Designer workspace | `/api/admin/workspace…`, `/publish` | Designer or admin token |
-| Designer tools | `/api/admin/query/parse`, `/designer/render`, `/designer/validate`, `/drafts/preview`, `/drafts/run`, `/jrxml/import` | Designer or admin token |
+| Designer tools | `/api/admin/query/parse`, `/designer/render`, `/designer/validate`, `/drafts/preview`, `/drafts/run`, `/jrxml/import`, `/api/admin/fonts…`, `/api/admin/patterns…` (saved format patterns, `app/patterns.py`) | Designer or admin token |
 | Repository (token) | `/api/admin/reports…`, `/api/admin/folders…` | Designer (read/save), admin (delete) |
-| Data adapters | `/api/admin/connections…` | Admin (change), designer (list/test) |
+| Data sources | `/api/data-sources…` (older: `/api/admin/connections…`) | The right of their part (`services/adapter_areas.py`); Admin: all |
 | `/server` portal | `/api/server/login`, `/repository`, `/reports/{id}` (details, edit, copy, move, file, run), `/upload`, `/folders…`, `/connections` | Session cookie; viewer < designer < admin |
 | Administration | `/api/admin/users…`, `/logs…`, `/audit`, `/whoami` | Admin token |
 | Health | `/health` | Open |
@@ -241,6 +247,7 @@ API helpers.
 | `panels.jsx` | Repository explorer trees (Workspace, Server, Data Adapters), Outline, Palette, adapter wizard |
 | `outlineActions.js` | Every right-click menu (report, band, element, parameter, field, variable, canvas) |
 | `Properties.jsx`, `ComponentProps.jsx` | Property tabs for the report, bands, elements and data components |
+| `query/` | Query page: `QueryHelper.jsx` + `queryHelper.js` (typed filters and drag & drop: a value keeps the type it has in the data, so `"123"` stays text), `Grid.jsx` and `DocViews.jsx` (Columns, Tree and JSON views of a result) |
 | `SetupForm.jsx`, `DatasetQueryDialog.jsx` | Report details, data adapter, query, fields, parameters, filter and sort |
 | `ComponentWizard.jsx`, `ExpressionEditor.jsx`, `PublishDialog.jsx` | Table/Crosstab/Subreport wizards, expression editor, publish |
 | `SourceView.jsx`, `mrd.js` | Source tab (definition as JSON, validated Apply) and the `.mrd` file format |
@@ -260,10 +267,12 @@ imports, disk use and limits), Branding, System database, Developer tools, Logs 
 
 ### 4.4 `/analytics` (`frontend/src/analytics`)
 
-`AnalyticsApp` (side list, `#dash/…`, `#ds/…`, `#model` addresses), `DatasetEditor` (source, test, import, column
+`AnalyticsApp` (side list, `#dash/…`, `#ds/…`, `#model`, `#ml`, `#embed/…` addresses), `DatasetEditor` (source, test, import, column
 model, import history), `ModelView` (relationships), `Dashboard` (12-column grid, drag/resize, cross-filter chips,
 slicers), `VisualEditor` (visual type, fields wells, filters, format), `Visual` (ECharts 5 charts, KPI, table,
-slicer; the validated palette for light and dark), `PowerBiImport` (the .pbit/.pbix dialog: pages, tables → datasets; `pbix.js` takes only the report part out of a .pbix in the browser),
+slicer, map, ML; the validated palette for light and dark), `PowerBiImport` (the .pbit/.pbix dialog: pages, tables → datasets; `pbix.js` takes only the report part out of a .pbix in the browser),
+`worldMap.js` (country borders from world-atlas, loaded only for a map), `MlLab` / `MlSetup` / `MlResult` / `mlModels.js`
+(machine learning; the models are numpy code in `backend/app/analytics/ml.py`), `EmbedGuide`,
 `api.js` (fetch helper and the visual → query spec).
 
 ---

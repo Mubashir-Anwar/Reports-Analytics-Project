@@ -22,8 +22,18 @@
 .aw-result { margin: 8px 0; font-weight: 600; }
 .aw-result.ok { color: var(--ok); } .aw-result.err { color: var(--danger); }
 .aw-buttons { display: flex; gap: 8px; align-items: center; padding: 10px 20px; border-top: 1px solid var(--line); background: var(--soft, var(--bg)); }
+.aw-modal.small { width: min(460px, 96vw); }
+.aw-area { display: inline-block; margin-top: 8px; padding: 2px 10px; border-radius: 999px; background: var(--accent-soft); color: var(--accent); font-size: 11px; font-weight: 700; }
+.aw-areas { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 6px; margin-top: 10px; }
+.aw-areas button { padding: 7px 8px; border: 1px solid var(--line); border-radius: 10px; background: var(--panel); color: var(--text); text-align: left; cursor: pointer; font: inherit; }
+.aw-areas button.on { border-color: var(--accent); background: var(--accent-soft); }
+.aw-areas b { display: block; font-size: 12px; } .aw-areas small { color: var(--muted); font-size: 10.5px; }
 @media (max-width: 760px) {
   .aw-back { place-items: end stretch; padding: 0; }
   .aw-modal { width: 100%; border-radius: 18px 18px 0 0; }
   .pg-grid { grid-template-columns: 1fr; }
+  .aw-areas { grid-template-columns: 1fr 1fr; }
 }
+.ds-part { display: inline-block; padding: 1px 8px; border-radius: 999px; background: var(--accent-soft); color: var(--accent); font-size: 11px; font-weight: 700; vertical-align: 1px; }
+.ds-part.shared { background: var(--warn-soft, var(--soft)); color: var(--warn, var(--muted)); }
+.ds-parts { margin: 4px 0 10px; }

@@ -1,5 +1,6 @@
 // /analytics: dashboards, datasets and the model. Needs the Analytics right; datasets and the model also the
-// Designer or Admin right. Addresses: #dash/<id>, #ds/<id>, #ds/new, #model, #q/<id>, #q/new (DAX / SQL queries).
+// Designer or Admin right. Addresses: #dash/<id>, #ds/<id>, #ds/new, #model, #q/<id>, #q/new (DAX / SQL queries),
+// #sources (its data sources), #ml (ML lab), #embed/<dashboard> (how to show it in a website).
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Notice, Topbar } from '../portal/Shell.jsx';
 import { signOut } from '../shared/session.js';
@@ -9,13 +10,16 @@ import AnalyticsRibbon from './AnalyticsRibbon.jsx';
 import QueryEditor, { modeLabel } from './QueryEditor.jsx';
 import Dashboard from './Dashboard.jsx';
 import DatasetEditor from './DatasetEditor.jsx';
+import DataSourcesPanel from '../shared/DataSourcesPanel.jsx';
+import EmbedGuide from './EmbedGuide.jsx';
+import MlLab from './MlLab.jsx';
 import ModelView from './ModelView.jsx';
 import PowerBiImport, { readBase64 } from './PowerBiImport.jsx';
 import { readPbixReport } from './pbix.js';
 
 const readHash = () => {
   const [kind, id] = window.location.hash.slice(1).split('/');
-  return ['dash', 'ds', 'model', 'q'].includes(kind) ? { kind, id: id || '' } : { kind: 'home', id: '' };
+  return ['dash', 'ds', 'model', 'q', 'ml', 'embed', 'sources'].includes(kind) ? { kind, id: id || '' } : { kind: 'home', id: '' };
 };
 
 export default function AnalyticsApp() {
@@ -34,6 +38,7 @@ export default function AnalyticsApp() {
     setDatasets(d.datasets); setRelationships(r.relationships); setDashboards(b.dashboards); setSavedQueries(q.queries);
   }, []);
 
+  const reloadInfo = useCallback(() => bi.info().then(setInfo).catch(() => {}), []);
   useEffect(() => {
     bi.info().then((value) => { setInfo(value); return reload(); }).catch((error) => setDenied(error.message));
   }, [reload]);
@@ -114,7 +119,7 @@ Type the ID of the data adapter to use: ${info.adapters.map((a) => a.id).join(',
     return (<><Topbar current="/analytics" /><div className="login-wrap"><div className="card login"><Notice message={{ text: denied, kind: 'error' }} /><button type="button" className="btn" onClick={signOut}>Sign out and use another account</button></div></div></>);
   }
   useEffect(() => {
-    const names = { dash: 'Dashboard', ds: 'Dataset', q: 'Query', model: 'Model' };
+    const names = { dash: 'Dashboard', ds: 'Dataset', q: 'Query', model: 'Model', ml: 'ML lab' };
     const item = ({ dash: dashboards, ds: datasets, q: savedQueries }[view.kind] || []).find((x) => x.id === view.id);
     setTeamPlace(names[view.kind] ? { place: `${view.kind}/${view.id || ''}`, title: `${names[view.kind]}${item ? ` · ${item.name || item.title || item.id}` : ''}` } : {});
   }, [view, datasets, dashboards, savedQueries]);
@@ -169,7 +174,10 @@ Type the ID of the data adapter to use: ${info.adapters.map((a) => a.id).join(',
               </a>
             ))}
           </div>
+          {info.mayModel && <a href="#sources" className={`bi-link model ${view.kind === 'sources' ? 'on' : ''}`}><span><i className="bi-mark tint-g" aria-hidden="true">⛁</i>Data sources</span><small className="muted">{info.adapters.length || 'connect'}</small></a>}
           <a href="#model" className={`bi-link model ${view.kind === 'model' ? 'on' : ''}`}><span><i className="bi-mark tint-v" aria-hidden="true">⇄</i>Model (relationships)</span><small className="muted">{relationships.length}</small></a>
+          <a href="#ml" className={`bi-link model ${view.kind === 'ml' ? 'on' : ''}`}><span><i className="bi-mark tint-c" aria-hidden="true">✦</i>ML lab</span><small className="muted">predict</small></a>
+          <a href="#embed" className={`bi-link model ${view.kind === 'embed' ? 'on' : ''}`}><span><i className="bi-mark tint-b" aria-hidden="true">⧉</i>Embed in a website</span><small className="muted">guide</small></a>
         </aside>
 
         <main className="bi-main">
@@ -180,13 +188,14 @@ Type the ID of the data adapter to use: ${info.adapters.map((a) => a.id).join(',
               onSaved={reload} onDeleted={() => { reload(); go(''); }}
               actions={(() => {
                 const entry = dashboards.find((d) => d.id === view.id);
+                const embed = entry ? <a className="btn" href={`#embed/${entry.id}`} title="Show this dashboard inside another website">Embed</a> : null;
                 return entry && (info.mayModel || entry.mayChange)
-                  ? <button type="button" className="btn" onClick={() => downloadDashboard(entry)} title="One .mdash file with the dashboard and its datasets' definitions (no data), to upload to another server or folder">Download</button>
-                  : null;
+                  ? <>{embed}<button type="button" className="btn" onClick={() => downloadDashboard(entry)} title="One .mdash file with the dashboard and its datasets' definitions (no data), to upload to another server or folder">Download</button></>
+                  : embed;
               })()} />
           )}
           {view.kind === 'ds' && (
-            <DatasetEditor key={view.id} datasetId={view.id} info={info} notify={notify}
+            <DatasetEditor key={view.id} datasetId={view.id} info={info} onConnected={reloadInfo} notify={notify}
               folders={[...new Set(['Analytics', ...datasets.map((d) => d.folder), ...dashboards.map((d) => d.folder)].filter(Boolean))].sort()}
               onSaved={(newId) => { reload(); if (newId) go(`ds/${newId}`); }} onDeleted={() => { reload(); go(''); }} />
           )}
@@ -196,6 +205,9 @@ Type the ID of the data adapter to use: ${info.adapters.map((a) => a.id).join(',
               onDatasetMade={() => reload()}
               onSaved={(newId) => { reload(); if (newId && newId !== view.id) go(`q/${newId}`); }} onDeleted={() => { reload(); go(''); }} />
           )}
+          {view.kind === 'sources' && info.mayModel && <DataSourcesPanel area="analytics" notify={notify} onChanged={reloadInfo} />}
+          {view.kind === 'ml' && <MlLab datasets={datasets} dashboards={dashboards} notify={notify} onAdded={reload} go={go} />}
+          {view.kind === 'embed' && <EmbedGuide dashboards={dashboards} dashboardId={view.id} notify={notify} go={go} />}
           {view.kind === 'model' && <ModelView datasets={datasets} relationships={relationships} mayModel={info.mayModel} notify={notify} onChanged={reload} />}
         </main>
       </div>
@@ -215,6 +227,7 @@ function Home({ info, datasets, dashboards, queries, relationships, onNew }) {
     ['Queries & links', `${queries.length} · ${relationships.length}`, 'Saved queries · relationships in the model', 'v'],
   ];
   const steps = [
+    ...(info.mayModel ? [{ done: info.adapters.length > 0, title: 'Data source', tint: 'b', text: info.adapters.length ? `${info.adapters.length} connected for Analytics` : 'Connect a database for Analytics.', action: <a className="btn small" href="#sources">{info.adapters.length ? 'Data sources' : 'Connect a database'}</a> }] : []),
     { done: datasets.length > 0, title: 'Datasets', tint: 'g', text: datasets.length ? `${datasets.length} dataset(s), ${ready.length} ready` : 'Choose a data adapter and a query; its records are imported for fast analysis.',
       action: info.mayModel ? <a className="btn small" href="#ds/new">New dataset</a> : <small className="muted">Made by people with the Designer or Admin right.</small> },
     { done: datasets.length > 1 && relationships.length > 0, title: 'Model', tint: 'v', text: 'Relate datasets on a shared column to use them together (optional).', action: <a className="btn small" href="#model">Open the model</a> },

@@ -56,10 +56,10 @@ from typing import Any
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse
 
-from backend.app.analytics import bundle, engine, importer, model as analytics_model, powerbi, queries as analytics_queries, settings, store
+from backend.app.analytics import bundle, engine, importer, ml, model as analytics_model, powerbi, queries as analytics_queries, settings, store
 from backend.app.analytics.refresher import next_refresh
 from backend.app.connectors.errors import ConnectorQueryError, MongoReadAccessError
-from backend.app.connectors.profiles import load_connection_profiles
+from backend.app.connectors.profiles import profiles_in
 from backend.app.logs import LOG
 from backend.app.security import api_keys, permissions
 from backend.app.security.access import client_address, enabled_areas
@@ -100,7 +100,7 @@ def register(app: FastAPI, ctx: SimpleNamespace) -> None:
             LOG.exception("Audit event %s could not be written", action)
 
     def adapters() -> dict[str, str]:
-        return {item["id"]: item.get("type", "mongodb") for item in load_connection_profiles()}
+        return {item["id"]: item.get("type", "mongodb") for item in profiles_in("analytics")}
 
     async def body(request: Request) -> dict[str, Any]:
         ctx.require_json_request(request)
@@ -199,10 +199,10 @@ def register(app: FastAPI, ctx: SimpleNamespace) -> None:
         session = user(request)
         modelling = may_model(session)
         return {"user": session["username"], "mayModel": modelling, "limits": settings.limits(),
-                "visuals": list(store.VISUALS), "aggregations": list(store.AGGREGATIONS), "buckets": [b for b in store.BUCKETS if b],
+                "visuals": list(store.VISUALS), "models": list(ml.MODELS), "aggregations": list(store.AGGREGATIONS), "buckets": [b for b in store.BUCKETS if b],
                 "operators": list(store.OPERATORS), "languages": list(store.LANGUAGES),
                 "adapters": [{"id": item["id"], "name": item.get("name", item["id"]), "type": item.get("type", "mongodb")}
-                             for item in load_connection_profiles()] if modelling else []}
+                             for item in profiles_in("analytics")] if modelling else []}
 
     # ------------------------------------------------------------- datasets
     @app.get("/api/analytics/datasets")
@@ -542,6 +542,38 @@ def register(app: FastAPI, ctx: SimpleNamespace) -> None:
             raise bad(exc) from None
         ctx.require_folder(session, folder, permissions.MANAGE)
         return JSONResponse(install(request, session, {**payload, "folder": folder}, folder), status_code=201)
+
+    # ------------------------------------------------------------- inside another website (routers/embed.py checks the token)
+    def embedded_dashboard(item: dict[str, Any]) -> dict[str, Any]:
+        """What a visitor of another website gets: the layout, without the names of people or the filters' values."""
+        return {"id": item["id"], "name": item.get("name"), "description": item.get("description") or "", "filters": [], "mayChange": False,
+                "tiles": [{**{k: v for k, v in tile.items() if k != "filters"}, "filters": []} for tile in item.get("tiles") or []]}
+
+    def embedded_query(item: dict[str, Any], tile_ids: Any, picks: Any, fixed: list[dict[str, Any]], caller: str) -> list[dict[str, Any]]:
+        """Answers for tiles of a dashboard as it was saved. A visitor sends only which tiles, and values picked in the
+        dashboard's own group-by fields; `fixed` filters (from the token) apply to every tile."""
+        tiles = {tile["id"]: tile for tile in item.get("tiles") or []}
+        if not isinstance(tile_ids, list) or not 1 <= len(tile_ids) <= MAX_BATCH or any(not isinstance(t, str) or t not in tiles for t in tile_ids):
+            raise HTTPException(status_code=422, detail="Send 'tiles': the IDs of visuals of this dashboard")
+        if picks is not None and not isinstance(picks, list):
+            raise HTTPException(status_code=422, detail="filters must be a list")
+        offered = {(tile["groupBy"][0].get("dataset") or tile.get("dataset"), tile["groupBy"][0]["column"], tile["groupBy"][0].get("bucket", ""))
+                   for tile in tiles.values() if tile.get("groupBy")}
+        chosen = []
+        for pick in picks or []:
+            if (isinstance(pick, dict) and pick.get("op") == "in"
+                    and (pick.get("dataset"), pick.get("column"), pick.get("bucket") or "") in offered):
+                chosen.append(pick)
+        queries = []
+        for tile_id in tile_ids:
+            tile = tiles[tile_id]
+            query = {**tile, "tileId": tile_id, "filters": [*(tile.get("filters") or []), *fixed]}
+            if tile.get("type") == "slicer":
+                query.update({"groupBy": tile["groupBy"][:1], "values": [{"agg": "countrows", "column": ""}], "sort": [{"by": "group:0", "dir": "asc"}], "limit": 500})
+            queries.append(query)
+        return run_queries(queries, [*(item.get("filters") or []), *chosen], caller)
+
+    ctx.embedded_dashboard, ctx.embedded_query = embedded_dashboard, embedded_query
 
     # ------------------------------------------------------------- administration (/admin → Analytics)
     def admin(request: Request) -> str:

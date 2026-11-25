@@ -2,7 +2,7 @@
 
 | File | What it is |
 |---|---|
-| `Reporting-Service.postman_collection.json` | 262 requests in 19 folders covering 200 of the 201 endpoints (incl. the public API, embedding, analytics and the Query workspace; only the system-database switch is left out, because it changes where the server keeps its data), in an order that runs end to end (create → use → clean up). Every request checks its status; IDs, the API key and links are passed on through environment variables. |
+| `Reporting-Service.postman_collection.json` | 299 requests in 19 folders (incl. the public API, embedding, analytics and the Query workspace; only the system-database switch is left out, because it changes where the server keeps its data), in an order that runs end to end (create → use → clean up). Every request checks its status; IDs, the API key and links are passed on through environment variables. |
 | `Local.postman_environment.json` | The variables. Fill in `password` and `adminToken`; the rest has local defaults. |
 
 Regenerate both after changing the API: `python tools/postman/build_collection.py`.
@@ -16,7 +16,7 @@ that server's address and their username filled in).
 1. **Import** both files (File → Import).
 2. Choose the environment **Reporting Service — local** and fill in:
    * `baseUrl` — e.g. `http://127.0.0.1:8000`
-   * `username` / `password` — a super admin (during first setup: `admin` and the admin token)
+   * `username` / `password` — a super admin (during first setup: the one `python -m backend.app.setup` printed)
    * `adminToken` — `REPORTING_ADMIN_TOKEN` (for the token-based report requests)
    * `mongoUri` — a MongoDB the server can reach (default `mongodb://127.0.0.1:27017`)
 3. Create the demo data once: `python tools/postman/seed_demo.py` (database `rs_postman_demo`, 5 orders).
@@ -29,7 +29,7 @@ that server's address and their username filled in).
 npx newman run postman/Reporting-Service.postman_collection.json -e postman/Local.postman_environment.json --env-var password=… --env-var adminToken=…
 ```
 
-Last full run (Newman 6, 2026-11-24, a fresh server with the demo data): 262 requests, 262 test scripts, 315 checks, 0 failures.
+Last full run (Newman 6, 2026-11-25, a fresh server with the demo data): 299 requests, 299 test scripts, 363 checks, 0 failures.
 
 Folder **05b Query workspace** browses `pm_mongo` like the /query page: collections, find (filter, projection, sort), an
 aggregation with its shell code and fields. A writing stage ($out) is refused. The two SQL requests answer 422 because

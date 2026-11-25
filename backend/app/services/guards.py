@@ -15,22 +15,21 @@ from typing import Any
 from fastapi import HTTPException, Request
 
 from backend.app.constants import (
-    BOOTSTRAP_USERNAME,
     MIN_ACCESS_SECRET_LENGTH,
     RIGHT_LABELS,
     ROLE_TOKEN_MIN_LENGTH,
     SESSION_COOKIE,
-    USER_RIGHTS,
 )
 from backend.app.logs import LOG
 from backend.app.security import api_keys
 from backend.app.security.access import client_address, enabled_areas
 from backend.app.security.shared_state import is_revoked, replaced, replaced_and_over
 from backend.app.security.users import (
-    bootstrap_login_active,
     derived_role,
     find_user,
+    is_expired,
     is_super_admin,
+    is_temporary,
     read_session_cookie,
     role_at_least,
     user_rights,
@@ -244,17 +243,12 @@ def current_session(ctx: SimpleNamespace, request: Request) -> dict[str, Any] | 
     body = read_session_cookie(request.cookies.get(SESSION_COOKIE, ""))
     if body is None or is_revoked(body.get("n")) or replaced_and_over(body.get("n")):
         return None
-    if body.get("b"):
-        if not bootstrap_login_active():
-            return None
-        return {"username": BOOTSTRAP_USERNAME, "role": "admin", "rights": set(USER_RIGHTS), "superAdmin": True,
-                "bootstrap": True, "nonce": body.get("n")}
     user = find_user(str(body.get("u", "")))
-    if user is None or user.get("disabled") or int(user.get("sessionVersion", 0)) != int(body.get("v", -1)):
+    if user is None or user.get("disabled") or is_expired(user) or int(user.get("sessionVersion", 0)) != int(body.get("v", -1)):
         return None
     rights, super_admin = user_rights(user), is_super_admin(user)
     return {"username": user["username"], "role": derived_role(rights, super_admin), "rights": rights, "superAdmin": super_admin,
-            "bootstrap": False, "nonce": body.get("n")}
+            "nonce": body.get("n"), "temporary": is_temporary(user), "expiresAt": (user.get("expiresAt") or "") if is_temporary(user) else ""}
 
 
 def require_right(ctx: SimpleNamespace, request: Request, right: str) -> dict[str, Any]:
@@ -282,7 +276,7 @@ def require_session(ctx: SimpleNamespace, request: Request, minimum: str = "view
 
 
 def session_view(ctx: SimpleNamespace, session: dict[str, Any]) -> dict[str, Any]:
-    return {"username": session["username"], "role": session["role"], "bootstrap": session["bootstrap"],
+    return {"username": session["username"], "role": session["role"], "temporary": session["temporary"], "expiresAt": session["expiresAt"],
             "rights": sorted(session["rights"]), "superAdmin": session["superAdmin"], "replaced": replaced_notice(session)}
 
 

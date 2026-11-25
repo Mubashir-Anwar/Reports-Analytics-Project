@@ -210,6 +210,8 @@ def _dynamic_report(payload: dict[str, Any], source_path: Path | None = None) ->
         raise ValueError("The MongoDB collection name is required")
     if not is_sql and not no_data and (not COLLECTION_TEMPLATE.fullmatch(collection) or collection.lower().startswith("system.")):
         raise ValueError("A collection name may contain only letters, numbers, _ - . and $P{parameter}")
+    if not connection_id:
+        raise ValueError("Choose a data adapter for the report (Setup, Data adapter)")
     if not CONNECTION_ID_PATTERN.fullmatch(connection_id):
         raise ValueError("Invalid connection ID format")
 

@@ -4,7 +4,8 @@
 // actions as the menus and shortcuts (outlineActions.js), so nothing here has its own logic. Ctrl K reads these buttons.
 import { useEffect, useRef, useState } from 'react';
 import { selectedIds } from './arrange.js';
-import { FONT_NAMES, PAGE_PRESETS, PALETTE_GROUPS, RESIZE_MODES, ZOOM_LIMITS, clampZoom, contentRight, findElement, mapElements, pagePreset } from './designModel.js';
+import { PAGE_PRESETS, PALETTE_GROUPS, RESIZE_MODES, ZOOM_LIMITS, clampZoom, contentRight, findElement, mapElements, pagePreset } from './designModel.js';
+import { FontSelect, FontsDialog } from './fonts.jsx';
 import HelpDialog from './HelpDialogs.jsx';
 import { MRD_WITH_IMAGES_ACCEPT } from './mrd.js';
 import { publishState } from './panels.jsx';
@@ -281,9 +282,7 @@ export default function Ribbon({
         </Group>
         <Group label="Font" className="rb-font">
           <Row>
-            <select className="rb-select wide" aria-label="Font" title="Font" value={element?.fontName || 'SansSerif'} disabled={!textual} onChange={(e) => actions.patchSelected({ fontName: e.target.value })}>
-              {FONT_NAMES.map((name) => <option key={name}>{name}</option>)}
-            </select>
+            <FontSelect className="rb-select wide" aria-label="Font" title="Font" value={element?.fontName} disabled={!textual} onChange={(fontName) => actions.patchSelected({ fontName })} />
             <input className="rb-num" type="number" min={4} max={96} aria-label="Font size" title="Font size" value={element?.fontSize ?? ''} disabled={!textual}
               onChange={(e) => { const size = Number(e.target.value); if (size >= 4 && size <= 96) actions.patchSelected({ fontSize: size }); }} />
             <Ico title="Bigger font" disabled={!textual} onClick={() => actions.patchSelected({ fontSize: Math.min(96, (element?.fontSize || 10) + 1) })}><b className="rb-txt">A<sup>+</sup></b></Ico>
@@ -644,6 +643,7 @@ export default function Ribbon({
       <hr />
       <button type="button" role="menuitem" onClick={() => { setMenu(null); onTemplates(); }} title="Apply a layout template"><RIcon name="layouts" /><span>Layouts</span></button>
       <button type="button" role="menuitem" onClick={() => { setMenu(null); onImportDesign(); }} title="Rebuild an existing design — PDF, Illustrator .ai, Word, or a PNG/JPEG scan — as this report's layout"><RIcon name="importDesign" /><span>Import design (PDF, AI, Word, scan)</span></button>
+      <button type="button" role="menuitem" onClick={() => { setMenu(null); setDialog('fonts'); }} title="Add your own fonts, e.g. Urdu ones, for the canvas, PDF and Excel"><RIcon name="layouts" /><span>Fonts (add Urdu and others)</span></button>
       <button type="button" role="menuitem" onClick={() => { setMenu(null); onDemo(); }} title="A demo design with sample fields"><RIcon name="demo" /><span>Demo design</span></button>
     </>
   );
@@ -659,8 +659,10 @@ export default function Ribbon({
         <div className="rb-filewrap">
           <button type="button" className="rb-doc" aria-haspopup="menu" aria-expanded={menu === 'file'} onClick={() => setMenu(menu === 'file' ? null : 'file')}
             title={`File menu — ${report.title || 'Untitled'}${report.folder ? ` in ${report.folder}` : ''}`}>
-            <b>{report.title || 'Untitled'}</b>{dirty && <span className="rb-dirty" title="Not saved">●</span>}
-            {report.folder && <small className="hide-narrow">in {report.folder}</small>}<span className="rb-caret" aria-hidden="true">▾</span>
+            <span className="rb-doc-icon" aria-hidden="true"><RIcon name="newDoc" size={16} /></span>
+            <span className="rb-doc-text"><span className="rb-doc-name"><b>{report.title || 'Untitled'}</b>{dirty && <span className="rb-dirty" title="Not saved">●</span>}</span>
+              {report.folder && <small className="hide-narrow">in {report.folder}</small>}</span>
+            <span className="rb-doc-file">File <span className="rb-caret" aria-hidden="true">▾</span></span>
           </button>
           {menu === 'file' && <div className="rb-menu" role="menu" aria-label="File">{fileItems}</div>}
         </div>
@@ -715,7 +717,8 @@ export default function Ribbon({
         <FunctionsDialog functions={design.functions || []} onClose={() => setDialog(null)}
           onSave={(functions) => { dispatch({ type: 'DESIGN', update: (d) => ({ ...d, functions }) }); setDialog(null); }} />
       )}
-      {dialog && dialog !== 'customFunctions' && <HelpDialog which={dialog} report={report} design={design} onGo={onGo} onOpen={setDialog} onClose={() => setDialog(null)} />}
+      {dialog === 'fonts' && <FontsDialog onClose={() => setDialog(null)} />}
+      {dialog && !['customFunctions', 'fonts'].includes(dialog) && <HelpDialog which={dialog} report={report} design={design} onGo={onGo} onOpen={setDialog} onClose={() => setDialog(null)} />}
     </header>
   );
 }

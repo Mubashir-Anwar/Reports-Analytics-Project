@@ -15,7 +15,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from backend.app.jobs import delivery  # noqa: E402
 from backend.app.security.secrets import _load_private_secrets  # noqa: E402
-from test_workspace_and_server import ADMIN, client, login  # noqa: E402,F401
+from test_workspace_and_server import ADMIN, client, login, setup_login  # noqa: E402,F401
 
 RUN = {"id": "run-20261122080000-0a1b2c3d", "reportId": "R1", "title": "Published one", "format": "csv", "status": "success",
        "rowCount": 2, "finishedAt": "2026-11-22T08:00:05+00:00"}
@@ -127,7 +127,7 @@ def test_schedule_api_never_shows_the_password_and_delivers_after_the_run(client
     monkeypatch.setenv("REPORTING_DELIVERY_FOLDERS", str(tmp_path))
     runner = client.app.state.ctx.job_runner
     runner.inline = True
-    assert login(client, "admin", ADMIN).status_code == 200
+    assert setup_login(client).status_code == 200
     assert "folder" in client.get("/api/server/schedules/info").json()["delivery"]["types"]
     payload = {**DAILY, "deliver": [{"type": "sftp", "host": "sftp.bank.com", "username": "u", "password": "pw", "folder": "/in"},
                                     {"type": "folder", "folder": str(tmp_path / "share")}]}

@@ -21,6 +21,13 @@ Khud test karna: [TESTING.md](TESTING.md). English mein mukhtasar: [README.md](R
 Sab pages `/login` se sign in hote hain. **Super admin** ke paas sab rights hain aur sirf woh administrators bana,
 badal ya delete kar sakta hai (kam az kam ek super admin hamesha rehta hai).
 
+### Data sources har hisse ke apne
+
+Data source (data adapter) jis hisse mein bana ho sirf wahin chalta hai: Designer, Server, Analytics aur Query sab ke apne hain.
+Har hisse mein **Connect** ka button hai, Home par bhi (har hisse ke card par), aur **Admin → Data sources** mein sab ek sath.
+Report publish karte waqt chuna jata hai ke Server par woh kis data source se parhe. Purane data sources (is se pehle ke) sab
+hisson mein chalte hain jab tak Admin unhein **Give to one part** ya **Split per part** na kare.
+
 ## Local setup
 
 Python 3.11+ (PowerShell, project folder mein):
@@ -29,14 +36,14 @@ Python 3.11+ (PowerShell, project folder mein):
 python -m venv .venv
 .venv\Scripts\Activate.ps1
 python -m pip install -r requirements-dev.txt
-Copy-Item .env.example .env
+python -m backend.app.setup
 python -m uvicorn backend.app.main:app --host 127.0.0.1 --port 8000
 ```
 
-`.env` ki har setting `.env.example` mein comment ke saath likhi hai. `REPORTING_ADMIN_TOKEN` khali ho to pehli run
-par service khud token bana kar `data/private_secrets.json` mein rakhti hai. Pehli dafa `/login` par username `admin`
-aur password = admin token; phir **Admin → Users & rights** mein super admin banayein, us ke baad yeh pehli-dafa wala
-login band ho jata hai. `.env`, `data/` aur private secrets kabhi share ya commit na karein.
+Ya sab kuch ek sath: `.\setup.ps1`. Setup command environment check karti hai, `.env` khud banati hai aur ek **setup admin**
+deti hai jo **24 ghante** chalta hai. `/login` par us se sign in karein, **Create new admin** se apna super admin banayein.
+Jaise hi aap ka apna admin banta hai, setup admin khud hi hat jata hai (24 ghante hon ya na hon).
+Waqt khatam ho jaye to command dobara chalayein. Har setting `docs/SETTINGS.md` mein hai. `.env`, `data/` aur private secrets kabhi share ya commit na karein.
 
 Frontend badalna ho to:
 
@@ -61,9 +68,20 @@ Tests: `python -m pytest -q` aur lint: `ruff check .` (CI dono chalata hai).
   Summary, No Data, Background. Elements: Text Field, Static Text, Image, Break, Rectangle, Ellipse, Line, Frame,
   Barcode, Chart, Table, Crosstab, List, Subreport, Note. Expressions Jasper jaisi (`$F{}`, `$P{}`, `$V{}`, Java-jaisi
   syntax) — safe interpreter se chalti hain, koi code execute nahi hota.
+- Ek hi hisse ki **kai bands**: Outline mein band ke **＋** se (ya right-click → Add another band) Detail 2, Detail 3, Summary 2…
+  banti hain; har band ki apni **Print When Expression** ho sakti hai. JRXML ki saari detail bands bhi import hoti hain.
+- **Apne fonts** (Urdu bhi): **File → Fonts** ya kisi bhi font list mein **＋ Add a font** se `.ttf` file dein. Canvas, PDF aur
+  Excel mein chalta hai. Urdu text PDF mein khud jurta aur right-to-left likha jata hai. Naskh aur Nastaliq
+  dono jurte hain (uharfbuzz package se); Nastaliq ke liye box thora ooncha rakhein.
+- **Format pattern**: Text Field → Pattern ke **…** se Number, Currency, Date waghera chunein, ya apna pattern likh kar
+  **Save as custom** karein; woh **Custom** mein har report aur har designer ke liye rehta hai.
 - **Outline** aur canvas par right-click menus: band banana/hatana, parameters, variables, calculated fields, groups.
 - **Sub-datasets**: Dataset & Query → **Datasets**; Table ya Crosstab apna dataset parh sakta hai (Table editor:
   Table par double-click).
+
+### Query page: drag & drop aur views
+Result **Tree**, **Columns** ya **JSON** mein dekhein. Koi bhi value pakar kar Query helper ya query box par chhor dein:
+field aur value khud likhe jate hain aur data type data wala hi rehta hai (`"123"` text, `123` number, date poora din).
 
 ### Query languages
 
@@ -93,7 +111,9 @@ JavaScript/Python sirf data ke taur par parhe jate hain (literal pipeline), chal
    ki tarah); yahan koi API key nahi likhni — jo API key kuch folders tak mehdood ho, woh sirf unhi folders ke datasets
    dekhti hai. Refresh: haath se ya schedule (har 15 minute se har hafte tak).
 2. **Model**: datasets ko common column se jorein (relationship).
-3. **Dashboard**: card, column / bar / line / area / pie / donut / scatter chart, table aur slicer. Kisi bar par click
+3. **Query se**: Query page par **Use in Analytics** dabane se naya dataset usi query ke saath khulta hai.
+   **ML lab**: regression, random forest, forecast, groups waghera; models ka muqabla, "what if" aur dashboard par lagana.
+   **Dashboard**: card, column / bar / line / area / pie / donut / scatter chart, **map**, ML, table aur slicer. Toolbar mein **Auto refresh** (10 second se 1 ghanta). Kisi bar par click
    karne se baqi visuals filter ho jate hain. Dashboards `/server` par bhi apne folder mein nazar aate hain.
 4. **Import**: `.mdash` (doosre server se dashboard + datasets ki definitions, data nahi) ya Power BI template
    **`.pbit`** (har page ek dashboard; har Power BI table ke liye yahan ka dataset chunein). **`.pbix`** bhi chalti hai:
@@ -112,7 +132,8 @@ JavaScript/Python sirf data ke taur par parhe jate hain (literal pipeline), chal
 - **URL se report**: `GET /generate/<ID>.pdf?Param=…` (`X-API-Key` ke saath), ya browser ke liye `POST /api/v1/links`
   se chand minute wala signed link.
 - **Embedding**: Admin → API keys → Embedding mein website likhein; website ka server `POST /api/v1/embed-tokens` se
-  token le, phir page mein `<script src=".../assets/embed/sdk.js"></script>` aur `<mrs-report token="emb_…"></mrs-report>`.
+  token le, phir page mein `<script src=".../assets/embed/sdk.js"></script>` aur `<mrs-report token="emb_…"></mrs-report>`. Dashboard ke liye `<mrs-dashboard token-url="…" refresh="60">`;
+  poora tareeqa aur code: Analytics → **Embed in a website**.
 - **Postman**: `postman/` mein har endpoint ki collection (tareeqa `postman/README.md`).
 
 ## Service ka apna data (storage)

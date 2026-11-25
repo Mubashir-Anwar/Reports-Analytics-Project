@@ -1,7 +1,7 @@
 // Multi-selection, alignment, distribution, clipboard and snapping for the canvas
 // (Jaspersoft Studio's "Arrange" toolbar, plus Photoshop/Illustrator-like smart guides).
 import {
-  BACKDROP_TYPES, DEFAULT_BAND_HEIGHT, bandKeys, bandPresent, bandWidth, findElement, getBand, mapElements, newId, setBand,
+  BACKDROP_TYPES, DEFAULT_BAND_HEIGHT, bandKeys, bandKind, bandPresent, bandWidth, findElement, getBand, mapElements, newId, setBand,
 } from './designModel.js';
 
 /** Ids of the selected elements (the primary one, `selection.id`, is always included and last). */
@@ -196,7 +196,7 @@ export function pasteElements(design, clipboard, targetBand) {
       x: Math.round(Math.min(Math.max(0, element.x + shift), Math.max(0, width - element.width))),
       y: Math.round(Math.max(0, (targetBand && targetBand !== bandKey ? element.y - top : element.y) + shift)),
     };
-    const kind = key.split(':')[0];
+    const kind = bandKind(key);
     const height = Math.max(band.height, band.height ? 0 : DEFAULT_BAND_HEIGHT[kind] || 30, Math.ceil(copy.y + copy.height));
     const elements = BACKDROP_TYPES.has(copy.type) ? [copy, ...band.elements] : [...band.elements, copy];
     next = setBand(next, key, { ...band, height, elements });

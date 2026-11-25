@@ -7,8 +7,10 @@ import { signOut, useMe } from './session.js';
 import AccountDialog from './AccountDialog.jsx';
 import ThemeMenu from './ThemeMenu.jsx';
 import TeamBar from './TeamBar.jsx';
+import { SetupAdminChip } from './SetupAdmin.jsx';
 
 const ICONS = {
+  home: 'M3 11l9-8 9 8M5.5 9.5V20h13V9.5M10 20v-6h4v6',
   designer: 'M4 20h4l10.5-10.5a2.1 2.1 0 0 0-3-3L5 17v3zM13.5 6.5l3 3',
   server: 'M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z',
   analytics: 'M4 20V10M10 20V4M16 20v-7M22 20H2',
@@ -45,6 +47,7 @@ export function Logo({ size = 30, className = 'fx-logo', src }) {
   );
 }
 
+const HOME = { href: '/home', label: 'Home', icon: 'home', text: 'What you can do here' };
 export const NAV_APPS = [
   { href: '/designer', right: 'designer', label: 'Designer', icon: 'designer', text: 'Build reports and publish them' },
   { href: '/server', right: 'server', label: 'Server', icon: 'server', text: 'Folders, run, schedules, permissions' },
@@ -86,7 +89,7 @@ function UserMenu({ me }) {
             <span className="fx-avatar" aria-hidden="true">{initials(me.username)}</span>
             <div><b>{me.username}</b><small>{(me.rights || []).length} of 5 parts</small><br /><span className="fx-badge">{me.superAdmin ? 'Super admin' : isAdmin ? 'Admin' : me.role === 'designer' ? 'Designer' : 'User'}</span></div>
           </div>
-          {!me.bootstrap && <button type="button" role="menuitem" onClick={() => { setOpen(false); setAccount('open'); }}><Icon name="key" />My account and password</button>}
+          <button type="button" role="menuitem" onClick={() => { setOpen(false); setAccount('open'); }}><Icon name="key" />My account and password</button>
           {isAdmin && <a role="menuitem" href="/admin#developer"><Icon name="api" />API, Postman and curl</a>}
           {isAdmin && <a role="menuitem" href="/admin#keys"><Icon name="key" />API keys</a>}
           {me.superAdmin && <a role="menuitem" href="/admin#branding"><Icon name="brand" />Name and logo</a>}
@@ -104,11 +107,15 @@ function UserMenu({ me }) {
  * (the report name in the Designer); children: the page's own buttons on the right.
  */
 export default function NavBar({ current, context, children }) {
+  useEffect(() => {   // Home starts with the part used last
+    if (!['/designer', '/analytics', '/query', '/server'].includes(current)) return;
+    try { localStorage.setItem('last-part', current.slice(1)); } catch { /* storage off */ }
+  }, [current]);
   const [open, setOpen] = useState(false);
   const me = useMe();
   const brand = useBrand();
-  const apps = me ? NAV_APPS.filter((app) => me.rights?.includes(app.right)) : [];
-  const here = NAV_APPS.find((app) => app.href === current);
+  const apps = me ? [HOME, ...NAV_APPS.filter((app) => me.rights?.includes(app.right))] : [];
+  const here = [HOME, ...NAV_APPS].find((app) => app.href === current);
   return (
     <header className={`fx-nav ${open ? 'open' : ''}`}>
       <a className="fx-brand" href="/" title={`${brand.name} — home`}>
@@ -127,6 +134,7 @@ export default function NavBar({ current, context, children }) {
       {context && <div className="fx-context">{context}</div>}
       <div className="fx-actions">
         {children}
+        {me?.temporary && <SetupAdminChip me={me} />}
         {me && <TeamBar app={here?.icon || 'server'} />}
         <ThemeMenu />
         <UserMenu me={me} />

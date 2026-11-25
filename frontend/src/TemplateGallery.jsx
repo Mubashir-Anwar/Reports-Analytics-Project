@@ -86,7 +86,7 @@ export default function TemplateGallery({ report, design, onApply, onClose, onIm
   const [options, setOptions] = useState(rememberedOptions);
   const [roles, setRoles] = useState({});             // Invoice / Statement: which field is the invoice number, amount…
   const template = TEMPLATES.find((t) => t.id === chosen);
-  const hasContent = Object.values(design.bands).some((band) => band?.elements?.length)
+  const hasContent = Object.values(design.bands).some((band) => band?.elements?.length || band?.more?.length)
     || Object.values(design.bands.groupHeaders || {}).some((b) => b.elements.length);
   const missingFields = template.needsFields && !report.columns.length;
   const set = (patch) => setOptions((o) => ({ ...o, ...patch }));

@@ -16,7 +16,7 @@ import secrets
 from datetime import datetime, timezone
 from typing import Any
 
-from backend.app.analytics import settings
+from backend.app.analytics import ml, settings
 from backend.app.db.entities import (
     ANALYTICS_DASHBOARDS,
     ANALYTICS_DATASETS,
@@ -35,7 +35,7 @@ ROLES = ("dimension", "measure")
 AGGREGATIONS = ("sum", "avg", "min", "max", "count", "distinct", "countrows", "median")
 BUCKETS = ("", "year", "quarter", "month", "week", "day")
 OPERATORS = ("in", "not_in", "eq", "ne", "gt", "gte", "lt", "lte", "between", "contains", "starts", "is_null", "not_null")
-VISUALS = ("kpi", "column", "bar", "line", "area", "pie", "donut", "scatter", "table", "slicer")
+VISUALS = ("kpi", "column", "bar", "line", "area", "pie", "donut", "scatter", "table", "slicer", "map", "ml")
 MAX_TILES = 60
 MAX_JSON = 200_000
 
@@ -89,7 +89,7 @@ def clean_source(payload: dict[str, Any], adapters: dict[str, str]) -> dict[str,
     """The source of a dataset: data adapter, query language, collection (MongoDB) and query."""
     connection_id = _text(payload.get("connectionId"), "Data adapter", 64, True)
     if connection_id not in adapters:
-        raise ValueError(f"Data adapter '{connection_id}' is not registered (Admin → Data sources)")
+        raise ValueError(f"Data adapter '{connection_id}' is not a data source of Analytics (Analytics → Data sources)")
     language = str(payload.get("queryLanguage") or ("sql" if adapters[connection_id] != "mongodb" else "aggregation-json")).lower()
     if language not in LANGUAGES:
         raise ValueError(f"Query language must be one of {', '.join(LANGUAGES)}")
@@ -271,12 +271,14 @@ def clean_visual(value: Any, where: str) -> dict[str, Any]:
         if not re.fullmatch(r"(group|value|column):\d", by):
             raise ValueError(f"{where}.sort[{index}].by must be like group:0 or value:0")
         clean_sort.append({"by": by, "dir": "desc" if str(item.get("dir", "")).lower() == "desc" else "asc"})
+    analysis = ml.clean(value.get("ml"), f"{where}.ml")
     limit = value.get("limit")
     detail = bool(value.get("detail"))
     columns = value.get("columns") or []
     if detail and (not isinstance(columns, list) or not columns or len(columns) > 40):
         raise ValueError(f"{where}.columns: list 1 to 40 columns to show without summarising")
     return {
+        **({"ml": analysis} if analysis else {}),
         "dataset": _text(value.get("dataset"), f"{where}.dataset", 40, True),
         "groupBy": [_field(item, f"{where}.groupBy[{i}]", bucket=True) for i, item in enumerate(group_by)],
         "values": [_field(item, f"{where}.values[{i}]", agg=True) for i, item in enumerate(values)],

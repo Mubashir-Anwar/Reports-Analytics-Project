@@ -161,7 +161,7 @@ function DataSourceTab({ info, onSave }) {
           <button className="btn primary sm" disabled={chosen === c.id} onClick={() => onSave({ connectionId: chosen })} style={{ alignSelf: 'flex-end' }}>Save</button>
         </div>
       )}
-      <p className="muted" style={{ fontSize: 12 }}>New data sources are connected in <a href="/server#sources">Server → Data sources</a> (with a connection string, in any folder) or the Designer; passwords are never shown here.</p>
+      <p className="muted" style={{ fontSize: 12 }}>New data sources are connected in <a href="/server#sources">Server → Data sources</a> (only for the Server; the Designer has its own); passwords are never shown here.</p>
     </div>
   );
 }

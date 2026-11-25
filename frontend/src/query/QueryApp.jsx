@@ -1,13 +1,15 @@
 // /query — the Query workspace. Left: the data adapters as a tree (MongoDB: collections; SQL: schemas, tables,
 // columns). Right: tabs like DBeaver / Studio 3T — a collection (Documents, Aggregate, Fields), a SQL editor, or
 // the schema diagram. The tabs and what is typed in them are kept in this browser. Nothing here can change data.
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import NavBar from '../shared/NavBar.jsx';
 import { api } from '../api.js';
 import MongoView from './MongoView.jsx';
 import SqlView from './SqlView.jsx';
 import Diagram from './Diagram.jsx';
 import ContextMenu from '../ContextMenu.jsx';
+import DataSourcesPanel from '../shared/DataSourcesPanel.jsx';
+import { AdapterWizard } from '../shared/adapters.jsx';
 import { quoteName } from './queryHelper.js';
 
 const TABS_KEY = 'query-tabs';
@@ -105,7 +107,7 @@ function firstRowsSql(table, schemaName, dialect) {
   return `SELECT ${cols}\nFROM ${name}`;
 }
 
-function Home({ adapters, onOpen, onPick }) {
+function Home({ adapters, onOpen, onPick, onConnect }) {
   return (
     <div className="q-home">
       <div className="q-hero">
@@ -122,7 +124,10 @@ function Home({ adapters, onOpen, onPick }) {
             <span className="q-home-go">{isSql(a) ? 'Tables & SQL →' : 'Collections →'}</span>
           </button>
         ))}
-        {!adapters.length && <p className="muted">No data adapters yet. Add one in the Designer (Setup → Data adapter) or in Admin → Data sources.</p>}
+        <button type="button" className="q-home-card add" style={{ '--i': adapters.length }} onClick={onConnect}>
+          <b>＋ Connect a database</b><span className="muted">MongoDB, PostgreSQL, MySQL, SQL Server or Oracle. It is only for Query.</span>
+          <span className="q-home-go">Connect →</span>
+        </button>
       </div>
       {adapters.some(isSql) && <p className="q-home-tip">Tip: <button type="button" className="linkish" onClick={() => onOpen({ kind: 'sql', connectionId: adapters.find(isSql).id })}>open a SQL editor</button> · Ctrl+Enter runs the query.</p>}
     </div>
@@ -186,7 +191,11 @@ export default function QueryApp() {
   };
   const { tabs, active } = state;
 
-  useEffect(() => { api.connections().then((r) => setAdapters(r.connections || []), (e) => setLoadError(e.message)); }, []);
+  const [connecting, setConnecting] = useState(false);
+  const [managing, setManaging] = useState(() => window.location.hash === '#sources');
+  const loadAdapters = useCallback(() => api.connections('query').then((r) => { setAdapters(r.connections || []); setLoadError(''); }, (e) => setLoadError(e.message)), []);
+  useEffect(() => { loadAdapters(); }, [loadAdapters]);
+  const tell = useCallback((text) => setToast(text), []);
   useEffect(() => { try { localStorage.setItem(TABS_KEY, JSON.stringify(state)); } catch { /* ignore */ } }, [state]);
   useEffect(() => { if (!toast) return undefined; const t = setTimeout(() => setToast(''), 2200); return () => clearTimeout(t); }, [toast]);
 
@@ -210,6 +219,7 @@ export default function QueryApp() {
   const adapterOf = (id) => adapters.find((a) => a.id === id);
 
   const openTab = ({ kind, connectionId, collection, table, schemaName, dialect, mode, run = true, fresh = false }) => {
+    setManaging(false);
     const adapter = adapterOf(connectionId);
     if (kind === 'diagram') load(adapter);
     const same = !fresh && tabs.find((t) => t.kind === kind && t.connectionId === connectionId && (kind === 'mongo' ? t.collection === collection : kind === 'diagram'));
@@ -247,11 +257,14 @@ export default function QueryApp() {
           <div className="q-side-head">
             <b>Data sources</b>
             <span className="grow" />
+            <button type="button" className="btn sm" title="Connect a database for Query" onClick={() => setConnecting(true)}>＋ Connect</button>
+            <button type="button" className="icon-btn" title="Manage data sources: edit, test, delete" onClick={() => setManaging(true)}>⚙</button>
             <button type="button" className="icon-btn" title="Hide the list" onClick={() => setSide(false)}>⟨</button>
           </div>
           <input className="q-filter" type="search" placeholder="Filter collections, tables…" value={filter} onChange={(e) => setFilter(e.target.value)} />
           <div className="q-tree">
             {loadError && <div className="qt-note err">{loadError}</div>}
+            {!adapters.length && !loadError && <div className="qt-note">No data source yet. <button type="button" className="linkish" onClick={() => setConnecting(true)}>Connect one</button></div>}
             {grouped.map((a) => (
               <AdapterNode key={a.id} adapter={a} open={!!open[a.id]} onToggle={() => toggle(a)} data={data[a.id]} filter={filter} onOpen={openTab} onMenu={showMenu} />
             ))}
@@ -260,17 +273,18 @@ export default function QueryApp() {
         <main className="q-main">
           <div className="q-tabs" role="tablist">
             {!side && <button type="button" className="icon-btn q-show-side" title="Show data sources" onClick={() => setSide(true)}>☰</button>}
-            <button type="button" role="tab" aria-selected={!current} className={`q-tab home ${!current ? 'on' : ''}`} onClick={() => setState({ tabs, active: null })} title="Start">⌂</button>
+            <button type="button" role="tab" aria-selected={!current} className={`q-tab home ${!current ? 'on' : ''}`} onClick={() => { setManaging(false); setState({ tabs, active: null }); }} title="Start">⌂</button>
             {tabs.map((t) => (
-              <div key={t.id} role="tab" aria-selected={t.id === active} className={`q-tab ${t.id === active ? 'on' : ''} k-${t.kind}`} onClick={() => setState({ tabs, active: t.id })} onAuxClick={(e) => { if (e.button === 1) closeTab(t.id); }}>
+              <div key={t.id} role="tab" aria-selected={t.id === active} className={`q-tab ${t.id === active ? 'on' : ''} k-${t.kind}`} onClick={() => { setManaging(false); setState({ tabs, active: t.id }); }} onAuxClick={(e) => { if (e.button === 1) closeTab(t.id); }}>
                 <span className="q-tab-ico">{t.kind === 'mongo' ? '▤' : t.kind === 'diagram' ? '⧉' : '⌘'}</span>
                 <span className="q-tab-name">{t.title}</span>
                 <button type="button" className="q-tab-x" aria-label={`Close ${t.title}`} onClick={(e) => { e.stopPropagation(); closeTab(t.id); }}>×</button>
               </div>
             ))}
           </div>
-          <div className="q-body" key={current?.id || 'home'}>
-            {!current && <Home adapters={grouped} onOpen={openTab} onPick={(a) => { setSide(true); if (!open[a.id]) toggle(a); }} />}
+          {managing && <div className="q-body"><DataSourcesPanel area="query" notify={tell} onChanged={loadAdapters} /></div>}
+          <div className="q-body" key={current?.id || 'home'} hidden={managing}>
+            {!current && <Home onConnect={() => setConnecting(true)} adapters={grouped} onOpen={openTab} onPick={(a) => { setSide(true); if (!open[a.id]) toggle(a); }} />}
             {current && (
               <div className="q-crumbs">
                 {currentAdapter ? <TypeChip type={currentAdapter.type} /> : <span className="q-chip">missing</span>}
@@ -290,6 +304,8 @@ export default function QueryApp() {
           </div>
         </main>
       </div>
+      {connecting && <AdapterWizard initial={{}} area="query" existingIds={adapters.map((a) => a.id)} notify={setToast} onClose={() => setConnecting(false)}
+        onSaved={(saved) => { setConnecting(false); loadAdapters().then(() => { setSide(true); setOpen((o) => ({ ...o, [saved.id]: true })); load(saved); }); }} />}
       <ContextMenu menu={menu} onClose={() => setMenu(null)} />
       {toast && <div className="q-toast" role="status">{toast}</div>}
     </div>

@@ -11,7 +11,7 @@ from fastapi import HTTPException
 from backend.app.constants import BOOTSTRAP_USERNAME
 from backend.app.definitions import ReportDefinition
 from backend.app.security import permissions
-from backend.app.security.users import derived_role, find_user, is_super_admin, user_rights
+from backend.app.security.users import derived_role, find_user, is_expired, is_super_admin, user_rights
 
 __all__ = ['report_folder', 'folder_level', 'report_level', 'require_report', 'require_folder', 'session_for_user',
            'report_allowed_for']
@@ -62,7 +62,7 @@ def session_for_user(ctx: SimpleNamespace, username: str) -> dict[str, Any] | No
     user = find_user(username)
     if user is None and username == BOOTSTRAP_USERNAME:
         return {"username": username, "role": "admin", "rights": {"server", "runner", "admin", "designer"}}
-    if user is None or user.get("disabled"):
+    if user is None or user.get("disabled") or is_expired(user):
         return None
     rights = user_rights(user)
     if "server" not in rights:                 # the Report Server right was taken away: the schedule stops running

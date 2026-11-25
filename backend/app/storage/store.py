@@ -18,7 +18,7 @@ from datetime import datetime, timezone
 from pathlib import Path, PurePosixPath
 from typing import Any, Iterable
 
-from backend.app.storage.files import _write_json_atomically, data_directory
+from backend.app.storage.files import _write_json_atomically, data_directory, long_path
 
 PRIVATE_MODE = 0o600
 
@@ -40,7 +40,7 @@ class _FileDocuments:
 
     @property
     def root(self) -> Path:
-        return data_directory()
+        return long_path(data_directory())
 
     def path(self, key: str) -> Path:
         return self.root.joinpath(*_clean_key(key).split("/"))

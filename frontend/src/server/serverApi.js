@@ -91,6 +91,11 @@ export const serverApi = {
   runFile(id) { saveUrl(`/api/server/runs/${encodeURIComponent(id)}/file`); },
   /** The report's .mrd file: a normal browser download. */
   download(ref) { saveUrl(reportUrl(ref, '/file')); },
+  /** Everything (or a folder and what is below it) as one ZIP, in the server's folders: a normal browser download. */
+  exportZip({ folder = '', reports = true, dashboards = true }) {
+    const query = new URLSearchParams({ reports, dashboards, ...(folder ? { folder } : {}) });
+    saveUrl(`/api/server/export?${query}`);
+  },
   /** Run now; the file is made on the server in the background and saved when ready (on any page). */
   runLater(ref, parameters, format, label) {
     return downloadLater(label || `${idOf(ref)}.${format || 'pdf'}`, reportUrl(ref, '/run'),

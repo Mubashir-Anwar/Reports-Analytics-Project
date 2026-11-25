@@ -83,7 +83,7 @@ def test_designer_token_can_design_but_not_manage(make_client):
     assert client.post("/api/admin/reports/R1/preview", headers=admin(DESIGNER), json={"parameters": {}}).status_code == 200
     assert client.delete("/api/admin/reports/R1", headers=admin(DESIGNER)).status_code == 403
     # data sources need no Admin right any more: the designer token may connect one
-    assert client.post("/api/data-sources", headers=admin(DESIGNER), json={"name": "x", "uri": "mongodb://x/y"}).status_code == 200
+    assert client.post("/api/data-sources", headers=admin(DESIGNER), json={"name": "x", "uri": "mongodb://x/y", "area": "designer"}).status_code == 200
     assert client.get("/api/admin/logs", headers=admin(DESIGNER)).status_code == 403
     assert client.get("/api/admin/whoami", headers=admin(ADMIN)).json()["role"] == "admin"
     assert client.get("/api/admin/reports", headers=admin("wrong")).status_code == 401
@@ -215,7 +215,7 @@ def test_markup_design_validates_and_renders_pdf():
 
 def test_unknown_markup_and_font_fall_back_safely():
     raw = markup_design()
-    raw["bands"]["detail"]["elements"][0].update(markup="rtf", fontName="Comic Sans")
+    raw["bands"]["detail"]["elements"][0].update(markup="rtf", fontName="<b>Comic</b>")
     element = dr.validate_design(raw, ["Body"], set())["bands"]["detail"]["elements"][0]
     assert element["markup"] == "none" and element["fontName"] == "SansSerif"
 

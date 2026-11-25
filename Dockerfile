@@ -3,7 +3,7 @@
 #   docker run -p 8000:8000 -v analysis-data:/data --env-file .env analysis
 
 # ---- 1) build the React pages (designer, /server, /admin, /analytics) into ui/app
-FROM node:20-alpine AS frontend
+FROM node:22-alpine AS frontend
 WORKDIR /src/frontend
 COPY frontend/package.json frontend/package-lock.json ./
 RUN npm ci --no-audit --no-fund
@@ -11,18 +11,34 @@ COPY frontend ./
 COPY ui/brand /src/ui/brand
 RUN npm run build
 
-# ---- 2) the Python service
-FROM python:3.12-slim
+# ---- 2) fonts with Urdu / Arabic letters: used in a PDF when the report's own font has none (backend/app/fonts.py)
+FROM debian:bookworm-slim AS fonts
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends fonts-noto-core \
+ && mkdir -p /fonts \
+ && cp /usr/share/fonts/truetype/noto/NotoNaskhArabic-Regular.ttf /usr/share/fonts/truetype/noto/NotoNaskhArabic-Bold.ttf /fonts/
 
-ENV PYTHONDONTWRITEBYTECODE=1 \
+# ---- 3) the Python packages, exactly the tested versions (constraints.txt)
+FROM python:3.12-slim-bookworm AS packages
+RUN python -m venv /opt/venv
+ENV PATH=/opt/venv/bin:$PATH
+COPY requirements.txt constraints.txt ./
+RUN pip install --no-cache-dir -r requirements.txt -c constraints.txt && pip check
+
+# ---- 4) the service
+FROM python:3.12-slim-bookworm
+
+ENV PATH=/opt/venv/bin:$PATH \
+    HOME=/tmp \
+    PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     REPORTING_DATA_DIR=/data \
     REPORTING_ACCESS_MODE=required \
     REPORTING_ENABLED_AREAS=runner,admin,designer,server,analytics
 
 WORKDIR /app
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+COPY --from=packages /opt/venv /opt/venv
+COPY --from=fonts /fonts /usr/share/fonts/truetype/noto
 
 COPY backend ./backend
 # sign-out helper, the embed viewer and the brand files; the React pages come from stage 1
@@ -35,8 +51,10 @@ COPY postman ./postman
 
 # API docs (/docs, /openapi.json) are off in the image; add "docs" to REPORTING_ENABLED_AREAS to show them.
 # Nothing from data/ is baked in: reports, adapters, users, secrets and analytics datasets live on the /data volume.
-# The "default" data adapter comes from MONGODB_URI / MONGODB_DATABASE.
-RUN useradd --system --uid 10001 reporting && mkdir -p /data && chown -R reporting /data
+# First sign-in: docker exec <container> python -m backend.app.setup (an admin for 24 hours). Data sources are added in the product.
+# The folders are made here so a new volume on any of them belongs to the service's user.
+RUN useradd --system --uid 10001 --no-create-home reporting \
+ && mkdir -p /data/analytics /data/exports && chown -R reporting /data
 USER reporting
 VOLUME ["/data"]
 EXPOSE 8000

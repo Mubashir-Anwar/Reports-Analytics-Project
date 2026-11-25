@@ -1,11 +1,12 @@
 """Embed tokens: let a client website show one report inside its own page, without a sign-in on this server.
 
 The website's server asks for a token with its API key (POST /api/v1/embed-tokens) and puts it in its page
-(<mrs-report token="…"> or an iframe of /embed/view?token=…). The token is
+(<mrs-report token="…">, <mrs-dashboard token="…"> or an iframe of /embed/view?token=…). The token is
 
     emb_<base64url(JSON)>.<hex HMAC-SHA256>
 
     {"k": key id, "r": report id, "p": {fixed parameters}, "x": expiry (unix s), "u": the website's user, "n": nonce}
+    for a dashboard also {"d": dashboard id, "f": [fixed filters]}
 
 It is signed with a server secret (derived from REPORTING_SESSION_SECRET), lives at most an hour, and is
 checked again on every use: the key must still be enabled and allowed to run the report's folder, and the page
@@ -25,7 +26,7 @@ from urllib.parse import urlparse
 
 MAX_LIFETIME = 3600
 DEFAULT_LIFETIME = 900
-TOKEN_PATTERN = re.compile(r"^emb_([A-Za-z0-9_-]{10,4000})\.([0-9a-f]{64})$")
+TOKEN_PATTERN = re.compile(r"^emb_([A-Za-z0-9_-]{10,6000})\.([0-9a-f]{64})$")
 
 
 def _secret() -> bytes:
@@ -33,9 +34,12 @@ def _secret() -> bytes:
     return hmac.new(_session_secret(), b"embed-tokens-v1", hashlib.sha256).digest()
 
 
-def issue(key_id: str, report_id: str, fixed: dict[str, Any], lifetime: int, on_behalf_of: str = "") -> tuple[str, int]:
+def issue(key_id: str, report_id: str, fixed: dict[str, Any], lifetime: int, on_behalf_of: str = "", *,
+          dashboard: str = "", filters: list[dict[str, Any]] | None = None) -> tuple[str, int]:
     expires = int(time.time()) + max(60, min(int(lifetime), MAX_LIFETIME))
     body = {"k": key_id, "r": report_id, "p": fixed, "x": expires, "n": secrets.token_hex(6)}
+    if dashboard:
+        body.update({"d": dashboard, "f": filters or []})
     if on_behalf_of:
         body["u"] = on_behalf_of[:128]
     encoded = base64.urlsafe_b64encode(json.dumps(body, separators=(",", ":"), ensure_ascii=False).encode("utf-8")).decode("ascii").rstrip("=")

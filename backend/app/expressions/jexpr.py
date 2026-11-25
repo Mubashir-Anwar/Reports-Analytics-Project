@@ -88,10 +88,12 @@ def _tokenize(text: str) -> list[tuple[str, Any]]:
 # --------------------------------------------------------------------- parser
 _STATIC_CLASSES = {"Double", "Integer", "Long", "String", "Math", "Boolean", "BigDecimal", "Float", "Short",
                    # java.time (Java 8+): parse / now / format with DateTimeFormatter.ofPattern
+                   "Base64",                     # a picture kept as base64 text: Base64.decodeBase64(x) / Base64.getDecoder().decode(x)
                    "OffsetDateTime", "LocalDateTime", "LocalDate", "ZonedDateTime", "Instant", "DateTimeFormatter"}
 _TIME_CLASSES = {"OffsetDateTime", "LocalDateTime", "LocalDate", "ZonedDateTime", "Instant"}
-_NEW_CLASSES = {"Date", "DecimalFormat", "SimpleDateFormat", "Double", "Integer", "Long", "String", "BigDecimal", "Float", "GregorianCalendar"}
-_PACKAGE_PREFIXES = ("java", "lang", "util", "text", "math", "sql")
+_NEW_CLASSES = {"Date", "DecimalFormat", "SimpleDateFormat", "Double", "Integer", "Long", "String", "BigDecimal", "Float", "GregorianCalendar",
+                "ByteArrayInputStream"}
+_PACKAGE_PREFIXES = ("java", "lang", "util", "text", "math", "sql", "io", "org", "apache", "commons", "codec", "binary")
 
 
 class _Parser:
@@ -219,6 +221,9 @@ class _Parser:
             if kind != "name":
                 raise JExprError("A method name is expected")
             if self.peek() != ("op", "("):
+                if name == "length":                        # Java array: text.split(",").length
+                    node = ("length", node)
+                    continue
                 raise JExprError(f"Field access .{name} is not supported")
             node = ("call", node, name, self.args())
 
@@ -671,6 +676,7 @@ _STRING_METHODS: dict[str, Callable[..., Any]] = {
     "replace": lambda s, a, b: _cap(s.replace(java_str(a), java_str(b))),
     "concat": lambda s, o: _cap(s + java_str(o)),
     "toString": lambda s: s,
+    "getBytes": lambda s, _charset=None: s,              # only used to hand text to a Base64 decoder
     "charAt": lambda s, i: s[i] if 0 <= i < len(s) else (_ for _ in ()).throw(JExprError("charAt range")),
 }
 
@@ -727,6 +733,23 @@ _MAP_METHODS: dict[str, Callable[..., Any]] = {
     "size": lambda mapping: len(mapping),
     "isEmpty": lambda mapping: len(mapping) == 0,
 }
+
+
+class Base64Decoder:
+    """java.util.Base64 / commons-codec: text → bytes (a picture stored as base64)."""
+    MAX_CHARS = 8_000_000
+
+    def decode(self, value: Any) -> bytes:
+        import base64  # noqa: PLC0415
+        if isinstance(value, (bytes, bytearray)):
+            value = bytes(value).decode("ascii", "ignore")
+        text = re.sub(r"\s+", "", java_str(value))
+        if len(text) > self.MAX_CHARS:
+            raise JExprError("The base64 text is too long")
+        try:
+            return base64.b64decode(text + "=" * (-len(text) % 4))
+        except ValueError:
+            raise JExprError("Not base64 text") from None
 
 
 class Calendar:
@@ -922,6 +945,11 @@ class Evaluator:
             return self.call(self.run(node[1]), node[2], [self.run(a) for a in node[3]])
         if kind == "index":
             return _index(self.run(node[1]), self.run(node[2]))
+        if kind == "length":
+            items = self.run(node[1])
+            if not isinstance(items, (list, tuple)):
+                raise JExprError(".length is only supported on a list (a text needs .length())")
+            return len(items)
         if kind == "local":
             return self.local_values.get(node[1])
         if kind == "fn":
@@ -943,6 +971,8 @@ class Evaluator:
             return int(to_number(args[0]))
         if cls == "String":
             return java_str(args[0]) if args else ""
+        if cls == "ByteArrayInputStream" and len(args) == 1:
+            return args[0]                               # the bytes themselves (an image reads them)
         raise JExprError(f"new {cls} is not supported")
 
     def static(self, cls: str, method: str, args: list) -> Any:
@@ -955,6 +985,10 @@ class Evaluator:
             return int(number)
         if cls == "String" and method == "valueOf":
             return java_str(args[0])
+        if cls == "Base64" and method in ("getDecoder", "getMimeDecoder", "getUrlDecoder") and not args:
+            return Base64Decoder()
+        if cls == "Base64" and method == "decodeBase64" and len(args) == 1:
+            return Base64Decoder().decode(args[0])
         if cls == "Boolean" and method in ("parseBoolean", "valueOf"):
             return str(args[0]).strip().lower() == "true"
         if cls == "DateTimeFormatter" and method == "ofPattern" and args:
@@ -983,6 +1017,8 @@ class Evaluator:
             return target.format(args[0])
         if isinstance(target, DateFormatter) and method in ("format", "parse"):
             return getattr(target, method)(args[0])
+        if isinstance(target, Base64Decoder) and method == "decode" and len(args) == 1:
+            return target.decode(args[0])
         if target is None:
             raise JExprError(f".{method}() called on null")
         if isinstance(target, Calendar):
