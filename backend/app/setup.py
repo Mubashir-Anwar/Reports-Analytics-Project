@@ -29,8 +29,9 @@ from pathlib import Path
 
 DEFAULT_USERNAME = "setup_admin"
 MAX_HOURS = 168
+# not pyodbc: only SQL Server with a Windows login uses it, and on Linux it needs the system library unixODBC
 PACKAGES = ("fastapi", "uvicorn", "pymongo", "sqlalchemy", "psycopg", "pymysql", "pymssql", "oracledb", "openpyxl", "reportlab",
-            "uharfbuzz", "PIL", "defusedxml", "cryptography", "duckdb", "numpy", "pdfplumber", "paramiko", "pyodbc", "rapidocr", "onnxruntime",
+            "uharfbuzz", "PIL", "defusedxml", "cryptography", "duckdb", "numpy", "pdfplumber", "paramiko", "rapidocr", "onnxruntime",
             "tzdata")
 ENV_TEXT = """# Settings of this installation (made by python -m backend.app.setup). Never commit or share this file.
 # Every other setting has a default; docs/SETTINGS.md explains all of them. Data sources are added in the product.
