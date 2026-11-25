@@ -4,6 +4,8 @@ import { inferColumns } from './designModel.js';
 import { AdapterOptions, DbLogo } from './panels.jsx';
 import { checkSetup, explainError, optionalFilters, placeOf } from './errorHelp.js';
 import { reportPayload } from './store.js';
+import { FolderPicker } from './shared/folders.jsx';
+import './setup-genz.css';
 import CodeArea, { selectLine } from './CodeArea.jsx';
 import FieldsEditor from './FieldsEditor.jsx';
 import { PATTERN_PRESETS, RELATIVE_DATES, isRelativeDate, resolveRelative, startValue, valueProblem } from './relativeDates.js';
@@ -24,7 +26,7 @@ export function cleanCollection(value) {
 
 const useAdapters = (notify, refreshKey) => {
   const [adapters, setAdapters] = useState(null); // null = loading
-  const load = () => api.connections().then((r) => setAdapters(r.connections)).catch((error) => {
+  const load = () => api.connections('designer').then((r) => setAdapters(r.connections)).catch((error) => {
     setAdapters([]);
     notify(`Could not load data adapters: ${error.message}`, 'error');
   });
@@ -153,7 +155,7 @@ export function QueryEditor({ state, dispatch, notify, refreshKey, markLine, mar
   };
 
   const sourceIssues = [];
-  if (selected && !selected.configured) sourceIssues.push({ level: 'error', text: 'This adapter has no saved connection URL yet', fix: 'Add it in the Data Adapters tab or on /admin → Data sources.' });
+  if (selected && !selected.configured) sourceIssues.push({ level: 'error', text: 'This adapter has no saved connection URL yet', fix: 'Add it in the Data Adapters tab (Files panel).' });
   if (adapters !== null && report.connectionId && !known) sourceIssues.push({ level: 'error', text: 'This adapter ID is not registered on this server', fix: 'Choose one from the list.' });
   if (kindMismatch) sourceIssues.push({ level: 'error', text: isSql ? 'SQL query, but a MongoDB adapter' : 'MongoDB query, but a SQL adapter', fix: isSql ? 'Choose a SQL data adapter.' : 'Choose a MongoDB adapter, or Query language SQL.' });
   const languageName = { mongosh: 'Mongo Shell', 'aggregation-json': 'Aggregation JSON', javascript: 'JavaScript', python: 'Python', sql: 'SQL' }[report.queryLanguage] || report.queryLanguage;
@@ -161,7 +163,8 @@ export function QueryEditor({ state, dispatch, notify, refreshKey, markLine, mar
   const usedParams = [...new Set([...report.querySource.matchAll(/\$[PX]\{(?:IN,\s*[^,]+,\s*)?(\w+)\}/g)].map((m) => m[1]))];
 
   const readFieldsRow = (
-    <div className="row" data-guide="fields">
+    <div className="row sg-read" data-guide="fields">
+      <i className="sg-read-icon" aria-hidden="true">🪄</i>
       <button className="btn primary" onClick={isSql ? readSqlFields : detect} disabled={busy || !report.querySource.trim() || (isSql && !report.connectionId)}>Read fields</button>
       <span className="muted">{isSql ? 'Asks the database for the columns (LIMIT 0): no rows are read, nothing is changed.' : 'Reads the field names from the query ($project / $group). The query is only parsed, not executed.'}</span>
     </div>
@@ -169,8 +172,18 @@ export function QueryEditor({ state, dispatch, notify, refreshKey, markLine, mar
 
   const sourcePart = (
     <>
+      {tests && (
+        <div className="sg-field" data-focus="adapter" data-guide="adapter">
+          <div className="sg-head"><span>Data adapter</span>
+            <button type="button" className="sg-round" onClick={loadAdapters} title="Reload the adapter list" aria-label="Reload the adapter list">↻</button>
+            {onDataScreen && <button type="button" className="sg-pill" onClick={onDataScreen} title="Open the data screen: saved adapters by folder, or connect a new database">＋ Connect a database</button>}
+          </div>
+          <AdapterCards adapters={adapters} value={report.connectionId} known={known} onPick={chooseAdapter} />
+          {!wrap && selected && !selected.configured && <small className="err">This adapter has no saved connection URL yet.</small>}
+        </div>
+      )}
       <div className="form-grid">
-        <label data-focus="adapter" data-guide="adapter">Data adapter <small>(the database connection this report reads from)</small>
+        {!tests && <label data-focus="adapter" data-guide="adapter">Data adapter <small>(the database connection this report reads from)</small>
           <span className="inline">
             {selected && <DbLogo type={selected.type || 'mongodb'} />}
             <select value={report.connectionId} onChange={(e) => chooseAdapter(e.target.value)} disabled={adapters === null}>
@@ -182,10 +195,19 @@ export function QueryEditor({ state, dispatch, notify, refreshKey, markLine, mar
             <button type="button" className="btn sm" onClick={loadAdapters} title="Reload the adapter list">↻</button>
             {onDataScreen && <button type="button" className="btn sm" onClick={onDataScreen} title="Open the data screen: saved adapters by folder, or connect a new database">＋ Connect / browse</button>}
           </span>
-          {!wrap && selected && !selected.configured && <small className="err">This adapter has no saved connection URL yet. Add it in the Data Adapters tab or on /admin → Data sources.</small>}
+          {!wrap && selected && !selected.configured && <small className="err">This adapter has no saved connection URL yet. Add it in the Data Adapters tab (Files panel).</small>}
           {!wrap && adapters !== null && report.connectionId && !known && <small className="err">This adapter ID is not registered on this server. Choose one from the list.</small>}
-        </label>
-        <label data-focus="language">Query language
+        </label>}
+        {tests ? (
+          <div className="sg-field wide" data-focus="language"><span>Query language</span>
+            <div className="sg-choices" role="group" aria-label="Query language">
+              {[['mongosh', 'Mongo Shell', '🍃'], ['aggregation-json', 'Aggregation JSON', '{ }'], ['javascript', 'JavaScript', 'JS'], ['python', 'Python', '🐍'], ['sql', 'SQL', '▤']].map(([id, text, icon]) => (
+                <button key={id} type="button" aria-pressed={report.queryLanguage === id} className={report.queryLanguage === id ? 'on' : ''} onClick={() => chooseLanguage(id)}><i aria-hidden="true">{icon}</i>{text}</button>
+              ))}
+            </div>
+            {!wrap && kindMismatch && <small className="err">{isSql ? 'This is a SQL query: choose a SQL data adapter.' : 'This adapter is a SQL database: choose a MongoDB adapter, or SQL.'}</small>}
+          </div>
+        ) : <label data-focus="language">Query language
           <select value={report.queryLanguage} onChange={(e) => chooseLanguage(e.target.value)}>
             <optgroup label="MongoDB">
               <option value="mongosh">Mongo Shell</option><option value="aggregation-json">Aggregation JSON</option>
@@ -196,9 +218,9 @@ export function QueryEditor({ state, dispatch, notify, refreshKey, markLine, mar
             </optgroup>
           </select>
           {!wrap && kindMismatch && <small className="err">{isSql ? 'This is a SQL query: choose a SQL data adapter above (PostgreSQL, MySQL, SQL Server or Oracle).' : 'This adapter is a SQL database: choose a MongoDB adapter, or Query language SQL.'}</small>}
-        </label>
+        </label>}
         {!isSql && (
-          <label data-focus="collection" data-guide="collection">Collection name <small>(only the name, e.g. Orders; filled in from a Jasper runCommand query)</small>
+          <label className={tests ? 'wide' : undefined} data-focus="collection" data-guide="collection">Collection name <small>Only the name, e.g. Orders. A Jasper query fills it in by itself.</small>
             <input value={report.collection} onChange={(e) => set({ collection: e.target.value })} onBlur={(e) => { const clean = cleanCollection(e.target.value); if (clean !== e.target.value) set({ collection: clean }); }} placeholder="Collection name" />
           </label>
         )}
@@ -215,11 +237,11 @@ export function QueryEditor({ state, dispatch, notify, refreshKey, markLine, mar
   const queryPart = (
     <>
       {isSql ? (
-        <div className="block query-block" data-guide="query">SQL query <small>(one SELECT; parameters: $P&#123;StartDate&#125;; a list filter: $X&#123;IN, branch, Branches&#125; — an empty list = no filter)</small>
+        <div className="block query-block" data-guide="query"><div className="sg-code-head"><b>SQL query</b><span><code>$P&#123;StartDate&#125;</code> a value</span><span><code>$X&#123;IN, branch, Branches&#125;</code> a list, empty = all</span></div>
           <CodeArea focusName="query" markLine={markLine} markNote={markNote} rows={14} value={report.querySource} onChange={(e) => set({ querySource: e.target.value })} placeholder={'SELECT o.id, o.branch, o.amount, o.placed_on\nFROM orders o\nWHERE o.placed_on BETWEEN $P{StartDate} AND $P{EndDate}\n  AND $X{IN, o.branch, Branches}\nORDER BY o.placed_on'} />
         </div>
       ) : (
-        <div className="block query-block" data-guide="query">Query <small>(parameters: $P&#123;StartDate&#125;; db.collection.aggregate([...]) or a Jaspersoft Studio &#123;"runCommand": &#123;"aggregate": …, "pipeline": [...]&#125;&#125; query)</small>
+        <div className="block query-block" data-guide="query"><div className="sg-code-head"><b>Query</b><span><code>$P&#123;StartDate&#125;</code> a value</span><span><code>db.collection.aggregate([…])</code> or a Jaspersoft Studio query</span></div>
           <CodeArea focusName="query" markLine={markLine} markNote={markNote} rows={14} value={report.querySource} onChange={(e) => set({ querySource: e.target.value })} placeholder={'db.getCollection("Orders").aggregate([\n  {"$match": {"Date": {"$gte": $P{StartDate}, "$lte": $P{EndDate}}}},\n  {"$project": {"Identifier": 1, "Branch": 1, "Amount": 1}}\n])'} />
         </div>
       )}
@@ -299,6 +321,31 @@ export function QueryEditor({ state, dispatch, notify, refreshKey, markLine, mar
 }
 
 /** The outcome of a segment test: a one-line status, and for a failure the plain-words explanation and "Go there". */
+/** The saved data adapters as cards (with a search when there are many). */
+function AdapterCards({ adapters, value, known, onPick }) {
+  const [find, setFind] = useState('');
+  if (adapters === null) return <div className="sg-empty">Loading the adapters…</div>;
+  if (!adapters.length) return <div className="sg-empty"><b>No database connected yet</b>Connect one, or skip this: a report without data prints once as fixed text.</div>;
+  const needle = find.trim().toLowerCase();
+  const shown = adapters.filter((a) => !needle || `${a.name} ${a.database || ''} ${a.folder || ''} ${a.type || ''}`.toLowerCase().includes(needle));
+  return (
+    <>
+      {adapters.length > 6 && <input className="sg-find" type="search" value={find} onChange={(e) => setFind(e.target.value)} placeholder="Find an adapter" aria-label="Find an adapter" />}
+      {value && !known && <small className="err">“{value}” is not on this server: choose another one.</small>}
+      <div className="sg-cards" role="group" aria-label="Data adapter">
+        {shown.map((a) => (
+          <button key={a.id} type="button" aria-pressed={a.id === value} className={`sg-card ${a.id === value ? 'on' : ''}`} onClick={() => onPick(a.id)}>
+            <span className="sg-logo"><DbLogo type={a.type || 'mongodb'} size={22} /></span>
+            <span className="sg-card-text"><b>{a.name}</b><small>{[a.database, a.folder && `/${a.folder}`].filter(Boolean).join(' · ') || a.type || 'mongodb'}{a.configured ? '' : ' · not configured'}</small></span>
+            <i className="sg-tick" aria-hidden="true">✓</i>
+          </button>
+        ))}
+        {!shown.length && <div className="sg-empty">No adapter matches “{find}”.</div>}
+      </div>
+    </>
+  );
+}
+
 function TestResult({ result, onFocus, idle }) {
   if (!result) return <p className="test-result idle">{idle}</p>;
   const info = result.error;
@@ -800,8 +847,9 @@ export default function SetupForm({ state, dispatch, notify, onTemplates, refres
   const guided = mode === 'guided';
   const [taskIndex, setTaskIndex] = useState(0);
 
-  const countElements = (band) => (Array.isArray(band?.elements) ? band.elements.length
-    : Object.values(band || {}).reduce((m, g) => m + (Array.isArray(g?.elements) ? g.elements.length : 0), 0));
+  const countElements = (band) => (Array.isArray(band?.elements)
+    ? band.elements.length + (band.more || []).reduce((m, part) => m + countElements(part), 0)
+    : Object.values(band || {}).reduce((m, g) => m + (Array.isArray(g?.elements) ? countElements(g) : 0), 0));
   const elements = Object.values(state.design?.bands || {}).reduce((n, b) => n + countElements(b), 0);
   const computed = report.parameters.filter((p) => p.prompt === false).length;
   const plural = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`;
@@ -876,28 +924,17 @@ export default function SetupForm({ state, dispatch, notify, onTemplates, refres
       {segment('details', (
         <div className="form-grid">
           <label data-guide="name">Report name<input value={report.title} onChange={(e) => set({ title: e.target.value, ...(auto ? { id: reportIdFrom(e.target.value) } : {}) })} placeholder="e.g. Branch wise amount report" /></label>
-          <label data-guide="id">Report ID <small>{report.isNew ? (auto ? '(made from the name — type to choose your own)' : '(your own ID)') : '(fixed once saved: /generate/ID.pdf)'}</small>
+          <label data-guide="id">Report ID <small>{report.isNew ? (auto ? 'Made from the name; type to choose your own' : 'Your own ID') : 'Fixed once saved: /generate/ID.pdf'}</small>
             <span className="inline">
               <input value={report.id} disabled={!report.isNew} onChange={(e) => set({ id: e.target.value.replace(/[^A-Za-z0-9_-]/g, ''), idManual: true })} placeholder="BRANCH_WISE_AMOUNT_REPORT" />
               {report.isNew && !auto && <button type="button" className="btn sm" title="Make the ID from the report name again" onClick={() => set({ id: reportIdFrom(report.title), idManual: false })}>↺ From name</button>}
             </span>
           </label>
-          <label>Workspace folder <small>(where Save keeps it in the designer; the server folder is chosen when you publish)</small>
-            <select value={report.folder || 'General'} onChange={(e) => {
-              if (e.target.value !== '__new__') { set({ folder: e.target.value }); return; }
-              const name = window.prompt('Name of the new folder (use / for a subfolder, e.g. Finance/Monthly)', report.folder && report.folder !== 'General' ? `${report.folder}/` : '');
-              const clean = String(name || '').trim().replace(/\\/g, '/').replace(/^\/+|\/+$/g, '');
-              if (!clean) return;
-              if (!/^[A-Za-z0-9][A-Za-z0-9 _-]{0,63}(\/[A-Za-z0-9][A-Za-z0-9 _-]{0,63})*$/.test(clean)) { window.alert('Use letters, numbers, spaces, _ and - (each folder name starts with a letter or number).'); return; }
-              setFolders((list) => [...new Set([...list, clean])].sort((a, b) => a.localeCompare(b)));
-              set({ folder: clean });
-            }}>
-              {[...new Set(['General', ...folders, report.folder || 'General'])].sort((a, b) => (a === 'General' ? -1 : b === 'General' ? 1 : a.localeCompare(b))).map((f) => (
-                <option key={f} value={f}>{f === 'General' ? 'Top level (no folder)' : f.split('/').join(' / ')}</option>
-              ))}
-              <option value="__new__">＋ New folder…</option>
-            </select>
-          </label>
+          <div className="sg-field wide"><span>Workspace folder</span>
+            <FolderPicker folders={folders.filter((f) => f !== 'General')} value={!report.folder || report.folder === 'General' ? '' : report.folder} allowNew storageKey="setup-pick-open"
+              onChange={(path) => { if (path) setFolders((list) => [...new Set([...list, path])]); set({ folder: path || 'General' }); }} />
+            <small>Where Save keeps it in the designer. The server folder is chosen when you publish.</small>
+          </div>
           <label className="wide" data-guide="description">Description<input value={report.description} onChange={(e) => set({ description: e.target.value })} placeholder="What this report shows and who uses it (optional)" /></label>
         </div>
       ))}
@@ -905,10 +942,18 @@ export default function SetupForm({ state, dispatch, notify, onTemplates, refres
         markLine={focus?.target === 'query' ? focus.line : undefined} markNote={focus?.note} markFixed={Boolean(focus?.fixed)} />
       {segment('parameters', <ParametersEditor state={state} dispatch={dispatch} />)}
       {segment('layout', (
-        <>
-          <p className="muted">Start from a template: a blank page, a letter (one letter per record), a table from the fields, a form, or a certificate. Nothing is changed until you choose one; you can also design everything yourself in the Design tab.</p>
-          <button className="btn primary" data-guide="layout" onClick={onTemplates}>Choose a layout template…</button>
-        </>
+        <button type="button" className="sg-layout" data-guide="layout" onClick={onTemplates}>
+          <span className="sg-pages" aria-hidden="true">
+            <i className="p-letter"><u /><u /><u /><u /></i>
+            <i className="p-table"><u /><u /><u /><u /></i>
+            <i className="p-form"><u /><u /><u /><u /></i>
+          </span>
+          <span className="sg-layout-text">
+            <b>Pick a layout</b>
+            <small>Table, letter, form, invoice, certificate or a blank page. Nothing changes until you choose one.</small>
+            <em>Choose a layout template <span aria-hidden="true">→</span></em>
+          </span>
+        </button>
       ))}
     </>
   );
@@ -919,7 +964,7 @@ export default function SetupForm({ state, dispatch, notify, onTemplates, refres
   const allOpen = open.size === SEGMENTS.length;
 
   return (
-    <div className={`setup ${guided ? 'is-guided' : ''}`} ref={root}>
+    <div className={`setup ${guided ? 'is-guided' : ''}`} data-step={guided ? current : undefined} ref={root}>
       <nav className="seg-nav" aria-label="Setup parts">
         <ol>
           {SEGMENTS.map(([id, title], i) => {

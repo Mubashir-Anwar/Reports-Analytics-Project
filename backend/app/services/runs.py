@@ -181,9 +181,12 @@ def draft_definition(ctx: SimpleNamespace, payload: Any) -> ReportDefinition:
     if not isinstance(raw, dict):
         raise HTTPException(status_code=400, detail="Send the draft report as 'definition'")
     try:
-        return _dynamic_report(ctx.strip_workspace_meta(raw))
+        definition = _dynamic_report(ctx.strip_workspace_meta(raw))
     except (TypeError, ValueError, KeyError) as exc:
         raise HTTPException(status_code=422, detail=f"The draft is not complete yet: {exc}") from None
+    for connection_id in ctx.report_connection_ids({**raw, "connectionId": ""}):      # its datasets (the main one: chosen_connection)
+        ctx.require_area(connection_id, "designer")
+    return definition
 
 
 def preview_definition(ctx: SimpleNamespace, definition: ReportDefinition, payload: Any, request: Any = None) -> dict[str, Any]:

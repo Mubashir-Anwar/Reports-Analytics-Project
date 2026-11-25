@@ -68,10 +68,13 @@ function elementText(element) {
 export function designFieldUse(design) {
   const use = {};
   const bands = design?.bands || {};
-  const visit = (band) => (band?.elements || []).forEach((el) => {
-    fieldRefs(elementText(el)).forEach((f) => { (use[f] = use[f] || []).push(el.id); });
-    if (el.elements) visit(el);                   // frames
-  });
+  const visit = (band) => {
+    (band?.elements || []).forEach((el) => {
+      fieldRefs(elementText(el)).forEach((f) => { (use[f] = use[f] || []).push(el.id); });
+      if (el.elements) visit(el);                 // frames
+    });
+    (band?.more || []).forEach(visit);            // Detail 2, Summary 2…
+  };
   Object.entries(bands).forEach(([key, band]) => {
     if (key === 'groupHeaders' || key === 'groupFooters') Object.values(band || {}).forEach(visit);
     else visit(band);

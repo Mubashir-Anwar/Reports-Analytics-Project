@@ -11,14 +11,14 @@ const ROW = 64;          // px per grid row
 const GAP = 12;
 
 function blankTile(type, y, dataset) {
-  const size = { kpi: [3, 2], slicer: [3, 5], table: [6, 5] }[type] || [6, 5];
+  const size = { kpi: [3, 2], slicer: [3, 5], table: [6, 5], map: [8, 7], ml: [6, 7] }[type] || [6, 5];
   return { id: newTileId(), type, title: '', x: 0, y, w: size[0], h: size[1], dataset: dataset || '', groupBy: [], values: [], filters: [],
     sort: [], limit: null, detail: false, columns: [], options: {} };
 }
 
 const sameValue = (a, b) => a === b || (a == null && b == null);
 
-export default function Dashboard({ dashboardId, datasets = [], relationships = [], notify, onSaved, onDeleted, source = bi, actions = null }) {
+export default function Dashboard({ dashboardId, datasets = [], relationships = [], notify, onSaved, onDeleted, source = bi, actions = null, refreshSeconds = null, embedded = false }) {
   const [saved, setSaved] = useState(null);
   const [draft, setDraft] = useState(null);           // the dashboard being edited (null = view mode)
   const [selected, setSelected] = useState(null);     // tile id whose settings are open
@@ -29,6 +29,10 @@ export default function Dashboard({ dashboardId, datasets = [], relationships = 
   const grid = useRef(null);
   const asked = useRef(0);
   const commands = useRef({});                         // what the Analytics ribbon can ask for (see below)
+  const refreshKey = `dash-refresh-${dashboardId}`;
+  const [ownRefresh, setOwnRefresh] = useState(() => { try { return Number(localStorage.getItem(refreshKey)) || 0; } catch { return 0; } });
+  const everySeconds = refreshSeconds ?? ownRefresh;
+  const [loadedAt, setLoadedAt] = useState(null);
   const [pendingAdd, setPendingAdd] = useState(null);  // a visual the ribbon added before editing had started
 
   // The ribbon (AnalyticsRibbon.jsx) sends window events { cmd: 'edit' | 'save' | 'cancel' | 'reload' | 'add', type }.
@@ -61,12 +65,12 @@ export default function Dashboard({ dashboardId, datasets = [], relationships = 
       if (!field || !tile.dataset) continue;
       const base = { dataset: field.dataset || tile.dataset, column: field.column, ...(field.bucket ? { bucket: field.bucket } : {}), fromTile: tile.id };
       if (tile.type === 'slicer' && slicers[tile.id]?.length) out.push({ ...base, op: 'in', values: slicers[tile.id] });
-      if (tile.type !== 'slicer' && tile.id in picks) out.push({ ...base, op: 'in', values: [picks[tile.id]] });
+      if (tile.type !== 'slicer' && tile.type !== 'ml' && tile.id in picks) out.push({ ...base, op: 'in', values: [picks[tile.id]] });
     }
     return out;
   }, [current, tiles, slicers, picks]);
 
-  const load = useCallback(async () => {
+  const load = useCallback(async (quiet) => {
     const ready = tiles.filter(tileReady);
     const ticket = ++asked.current;
     if (!ready.length) { setResults({}); return; }
@@ -74,16 +78,24 @@ export default function Dashboard({ dashboardId, datasets = [], relationships = 
       const { results: answers } = await source.queryBatch(ready.map(tileQuery), filters);
       if (ticket !== asked.current) return;          // a newer request is on its way
       setResults(Object.fromEntries(ready.map((tile, i) => [tile.id, answers[i]])));
+      setLoadedAt(new Date());
     } catch (error) {
       if (ticket !== asked.current) return;
+      if (quiet === true) return;                    // an automatic refresh that failed: keep what is shown, try again next time
       setResults(Object.fromEntries(ready.map((tile) => [tile.id, { error: error.message }])));
     }
   }, [tiles, filters, source]);
 
   useEffect(() => {
-    const timer = setTimeout(load, draft ? 350 : 0);   // while editing, wait until the changes settle
+    const timer = setTimeout(() => load(), draft ? 350 : 0);   // while editing, wait until the changes settle
     return () => clearTimeout(timer);
   }, [load, draft]);
+
+  useEffect(() => {                                   // refresh by itself (not while editing or in a hidden tab)
+    if (!everySeconds || draft) return undefined;
+    const timer = setInterval(() => { if (!document.hidden) load(true); }, everySeconds * 1000);
+    return () => clearInterval(timer);
+  }, [everySeconds, load, draft]);
 
   if (!current) return <section className="card"><p className="muted">Loading the dashboard…</p></section>;
 
@@ -168,7 +180,14 @@ export default function Dashboard({ dashboardId, datasets = [], relationships = 
         </div>
         <div className="row">
           {!editing && actions}
-          {!editing && <button type="button" className="btn" onClick={load} title="Ask the data again">Reload</button>}
+          {!editing && embedded && loadedAt && <small className="muted">{loadedAt.toLocaleTimeString()}</small>}
+          {!editing && !embedded && (
+            <select className="dash-refresh" value={ownRefresh} aria-label="Refresh by itself" title={loadedAt ? `Refresh by itself · last ${loadedAt.toLocaleTimeString()}` : 'Refresh by itself'}
+              onChange={(e) => { const s = Number(e.target.value); setOwnRefresh(s); try { if (s) localStorage.setItem(refreshKey, s); else localStorage.removeItem(refreshKey); } catch { /* private mode */ } }}>
+              {[[0, 'Auto refresh: off'], [10, 'Every 10 s'], [30, 'Every 30 s'], [60, 'Every minute'], [300, 'Every 5 min'], [900, 'Every 15 min'], [3600, 'Every hour']].map(([s, text]) => <option key={s} value={s}>{text}</option>)}
+            </select>
+          )}
+          {!editing && <button type="button" className="btn" onClick={() => load()} title="Ask the data again">Reload</button>}
           {!editing && saved.mayChange && <button type="button" className="btn primary" onClick={() => setDraft(structuredClone(saved))}>Edit</button>}
           {!editing && saved.mayChange && <button type="button" className="btn danger" onClick={remove}>Delete</button>}
           {editing && <button type="button" className="btn" onClick={() => { setDraft(null); setSelected(null); }} disabled={busy}>Cancel</button>}

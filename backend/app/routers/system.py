@@ -36,6 +36,8 @@ def register(app: FastAPI, ctx: SimpleNamespace) -> None:
 
     @app.get("/health")
     def health() -> JSONResponse:
+        if not any(item["id"] == "default" for item in load_connection_profiles()):
+            return JSONResponse({"status": "ok", "version": SERVICE_VERSION, "connection": None})
         try:
             _, database = get_connection("default")
             return JSONResponse({"status": "ok", "version": SERVICE_VERSION, "connection": "default", "database": database})
@@ -62,7 +64,7 @@ def register(app: FastAPI, ctx: SimpleNamespace) -> None:
         require_admin(request)
         from backend.app.jobs import mailer
         from backend.app.security.access import enabled_areas
-        from backend.app.security.users import bootstrap_login_active
+        from backend.app.security.users import needs_first_admin
         from backend.app.storage.store import get_store
         store = get_store()
         from backend.app.security.secrets import secrets_encrypted  # noqa: PLC0415
@@ -78,8 +80,8 @@ def register(app: FastAPI, ctx: SimpleNamespace) -> None:
             {"id": "session", "ok": bool(env.get("REPORTING_SESSION_SECRET", "").strip()), "label": "Session secret",
              "value": "set" if env.get("REPORTING_SESSION_SECRET", "").strip() else "random per start (sign-ins end at restart)",
              "hint": "Set REPORTING_SESSION_SECRET (the same on every instance)"},
-            {"id": "admin-user", "ok": not bootstrap_login_active(), "label": "Admin account",
-             "value": "named admin user exists" if not bootstrap_login_active() else "only the first-setup login (admin + token)",
+            {"id": "admin-user", "ok": not needs_first_admin(), "label": "Admin account",
+             "value": "your own admin exists" if not needs_first_admin() else "only the temporary setup admin",
              "hint": "Create an admin user on the Users tab"},
             {"id": "https", "ok": env.get("REPORTING_SECURE_COOKIES", "").lower() == "true", "label": "HTTPS cookies",
              "value": "secure cookies on" if env.get("REPORTING_SECURE_COOKIES", "").lower() == "true" else "off",

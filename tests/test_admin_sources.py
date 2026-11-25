@@ -6,7 +6,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from backend.app.connectors import sql as sql_connector  # noqa: E402
-from test_workspace_and_server import ADMIN, PUBLISHED, client, login, token  # noqa: E402,F401
+from test_workspace_and_server import ADMIN, PUBLISHED, client, login, setup_login, token  # noqa: E402,F401
 
 ADMIN_HEADERS = {"X-Admin-Token": ADMIN}
 
@@ -34,7 +34,7 @@ def test_every_kind_is_listed_with_its_usage(client, monkeypatch):
 def test_server_shows_the_kind_tests_and_refuses_a_wrong_kind(client, monkeypatch):
     pg = add_pg(client)
     monkeypatch.setattr(sql_connector, "test", lambda kind, url: {"ok": True, "message": f"Connected {kind}", "database": "fin"})
-    assert login(client, "admin", ADMIN).status_code == 200
+    assert setup_login(client).status_code == 200
     adapters = {c["id"]: c for c in client.get("/api/server/connections").json()["connections"]}
     assert adapters[pg]["type"] == "postgresql" and adapters["default"]["type"] == "mongodb" and adapters[pg]["configured"]
     assert client.get("/api/server/reports/R1").json()["connection"]["type"] == "mongodb"

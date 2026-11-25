@@ -4,28 +4,30 @@ from __future__ import annotations
 import copy
 import json
 import os
-import secrets
+import tempfile
 import xml.etree.ElementTree as ET
+from datetime import datetime
 from types import SimpleNamespace
 from typing import Any
 
 from defusedxml import ElementTree as SafeET
 from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import JSONResponse, Response
+from fastapi.responses import FileResponse, JSONResponse, Response
+from starlette.background import BackgroundTask
 
-from backend.app.analytics import store as analytics_store
-from backend.app.connectors.profiles import load_connection_profiles
-from backend.app.constants import BOOTSTRAP_USERNAME, OUTPUT_FORMATS, REPORT_ID_PATTERN, SESSION_COOKIE, USER_RIGHTS, WORKSPACE_META
+from backend.app.analytics import bundle as analytics_bundle, store as analytics_store
+from backend.app.connectors.profiles import profiles_in
+from backend.app.constants import OUTPUT_FORMATS, REPORT_ID_PATTERN, SESSION_COOKIE, WORKSPACE_META
 from backend.app.definitions import clean_folder
 from backend.app.logs import LOG
 from backend.app.mrd import parse_report_definition_xml, render_report_definition_xml
 from backend.app.security import permissions, shared_state
 from backend.app.security.access import client_address, enabled_areas
 from backend.app.security.users import (
-    bootstrap_login_active,
     check_user_password,
     derived_role,
     find_user,
+    is_expired,
     is_super_admin,
     load_users,
     make_session_cookie,
@@ -36,6 +38,7 @@ from backend.app.security.users import (
     set_user_password,
     user_rights,
 )
+from backend.app.services.export_zip import build_zip, safe_name
 from backend.app.storage.files import add_saved_folder, list_saved_folders, move_target, normalize_folder_path
 
 
@@ -71,33 +74,36 @@ def register(app: FastAPI, ctx: SimpleNamespace) -> None:
         if shared_state.recent_failures(client) >= 10:  # counted on every instance
             raise HTTPException(status_code=429, detail="Too many failed sign-ins; wait a few minutes and try again")
         user = find_user(username) if username else None
-        session_user, version, bootstrap = "", 0, False
+        session_user, version = "", 0
         if user is not None and not user.get("disabled") and password and check_user_password(user, password):
+            if is_expired(user):
+                ctx.audit_event(request, "auth.login_failed", username[:64], {"reason": "the setup admin's time is over"},
+                                actor=user["username"], actor_type="user")
+                raise HTTPException(status_code=403, detail="This setup account is switched off: its time is over. Sign in with your own "
+                                    "admin account, or run 'python -m backend.app.setup' on the server for a new 24 hours")
             session_user, version = user["username"], int(user.get("sessionVersion", 0))
-        elif user is None and username.casefold() == BOOTSTRAP_USERNAME and bootstrap_login_active():
-            admin_token = os.getenv("REPORTING_ADMIN_TOKEN", "")
-            if admin_token and password and secrets.compare_digest(password, admin_token):
-                session_user, bootstrap = BOOTSTRAP_USERNAME, True
         if not session_user:
             shared_state.record_failure(client)
             LOG.warning("Failed /server sign-in for user %r from %s", username[:64], client)
             ctx.audit_event(request, "auth.login_failed", username[:64], {"reason": "wrong username or password"},
                             actor=username[:64] or "?", actor_type="anonymous")
+            if not load_users():
+                raise HTTPException(status_code=401, detail="There are no accounts yet. On the server, in the project folder, run: "
+                                    "python -m backend.app.setup")
             raise HTTPException(status_code=401, detail="Wrong username or password")
         shared_state.clear_failures(client)
-        if user is not None and not bootstrap:
-            from backend.app.db.people import put_user  # noqa: PLC0415
-            user["lastLoginAt"] = now_iso()
-            if password_needs_upgrade(user):  # older, weaker hash: replace it now that we know the password
-                set_user_password(user, password)
-            put_user(user)                    # only this account's row changes
-        rights = sorted(USER_RIGHTS) if bootstrap else sorted(user_rights(user))
-        super_admin = bootstrap or is_super_admin(user)
+        from backend.app.db.people import put_user  # noqa: PLC0415
+        user["lastLoginAt"] = now_iso()
+        if password_needs_upgrade(user):  # older, weaker hash: replace it now that we know the password
+            set_user_password(user, password)
+        put_user(user)                    # only this account's row changes
+        rights = sorted(user_rights(user))
+        super_admin = is_super_admin(user)
         role = derived_role(set(rights), super_admin)
         LOG.info("User %s signed in (%s)", session_user, ", ".join(rights) or "no rights")
-        ctx.audit_event(request, "auth.login", session_user, {"firstSetup": bootstrap, "rights": rights},
+        ctx.audit_event(request, "auth.login", session_user, {"rights": rights},
                         actor=session_user, actor_type="user")
-        cookie = make_session_cookie(session_user, version, bootstrap)
+        cookie = make_session_cookie(session_user, version)
         nonce = (read_session_cookie(cookie) or {}).get("n", "")
         agent = shared_state.describe_agent(request.headers.get("user-agent", ""), client)
         previous = shared_state.claim_session(session_user, nonce, agent, session_lifetime_seconds())
@@ -105,9 +111,9 @@ def register(app: FastAPI, ctx: SimpleNamespace) -> None:
             LOG.info("User %s signed in on %s; the session on %s ends in %ss", session_user, agent, previous["agent"], shared_state.grace_seconds())
             ctx.audit_event(request, "auth.session_replaced", session_user, {"old": previous["agent"], "new": agent},
                             actor=session_user, actor_type="user")
-        response = JSONResponse({"username": session_user, "role": role, "bootstrap": bootstrap, "rights": rights,
+        response = JSONResponse({"username": session_user, "role": role, "rights": rights,
                                  "superAdmin": super_admin,
-                                 "mustChangePassword": bool(user and not bootstrap and user.get("mustChangePassword")),
+                                 "mustChangePassword": bool(user.get("mustChangePassword")),
                                  "replacedOther": {"by": previous["agent"], "seconds": shared_state.grace_seconds()} if previous else None})
         secure = request.url.scheme == "https" or os.getenv("REPORTING_SECURE_COOKIES", "false").strip().lower() == "true"
         response.set_cookie(SESSION_COOKIE, cookie, max_age=session_lifetime_seconds(),
@@ -238,8 +244,8 @@ def register(app: FastAPI, ctx: SimpleNamespace) -> None:
         if set(changes) - {"connectionId"} and not role_at_least(session["role"], "designer"):
             raise HTTPException(status_code=403, detail="This needs a designer account; you may link the report to another data source")
         if "connectionId" in changes and not any(item["id"] == str(changes["connectionId"] or "").strip()
-                                                 for item in load_connection_profiles()):
-            raise HTTPException(status_code=422, detail=f"There is no data source {changes['connectionId']!s}")
+                                                 for item in profiles_in("server")):
+            raise HTTPException(status_code=422, detail=f"There is no data source {changes['connectionId']!s} on the Report Server")
         payload = copy.deepcopy(definition.editor_config)
         for key in ("title", "description"):
             if key in changes:
@@ -279,9 +285,16 @@ def register(app: FastAPI, ctx: SimpleNamespace) -> None:
         saved = save_report_payload(payload, expected_id=report_id, previous=definition, action="edited", user=session["username"])
         changed = sorted(k for k in changes if k in ("title", "description", "formats", "defaultFormat", "connectionId", "parameters", "querySource"))
         sync_workspace_copy(saved, lambda data: data.update({k: copy.deepcopy(saved.editor_config.get(k)) for k in
-                                                                ("title", "description", "formats", "defaultFormat", "connectionId",
+                                                                ("title", "description", "formats", "defaultFormat",
                                                                  "parameters", "querySource", "queryLanguage", "collection")
                                                                 if k in saved.editor_config}))
+        draft = ctx.find_workspace_entry(report_id, saved.folder) if "connectionId" in changes else None
+        if draft is not None:                                  # the next publish of the draft keeps this link
+            before = str(draft[1].get("connectionId") or "")
+            if before and ctx.counterpart(saved.connection_id, "designer") == saved.connection_id:
+                sync_workspace_copy(saved, lambda data: data.update({"connectionId": saved.connection_id}))
+            elif before:
+                ctx.remember_counterpart(before, "server", saved.connection_id)
         record_history(report_id, "edited", session["username"], ", ".join(changed), folder=saved.folder)
         return resource_details(saved, session)
 
@@ -334,6 +347,42 @@ def register(app: FastAPI, ctx: SimpleNamespace) -> None:
         return Response(render_report_definition_xml(admin_report_payload(definition)), media_type="application/xml; charset=utf-8",
                         headers={"Content-Disposition": f'attachment; filename="{report_id}.mrd"'})
 
+    @app.get("/api/server/export")
+    def server_export_zip(request: Request, folder: str = "", reports: bool = True, dashboards: bool = True) -> Response:
+        """A ZIP of the repository (or of one folder and what is below it): .mrd and .mdash files in their server
+        folders, with an index of which item is in which folder. Only what this user may manage."""
+        session = require_session(request, "designer")
+        try:
+            scope = normalize_folder_path(folder) if folder.strip() else ""
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from None
+        rules = permissions.load_rules()
+
+        def wanted(path: str) -> bool:
+            return (not scope or path == scope or path.startswith(f"{scope}/")) and permissions.level(session, path, rules) >= permissions.MANAGE
+
+        report_items = [] if not reports else [
+            {"folder": item.folder, "id": item.report_id, "title": item.title, "dataSource": item.connection_id,
+             "content": lambda item=item: render_report_definition_xml(admin_report_payload(item))}
+            for item in list(reports_by_id.values()) if wanted(item.folder)]
+        boards = [] if not dashboards or "analytics" not in enabled_areas() else [
+            {"folder": item.get("folder") or "Analytics", "id": item["id"], "title": item.get("name") or item["id"],
+             "datasets": ", ".join((found or {}).get("name", "") for found in map(analytics_store.dataset, analytics_bundle.used_datasets(item)) if found),
+             "content": lambda item=item: json.dumps(analytics_bundle.export(item), ensure_ascii=False, indent=1)}
+            for item in analytics_store.dashboards() if wanted(item.get("folder") or "Analytics")]
+        folders = sorted({path for path in list_saved_folders() if wanted(path)} | {item["folder"] for item in (*report_items, *boards)})
+        handle = tempfile.NamedTemporaryFile(prefix="report-server-export-", suffix=".zip", delete=False)
+        try:
+            with handle:
+                made = build_zip(handle, report_items, boards, folders, f"/{scope}" if scope else "Everything")
+        except Exception:
+            os.unlink(handle.name)
+            raise
+        ctx.audit_event(request, "server.exported", scope or "/", made, actor=session["username"], actor_type="user")
+        stem = safe_name(scope.replace("/", "-")) if scope else "everything"
+        return FileResponse(handle.name, media_type="application/zip", filename=f"report-server-{stem}-{datetime.now():%Y%m%d-%H%M}.zip",
+                            background=BackgroundTask(os.unlink, handle.name))
+
     @app.post("/api/server/upload")
     async def server_upload_report(request: Request) -> dict[str, Any]:
         """Add a resource: a .mrd file (or a Jaspersoft Studio .jrxml) is published into a folder."""
@@ -381,9 +430,9 @@ def register(app: FastAPI, ctx: SimpleNamespace) -> None:
 
     @app.get("/api/server/connections")
     def server_connections(request: Request) -> dict[str, Any]:
-        """Every data source, from any folder: a report can be linked to any of them."""
+        """Every data source of the Report Server, from any folder: a report can be linked to any of them."""
         require_session(request)
-        return {"connections": [connection_summary(item["id"]) for item in load_connection_profiles()]}
+        return {"connections": [connection_summary(item["id"]) for item in profiles_in("server")]}
 
     # ---------------------------------------------------------------- versions (every save of a server report)
     @app.get("/api/server/reports/{report_id}/versions")
@@ -420,6 +469,7 @@ def register(app: FastAPI, ctx: SimpleNamespace) -> None:
             data.update(copy.deepcopy(saved.editor_config))
             if meta:
                 data[WORKSPACE_META] = meta
+            ctx.draft_connections(data)                        # the draft reads from data sources of the Designer
         sync_workspace_copy(saved, replace_draft)
         record_history(report_id, "restored", session["username"], f"version {number}", folder=saved.folder)
         return {"report": resource_details(saved, session), "versions": ctx.list_versions(report_id, saved.folder)}

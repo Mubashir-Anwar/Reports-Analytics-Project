@@ -16,7 +16,16 @@ from fastapi import FastAPI, HTTPException, Request
 from backend.app.constants import RIGHT_LABELS, USER_RIGHTS, USER_ROLES, USERNAME_PATTERN
 from backend.app.logs import LOG
 from backend.app.routers.accounts import check_contact
-from backend.app.security.users import bootstrap_login_active, is_super_admin, load_users, save_users, set_user_password, user_rights
+from backend.app.security.users import (
+    is_permanent_super_admin,
+    is_super_admin,
+    is_temporary,
+    load_users,
+    needs_first_admin,
+    save_users,
+    set_user_password,
+    user_rights,
+)
 
 # Old clients send role instead of rights.
 ROLE_RIGHTS = {"viewer": ["server", "runner"], "designer": ["designer", "query", "server", "runner"]}
@@ -58,10 +67,21 @@ def register(app: FastAPI, ctx: SimpleNamespace) -> None:
         if touched:
             raise HTTPException(status_code=403, detail="Only a super admin may create, change or delete administrators")
 
+    def end_setup_admins(request: Request, users: list[dict[str, Any]], admin: dict[str, Any]) -> list[str]:
+        """Once a lasting super admin is made (or helped back in) the setup admin goes, whether its time is over or not."""
+        if not is_permanent_super_admin(admin):
+            return []
+        gone = [item["username"] for item in users if is_temporary(item)]
+        users[:] = [item for item in users if not is_temporary(item)]
+        for username in gone:
+            LOG.info("Setup admin %s removed: a lasting super admin exists", username)
+            ctx.audit_event(request, "user.deleted", username, {"reason": "setup admin replaced by a new admin"})
+        return gone
+
     @app.get("/api/admin/users")
     def admin_list_users(request: Request) -> dict[str, Any]:
         require_admin(request)
-        return {"users": [user_view(item) for item in load_users()], "bootstrapLogin": bootstrap_login_active(),
+        return {"users": [user_view(item) for item in load_users()], "needsFirstAdmin": needs_first_admin(),
                 "roles": list(USER_ROLES), "rights": [{"id": right, "label": RIGHT_LABELS[right]} for right in USER_RIGHTS],
                 "youAreSuperAdmin": caller_is_super(request)}
 
@@ -82,11 +102,12 @@ def register(app: FastAPI, ctx: SimpleNamespace) -> None:
         set_user_password(new_user, valid_password(payload.get("password")))
         users = load_users()
         users.append(new_user)
+        removed = end_setup_admins(request, users, new_user)
         save_users(users, by=getattr(request.state, "actor", ""))
         LOG.info("User %s created by %s (rights %s%s)", username, getattr(request.state, "actor", "?"),
                  ",".join(new_user["rights"]), ", super admin" if new_user["superAdmin"] else "")
         ctx.audit_event(request, "user.created", username, {"rights": new_user["rights"], "superAdmin": new_user["superAdmin"]})
-        return {"user": user_view(users[-1])}
+        return {"user": user_view(new_user), "removedSetupAdmins": removed}
 
     @app.put("/api/admin/users/{username}")
     async def admin_update_user(username: str, request: Request) -> dict[str, Any]:
@@ -96,6 +117,8 @@ def register(app: FastAPI, ctx: SimpleNamespace) -> None:
         user = next((item for item in users if str(item["username"]).casefold() == username.casefold()), None)
         if user is None:
             raise HTTPException(status_code=404, detail="User not found")
+        if is_temporary(user) and ("rights" in payload or "superAdmin" in payload or "role" in payload):
+            raise HTTPException(status_code=409, detail="The setup admin is temporary: create your own admin instead of changing it")
         before, super_admins_before = dict(user), super_admins_left(users)
         apply_access(user, payload)
         user.update(check_contact({key: payload[key] for key in ("fullName", "email", "phone") if key in payload},
@@ -109,6 +132,7 @@ def register(app: FastAPI, ctx: SimpleNamespace) -> None:
         if super_admins_before and not super_admins_left(users):
             raise HTTPException(status_code=409, detail="Keep at least one active super admin")
         user["sessionVersion"] = int(user.get("sessionVersion", 0)) + 1  # signs this user out everywhere
+        removed = end_setup_admins(request, users, user)
         save_users(users, by=getattr(request.state, "actor", ""))
         LOG.info("User %s changed by %s", user["username"], getattr(request.state, "actor", "?"))
         change: dict[str, Any] = {}
@@ -121,7 +145,7 @@ def register(app: FastAPI, ctx: SimpleNamespace) -> None:
         if payload.get("password"):
             change["passwordReset"] = True
         ctx.audit_event(request, "user.changed", user["username"], change)
-        return {"user": user_view(user)}
+        return {"user": user_view(user), "removedSetupAdmins": removed}
 
     @app.delete("/api/admin/users/{username}")
     def admin_delete_user(username: str, request: Request) -> dict[str, Any]:

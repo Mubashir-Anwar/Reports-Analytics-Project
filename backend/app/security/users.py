@@ -8,6 +8,7 @@ import json
 import os
 import secrets
 import time
+from datetime import datetime, timezone
 from typing import Any
 
 from backend.app.constants import LEGACY_PASSWORD_ITERATIONS, PASSWORD_ITERATIONS, USER_RIGHTS, USER_ROLES
@@ -80,9 +81,28 @@ def derived_role(rights: set[str], super_admin: bool = False) -> str:
     return "designer" if "designer" in rights else "viewer"
 
 
-def bootstrap_login_active() -> bool:
-    """Until a super admin exists, 'admin' can sign in to /server with the admin token as password."""
-    return not any(is_super_admin(item) for item in load_users())
+def is_temporary(user: dict[str, Any]) -> bool:
+    """The setup admin (python -m backend.app.setup): it switches itself off at expiresAt."""
+    return bool(user.get("temporary"))
+
+
+def is_expired(user: dict[str, Any]) -> bool:
+    """A temporary account after its time (a broken date counts as over)."""
+    if not is_temporary(user):
+        return False
+    try:
+        return datetime.fromisoformat(str(user.get("expiresAt") or "")) <= datetime.now(timezone.utc)
+    except (ValueError, TypeError):
+        return True
+
+
+def is_permanent_super_admin(user: dict[str, Any]) -> bool:
+    return is_super_admin(user) and not user.get("disabled") and not is_temporary(user)
+
+
+def needs_first_admin() -> bool:
+    """No permanent super admin yet: the setup admin still has to create one."""
+    return not any(is_permanent_super_admin(item) for item in load_users())
 
 
 def role_at_least(role: str, minimum: str) -> bool:
@@ -105,10 +125,8 @@ def session_lifetime_seconds() -> int:
     return int(max(0.25, min(hours, 24 * 30)) * 3600)
 
 
-def make_session_cookie(username: str, version: int, bootstrap: bool = False) -> str:
+def make_session_cookie(username: str, version: int) -> str:
     body = {"u": username, "v": version, "exp": int(time.time()) + session_lifetime_seconds(), "n": secrets.token_hex(8)}
-    if bootstrap:
-        body["b"] = 1
     encoded = base64.urlsafe_b64encode(json.dumps(body, separators=(",", ":")).encode("utf-8")).decode("ascii").rstrip("=")
     signature = hmac.new(_session_secret(), encoded.encode("ascii"), hashlib.sha256).hexdigest()
     return f"{encoded}.{signature}"

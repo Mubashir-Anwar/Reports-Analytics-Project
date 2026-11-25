@@ -64,7 +64,7 @@ def main(argv: list[str] | None = None) -> int:
     users = load_users()
     if not args.username:
         if not users:
-            print("There are no accounts yet. Start the service and sign in as 'admin' with the admin token to create one.")
+            print("There are no accounts yet. Make the first one with: python -m backend.app.setup")
             return 0
         print("Accounts (super admins first):")
         for user in sorted(users, key=lambda item: (not is_super_admin(item), item["username"].casefold())):

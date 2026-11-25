@@ -32,7 +32,7 @@ export default function OverviewTab({ who, notify, onOpen }) {
     { id: 'users', icon: 'users', tint: 'v', title: 'Users & rights', text: data ? (Object.entries(byRole).map(([r, n]) => `${n} ${r}${n > 1 ? 's' : ''}`).join(' · ') || 'No users yet') : 'People, roles and rights', count: plural(data?.users.users.length || 0, 'person').replace('persons', 'people'), go: () => onOpen('users') },
     { id: 'keys', icon: 'keys', tint: 'b', title: 'API keys', text: 'Keys for apps, which reports each may call, expiry', count: keys === null ? '–' : plural(keys, 'key'), go: () => onOpen('keys') },
     { id: 'developer', icon: 'developer', tint: 'b', title: 'API & Postman', text: 'Every endpoint with examples; download the Postman collection', count: 'Docs', go: () => onOpen('developer') },
-    { id: 'sources', icon: 'sources', tint: 'g', title: 'Data sources', text: needsSetup.length ? `${needsSetup.length} without a saved connection` : 'Users connect them on the Server; no Admin step needed', count: plural(data?.connections.connections.length || 0, 'adapter'), go: () => { window.location.href = '/server#sources'; } },
+    { id: 'sources', icon: 'sources', tint: 'g', title: 'Data sources', text: needsSetup.length ? `${needsSetup.length} without a saved connection` : 'Each part has its own: Designer, Server, Analytics, Query', count: plural(data?.connections.connections.length || 0, 'adapter'), go: () => onOpen('sources') },
     { id: 'analytics', icon: 'analytics', tint: 'c', title: 'Datasets & dashboards', text: 'Refresh times, who may see each dashboard, storage used', count: 'Analytics', go: () => onOpen('analytics') },
     { id: 'systemdb', icon: 'systemdb', tint: 'c', title: 'System database', text: 'Where the service keeps its own tables', count: status?.storage || '–', go: () => onOpen('systemdb') },
     { id: 'limits', icon: 'limits', tint: 'v', title: 'Limits', text: 'Reports at once, rows, time limits, analytics and API rate', count: 'Live', go: () => onOpen('limits') },
@@ -71,7 +71,7 @@ export default function OverviewTab({ who, notify, onOpen }) {
           <p className="muted">Details: DEPLOYMENT.md → “Keeping the data safe”.</p>
         </section>
         <section className="card">
-          <div className="card-head"><div><p className="eyebrow">Needs attention</p><h2>Data sources</h2></div><a className="btn sm" href="/server#sources">Open on the Server</a></div>
+          <div className="card-head"><div><p className="eyebrow">Needs attention</p><h2>Data sources</h2></div><button type="button" className="btn sm" onClick={() => onOpen('sources')}>Open</button></div>
           <ul className="checklist">
             <li className={needsSetup.length ? 'todo' : 'ok'}><span className="check-icon">{needsSetup.length ? '!' : '✓'}</span>
               <div><b>{needsSetup.length ? `${needsSetup.length} without a saved connection` : 'Every data source has a connection'}</b>{needsSetup.length > 0 && <small>{needsSetup.map((c) => c.name).join(', ')}</small>}</div></li>

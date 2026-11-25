@@ -24,7 +24,7 @@ import test_storage  # noqa: E402
 from backend.app import db as db_package  # noqa: E402
 from backend.app.db import model  # noqa: E402
 from backend.app.storage import store as store_module  # noqa: E402
-from test_workspace_and_server import ADMIN, PUBLISHED, FakeMongoClient, login, token  # noqa: E402
+from test_workspace_and_server import ADMIN, PUBLISHED, FakeMongoClient, login, setup_login, token  # noqa: E402
 
 MONGO_URL = os.getenv("MONGO_TEST_URL", "")
 PG_URL = os.getenv("PG_TEST_URL", "")
@@ -254,7 +254,7 @@ def test_whole_service_records_runs_and_audit(backend, monkeypatch):
     assert app.post("/api/admin/workspace/SYS1/publish", headers=token(ADMIN), json={}).status_code == 200
     response = app.get("/generate/SYS1.csv?CNIC=4220112345671&Branch=LHR", headers={"X-Admin-Token": ADMIN})
     assert response.status_code == 200
-    assert login(app, "admin", ADMIN).status_code == 200
+    assert setup_login(app).status_code == 200
     assert app.get("/api/server/me").status_code == 200 and app.get("/admin").status_code == 200   # signed-in pages
     assert login(app, "admin", "wrong").status_code == 401
     assert app.post("/api/admin/users", headers=token(ADMIN), json={"username": "ali", "email": "ali@example.com", "password": "Passw0rd-long-enough", "rights": ["runner"]}).status_code == 200
@@ -264,7 +264,7 @@ def test_whole_service_records_runs_and_audit(backend, monkeypatch):
     assert run_record["rowCount"] == 2 and run_record["folder"] == "Sales" and run_record["outputBytes"] == len(response.content)
     events = app.get("/api/admin/audit-events", headers=token(ADMIN)).json()["events"]
     actions = [e["action"] for e in reversed(events)]
-    assert actions == ["report.published", "auth.login", "auth.login_failed", "user.created"]
+    assert actions == ["report.published", "user.setup_admin", "auth.login", "auth.login_failed", "user.created"]
     assert events[0]["details"] == {"rights": ["runner"], "superAdmin": False} and events[0]["actor"] == "admin token"
     assert app.get("/api/admin/audit-events/verify", headers=token(ADMIN)).json()["ok"] is True
     assert app.get("/api/admin/audit-events", headers=token(ADMIN), params={"actor": "nobody"}).json()["events"] == []

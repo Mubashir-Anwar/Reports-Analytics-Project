@@ -13,6 +13,8 @@ import uuid
 import xml.etree.ElementTree as ET
 from typing import Any
 
+from backend.app.rendering.engine import band_parts
+
 NS = "http://jasperreports.sourceforge.net/jasperreports"
 XSI = "http://www.w3.org/2001/XMLSchema-instance"
 TOKEN = re.compile(r"\$([FPV])\{([^{}]+)\}")
@@ -218,7 +220,9 @@ def jasper_font(name: Any) -> str:
     as Times. Jasper has those three built in for PDF; a font it does not bundle (Arial, Calibri) loses bold and italic
     in Jasper's PDF and has other letter widths, so the text would not line up with the design."""
     from backend.app.rendering.engine import FONT_FAMILY  # noqa: PLC0415
-    family = FONT_FAMILY.get(str(name or "SansSerif"), "Helvetica")
+    if name and str(name) not in FONT_FAMILY:
+        return str(name)                                        # an own font: Studio needs it installed too
+    family = FONT_FAMILY[str(name or "SansSerif")]
     return {"Helvetica": "SansSerif", "Times": "Serif", "Courier": "Monospaced"}[family]
 
 
@@ -278,7 +282,9 @@ def _element(parent: ET.Element, el: dict[str, Any], out: _Out, where: str, widt
         _box(node, el)
         source = str(el.get("src") or "")
         found = DATA_URL.match(source)
-        if found and len(found.group(2)) <= MAX_EMBEDDED_BASE64:
+        if el.get("expression"):
+            expression, _late = out.expression(el["expression"], where)
+        elif found and len(found.group(2)) <= MAX_EMBEDDED_BASE64:
             expression = ("new java.io.ByteArrayInputStream(java.util.Base64.getDecoder().decode("
                           + java_string(found.group(2)) + "))")
         else:
@@ -290,6 +296,29 @@ def _element(parent: ET.Element, el: dict[str, Any], out: _Out, where: str, widt
         out.warn(f"{where}: an element of type '{kind}' was left out")
 
 
+def _parts(band: dict[str, Any] | None) -> list[dict[str, Any]]:
+    """The section's bands that exist (Detail 1, Detail 2, …), in print order."""
+    return [part for part in band_parts(band) if _num(part.get("height")) > 0 or part.get("elements")]
+
+
+def _stacked(band: dict[str, Any], out: _Out, where: str) -> dict[str, Any]:
+    """Jasper has one band in this section: ours are put below one another in it, each band's own Print When
+    Expression on its elements."""
+    parts = _parts(band)
+    if len(parts) < 2:
+        return parts[0] if parts else band
+    out.warn(f"{where}: Jaspersoft Studio has one band here; the {len(parts)} bands were joined into one")
+    top, elements = 0.0, []
+    for part in parts:
+        condition = part.get("printWhenExpression") or ""
+        for el in part.get("elements") or []:
+            own = el.get("printWhenExpression") or ""
+            both = f"({condition}) && ({own})" if condition and own else condition or own
+            elements.append({**el, "y": _num(el.get("y")) + top, "printWhenExpression": both})
+        top += _num(part.get("height"))
+    return {"height": top, "elements": elements}
+
+
 def _band(parent: ET.Element, band: dict[str, Any] | None, out: _Out, where: str, width_limit: float) -> None:
     band = band or {}
     elements = [el for el in band.get("elements") or [] if isinstance(el, dict)]
@@ -298,12 +327,15 @@ def _band(parent: ET.Element, band: dict[str, Any] | None, out: _Out, where: str
     if bottom > height + 0.5:
         height = bottom                                     # Jasper refuses elements that reach outside their band
     node = _sub(parent, "band", {"height": _int(height), "splitType": "Stretch"})
+    if band.get("printWhenExpression"):
+        expression, _late = out.expression("=" + band["printWhenExpression"], f"{where} band print when")
+        _sub(node, "printWhenExpression", text=expression)
     for el in elements:
         _element(node, el, out, where, width_limit)
 
 
 def _has_band(band: dict[str, Any] | None) -> bool:
-    return bool(band) and (_num(band.get("height")) > 0 or bool(band.get("elements")))
+    return bool(_parts(band))
 
 
 def _mongo_query(definition: dict[str, Any], out: _Out, root: ET.Element) -> str:
@@ -352,7 +384,7 @@ def export_jrxml(definition: dict[str, Any]) -> dict[str, Any]:
     ET.register_namespace("", NS)
     ET.register_namespace("xsi", XSI)
     # an empty No Data band would make Jasper print a blank page when the query has no rows
-    no_data = bool((bands.get("noData") or {}).get("elements"))
+    no_data = any(part.get("elements") for part in band_parts(bands.get("noData")))
     root = ET.Element(f"{{{NS}}}jasperReport", {
         f"{{{XSI}}}schemaLocation": f"{NS} http://jasperreports.sourceforge.net/xsd/jasperreport.xsd",
         "name": name, "pageWidth": _int(width), "pageHeight": _int(height),
@@ -460,14 +492,17 @@ def export_jrxml(definition: dict[str, Any]) -> dict[str, Any]:
         for holder, pool in (("groupHeader", "groupHeaders"), ("groupFooter", "groupFooters")):
             band = (bands.get(pool) or {}).get(gname)
             if _has_band(band):
-                _band(_sub(node, holder), band, out, f"{gname} {holder}", column_width)
+                section = _sub(node, holder)
+                for part in _parts(band):
+                    _band(section, part, out, f"{gname} {holder}", column_width)
 
     for key in BAND_ORDER:
         band = bands.get(key)
         if not _has_band(band) or (key == "noData" and not no_data):
             continue
         holder = _sub(root, key)
-        _band(holder, band, out, key, column_width)
+        for number, part in enumerate(_parts(band) if key == "detail" else [_stacked(band, out, key)], start=1):
+            _band(holder, part, out, key if number == 1 else f"{key} {number}", column_width)
 
     for skipped in ("functions", "datasets"):
         if design.get(skipped):

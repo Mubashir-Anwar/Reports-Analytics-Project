@@ -9,7 +9,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from backend.app.jobs import mailer, schedule, store  # noqa: E402
-from test_workspace_and_server import ADMIN, client, login  # noqa: E402,F401
+from test_workspace_and_server import ADMIN, client, login, setup_login  # noqa: E402,F401
 
 UTC = timezone.utc
 
@@ -82,7 +82,7 @@ def test_schedule_runs_when_due_and_keeps_the_file(client, monkeypatch):
     sent = []
     monkeypatch.setattr(mailer, "configured", lambda: True)
     monkeypatch.setattr(mailer, "send", lambda to, subject, text, attachment=None: sent.append((to, subject, attachment[0] if attachment else None)))
-    assert login(client, "admin", ADMIN).status_code == 200
+    assert setup_login(client).status_code == 200
     info = client.get("/api/server/schedules/info").json()
     assert info["canSchedule"] and info["emailConfigured"]
 
@@ -91,7 +91,7 @@ def test_schedule_runs_when_due_and_keeps_the_file(client, monkeypatch):
     created = client.post("/api/server/schedules", json=payload)
     assert created.status_code == 200, created.text
     job = created.json()["schedule"]
-    assert job["describe"] == "Every day at 08:00" and job["nextRunAt"] and job["owner"] == "admin"
+    assert job["describe"] == "Every day at 08:00" and job["nextRunAt"] and job["owner"] == "setup_admin"
     assert client.post("/api/server/schedules", json={**payload, "reportId": "MISSING"}).status_code == 422
     assert client.post("/api/server/schedules", json={**payload, "format": "docx"}).status_code == 422
 
@@ -142,7 +142,7 @@ def test_background_runs_and_who_sees_what(client, monkeypatch):
     assert client.get("/api/server/runs").json()["runs"] == []
     assert client.get(f"/api/server/runs/{run_id}/file").status_code == 404
     client.post("/api/server/logout", json={})
-    assert login(client, "admin", ADMIN).status_code == 200
+    assert setup_login(client).status_code == 200
     assert [r["id"] for r in client.get("/api/server/runs").json()["runs"]] == [run_id]  # the admin sees all
     assert client.request("DELETE", f"/api/server/runs/{run_id}", json={}).status_code == 200
 
@@ -150,7 +150,7 @@ def test_background_runs_and_who_sees_what(client, monkeypatch):
 def test_failed_runs_and_restart_recovery(client, monkeypatch):
     runner = client.app.state.ctx.job_runner
     runner.inline = True
-    assert login(client, "admin", ADMIN).status_code == 200
+    assert setup_login(client).status_code == 200
 
     def broken(*_a, **_k):
         raise RuntimeError("database down")
@@ -169,13 +169,13 @@ def test_a_background_run_is_one_row_of_runs(client):
     from backend.app.db import get_records
     runner = client.app.state.ctx.job_runner
     runner.inline = True
-    assert login(client, "admin", ADMIN).status_code == 200
+    assert setup_login(client).status_code == 200
     run_id = client.post("/api/server/reports/R1/background", json={"format": "csv", "parameters": {}}).json()["run"]["id"]
     rows = [row for row in get_records().runs(reportId="R1") if row["startedAt"]]
     assert [row["id"] for row in rows] == [run_id]                               # one row, not two
     row = rows[0]
     assert row["runType"] == "background" and row["status"] == "success" and row["queuedAt"] and row["outputSha256"]
-    assert row["channel"] == "server" and row["actor"] == "admin" and row["durationMs"] is not None
+    assert row["channel"] == "server" and row["actor"] == "setup_admin" and row["durationMs"] is not None
     stored = ent.get_entities().get(ent.RUN_FILES, run_id)
     assert stored["storage"] == "store" and stored["location"] == f"jobs/output/{run_id}.csv" and stored["sizeBytes"] > 0
     assert client.request("DELETE", f"/api/server/runs/{run_id}", json={}).status_code == 200

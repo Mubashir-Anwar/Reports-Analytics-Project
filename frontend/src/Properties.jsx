@@ -1,8 +1,9 @@
 import { useState } from 'react';
 import {
-  ELEMENT_LABELS, FONT_NAMES, MARKUPS, PAGE_LIMITS, PAGE_PRESETS, bandLabel, bandPresent, bandPurpose, contentBottom, contentRight, findElement, getBand, pagePreset,
+  ELEMENT_LABELS, MARKUPS, PAGE_LIMITS, PAGE_PRESETS, bandLabel, bandNumber, bandPresent, sectionBands, bandPurpose, contentBottom, contentRight, findElement, getBand, pagePreset,
   mapElements, resizeElement, resizeRule, safeMarkupHtml, setBand,
 } from './designModel.js';
+import { FontSelect } from './fonts.jsx';
 import { selectedIds } from './arrange.js';
 import { CrosstabProps, DatasetProps, ListProps, NoteProps, SubreportProps, TableProps } from './ComponentProps.jsx';
 import { componentFields } from './DatasetsEditor.jsx';
@@ -54,9 +55,7 @@ function TextFormat({ element, patch }) {
       <div className="prop-section">Font</div>
       <div className="prop-grid">
         <Row label="Font name">
-          <select value={element.fontName || 'SansSerif'} onChange={(e) => patch({ fontName: e.target.value })}>
-            {FONT_NAMES.map((name) => <option key={name}>{name}</option>)}
-          </select>
+          <FontSelect value={element.fontName} onChange={(fontName) => patch({ fontName })} />
         </Row>
         <Row label="Size"><Num value={element.fontSize} min={4} max={96} onChange={(fontSize) => patch({ fontSize })} /></Row>
       </div>
@@ -340,9 +339,7 @@ export default function Properties({ state, dispatch, notify, actions, onEditExp
         {tab === 'text' && (hasFont || ['table', 'crosstab'].includes(element.type)) && (
           <>
             <Row label="Font name">
-              <select value={element.fontName || 'SansSerif'} onChange={(e) => patch({ fontName: e.target.value })}>
-                {FONT_NAMES.map((name) => <option key={name}>{name}</option>)}
-              </select>
+              <FontSelect value={element.fontName} onChange={(fontName) => patch({ fontName })} />
             </Row>
             <div className="prop-grid">
               <Row label="Font size"><Num value={element.fontSize} min={4} max={96} onChange={(fontSize) => patch({ fontSize })} /></Row>
@@ -428,7 +425,7 @@ export default function Properties({ state, dispatch, notify, actions, onEditExp
               <span className="expr-row">
                 <input list="pattern-choices" value={element.pattern || ''} placeholder="#,##0.00  |  dd/MM/yyyy" spellCheck={false} onChange={(e) => patch({ pattern: e.target.value })} />
                 <datalist id="pattern-choices">{PATTERNS.map(([value, label]) => <option key={value} value={value}>{label}</option>)}</datalist>
-                <button type="button" className="btn sm" title="Format Pattern: Number, Percentage, Currency, Scientific, Time, Date" onClick={() => setPatternOpen(true)}>…</button>
+                <button type="button" className="btn sm" title="Format pattern: ready ones, or your own" onClick={() => setPatternOpen(true)}>…</button>
               </span>
             </Row>
             {element.pattern && <p className="hint pattern-preview">Sample: <b>{patternSample(element.pattern)}</b></p>}
@@ -455,11 +452,12 @@ export default function Properties({ state, dispatch, notify, actions, onEditExp
         {tab === 'specific' && element.type === 'image' && (
           <>
             <Row label="Image (PNG/JPEG)"><input type="file" accept="image/png,image/jpeg" onChange={(e) => upload(e.target.files[0])} /></Row>
+            {expressionRow('Or from the data (an expression)', 'expression', '$F{Photo}  (base64 text of a PNG/JPEG)')}
             <Row label="Or from a web address">
               <input type="url" placeholder="https://…/logo.png" onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); fromUrl(e.currentTarget.value); } }}
                 onBlur={(e) => { if (e.currentTarget.value.trim() && e.currentTarget.value.trim() !== element.srcUrl) fromUrl(e.currentTarget.value); }} />
             </Row>
-            {(element.src || element.srcName || element.reference) && (
+            {!(element.expression && !element.src) && (element.src || element.srcName || element.reference) && (
               <p className="hint img-origin">
                 {element.src ? <>Stored in the report: <b>{element.srcName || 'picture'}</b> ({Math.round((element.src.length * 3) / 4 / 1024)} KB)</> : <b className="danger-text">Missing picture{element.srcName ? `: ${element.srcName}` : ''} — choose the file above</b>}
                 {element.srcUrl && <> · from <a href={element.srcUrl} target="_blank" rel="noopener noreferrer">{new URL(element.srcUrl).host}</a></>}
@@ -546,6 +544,17 @@ export default function Properties({ state, dispatch, notify, actions, onEditExp
         <div className="prop-title">{bandLabel(selection.key)} <small>band</small></div>
         <p className="hint band-purpose">{bandPurpose(selection.key)}</p>
         <Row label="Height (px)"><Num value={band.height} min={0} max={1500} onChange={setHeight} /></Row>
+        <Row label="Print When Expression">
+          <textarea rows={2} value={band.printWhenExpression || ''} placeholder='$F{Amount} > 0   (empty = always)'
+            onChange={(e) => { const value = e.target.value; design$((d) => setBand(d, selection.key, { ...getBand(d, selection.key), printWhenExpression: value }), `band-when-${selection.key}`); }} />
+        </Row>
+        <div className="row-actions">
+          <button className="btn sm" onClick={() => actions.addBandAt(selection.key)} title="A second, third… band of this kind: it prints right after this one">＋ Add another</button>
+          {sectionBands(design, selection.key).length > 1 && <>
+            <button className="btn sm" disabled={bandNumber(selection.key) === 1} onClick={() => actions.moveBandBy(selection.key, -1)} title="Print this band earlier">↑ Up</button>
+            <button className="btn sm" disabled={bandNumber(selection.key) === sectionBands(design, selection.key).length} onClick={() => actions.moveBandBy(selection.key, 1)} title="Print this band later">↓ Down</button>
+          </>}
+        </div>
         <div className="row-actions">
           <button className="btn sm" onClick={() => setHeight(contentBottom(band))} title="Make the band exactly as tall as its elements">Fit to content</button>
           <button className="btn sm danger-text" onClick={() => actions.deleteSelection({ kind: 'band', key: selection.key })} title="Remove the band and its elements from the report (Ctrl+Z to undo)">Delete Band</button>

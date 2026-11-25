@@ -8,7 +8,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from test_workspace_and_server import ADMIN, PUBLISHED, client, login, token  # noqa: E402,F401
+from test_workspace_and_server import ADMIN, PUBLISHED, client, login, setup_login, token  # noqa: E402,F401
 
 ADMIN_HEADERS = token(ADMIN)
 
@@ -83,7 +83,7 @@ def test_public_api_and_api_key_folders(client):
 
 def test_report_server_keeps_them_apart(client):
     two_copies(client)
-    login(client, "admin", ADMIN)
+    setup_login(client)
     assert client.get("/api/server/reports/AR").status_code == 409
     kmbl = client.get("/api/server/reports/AR?folder=cascade/KMBL/Reports").json()
     gl = client.get("/api/server/reports/AR?folder=cascade/KMBLGL/Reports").json()
@@ -118,7 +118,7 @@ def test_report_server_keeps_them_apart(client):
 
 def test_schedules_and_background_runs_remember_the_folder(client):
     two_copies(client)
-    login(client, "admin", ADMIN)
+    setup_login(client)
     client.app.state.ctx.job_runner.inline = True
     run = client.post("/api/server/reports/AR/background?folder=cascade/KMBLGL/Reports", json={"format": "csv", "parameters": {}})
     assert run.status_code == 200 and run.json()["run"]["folder"] == "cascade/KMBLGL/Reports"

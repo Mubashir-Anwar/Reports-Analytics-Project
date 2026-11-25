@@ -1,6 +1,7 @@
 // My account: your own name, e-mail and phone, and a new password (the current one first).
 // Opened from the user menu; opened by itself after an administrator set your password (mustChangePassword).
 import { useEffect, useState } from 'react';
+import { createPortal } from 'react-dom';
 import PasswordInput from './PasswordInput.jsx';
 
 async function call(path, method = 'GET', body) {
@@ -23,6 +24,7 @@ export default function AccountDialog({ onClose, forced = false }) {
   const [pw, setPw] = useState({ current: '', next: '', again: '' });
   const [message, setMessage] = useState(null);
   const [busy, setBusy] = useState('');
+  const [done, setDone] = useState(false);
 
   useEffect(() => {
     accountApi.get().then((data) => { setAccount(data); setForm({ fullName: data.fullName, email: data.email, phone: data.phone }); })
@@ -32,57 +34,72 @@ export default function AccountDialog({ onClose, forced = false }) {
   const saveProfile = async (event) => {
     event.preventDefault();
     setBusy('profile');
-    try { setAccount(await accountApi.save(form)); setMessage({ kind: 'ok', text: 'Saved.' }); }
-    catch (error) { setMessage({ kind: 'error', text: error.message }); }
+    try { setAccount(await accountApi.save(form)); setMessage({ tab: 'profile', kind: 'ok', text: 'Saved.' }); }
+    catch (error) { setMessage({ tab: 'profile', kind: 'error', text: error.message }); }
     finally { setBusy(''); }
   };
   const savePassword = async (event) => {
     event.preventDefault();
-    if (pw.next !== pw.again) { setMessage({ kind: 'error', text: 'The two new passwords are not the same.' }); return; }
+    if (pw.next !== pw.again) { setMessage({ tab: 'password', kind: 'error', text: 'The two new passwords are not the same.' }); return; }
     setBusy('password');
     try {
       await accountApi.password(pw.current, pw.next);
       setPw({ current: '', next: '', again: '' });
-      setAccount({ ...account, mustChangePassword: false });
-      setMessage({ kind: 'ok', text: 'Your password is changed.' });
-    } catch (error) { setMessage({ kind: 'error', text: error.message }); }
+      setDone(true);                                    // nothing left to do here: the dialog closes
+    } catch (error) { setMessage({ tab: 'password', kind: 'error', text: error.message }); }
     finally { setBusy(''); }
   };
   const mustChange = forced && account?.mustChangePassword;
+  useEffect(() => {
+    const escape = (event) => { if (event.key === 'Escape' && !mustChange) onClose(); };
+    document.addEventListener('keydown', escape);
+    return () => document.removeEventListener('keydown', escape);
+  }, [mustChange, onClose]);
+  useEffect(() => {
+    if (!done) return undefined;
+    const timer = setTimeout(onClose, 2600);
+    return () => clearTimeout(timer);
+  }, [done, onClose]);
 
-  return (
-    <div className="dialog-back" onMouseDown={(e) => e.target === e.currentTarget && !mustChange && onClose()}>
-      <div className="card dialog account-dialog" role="dialog" aria-label="My account">
-        <div className="card-head">
-          <div><p className="eyebrow">My account</p><h2>{account ? account.username : 'Loading…'}</h2>
-            {account && <p className="muted">{account.superAdmin ? 'Super admin' : `Rights: ${account.rights.join(', ') || 'none'}`}{account.groups.length ? ` · Teams: ${account.groups.join(', ')}` : ''}</p>}</div>
-          {!mustChange && <button className="btn quiet sm" onClick={onClose} aria-label="Close">✕</button>}
-        </div>
-        {mustChange && <p className="notice warn">An administrator set your password. Choose your own now.</p>}
+  if (done) return createPortal(<div className="acct-done" role="status"><span aria-hidden="true">✓</span>Your password is changed.</div>, document.body);
+  const note = (tab) => message && message.tab === tab && <p className={`acct-note ${message.kind}`} role="status">{message.text}</p>;
+
+  return createPortal(   // on <body>: inside the dark navigation bar its light text colours would apply
+    <div className="acct-back" onMouseDown={(e) => e.target === e.currentTarget && !mustChange && onClose()}>
+      <div className="acct" role="dialog" aria-modal="true" aria-label={mustChange ? 'Choose your own password' : 'My account'}>
+        <header className="acct-head">
+          <span className="acct-avatar" aria-hidden="true">{(account?.username || '?').slice(0, 2).toUpperCase()}</span>
+          <div><small>{mustChange ? 'Choose your own password' : 'My account'}</small><h2>{account ? account.username : 'Loading…'}</h2>
+            {account && !mustChange && <div className="acct-chips">{account.superAdmin ? <span>Super admin</span> : account.rights.map((right) => <span key={right}>{right}</span>)}{account.groups.map((group) => <span key={`g${group}`}>Team: {group}</span>)}</div>}</div>
+          {!mustChange && <button type="button" className="acct-x" onClick={onClose} aria-label="Close">✕</button>}
+        </header>
+        {!account && message && <p className={`acct-note ${message.kind}`} role="status">{message.text}</p>}
+        {mustChange && <p className="acct-note warn">An administrator set your password. Choose your own to go on.</p>}
         {account && !mustChange && (
-          <form className="stack" onSubmit={saveProfile}>
-            <div className="form-grid-2">
-              <label className="field"><span>Full name</span><input value={form.fullName} onChange={(e) => setForm({ ...form, fullName: e.target.value })} maxLength={120} autoComplete="name" /></label>
-              <label className="field"><span>E-mail</span><input type="email" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} required autoComplete="email" /></label>
-              <label className="field"><span>Phone (optional)</span><input value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })} autoComplete="tel" placeholder="+92 300 1234567" /></label>
+          <form className="acct-part" onSubmit={saveProfile}>
+            <h3>My details</h3>
+            <div className="acct-grid">
+              <label><span>Full name</span><input value={form.fullName} onChange={(e) => setForm({ ...form, fullName: e.target.value })} maxLength={120} autoComplete="name" /></label>
+              <label><span>E-mail</span><input type="email" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} required autoComplete="email" /></label>
+              <label><span>Phone (optional)</span><input value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })} autoComplete="tel" placeholder="+92 300 1234567" /></label>
             </div>
-            <div className="row"><button className="btn" type="submit" disabled={busy === 'profile'}>{busy === 'profile' ? 'Saving…' : 'Save my details'}</button></div>
+            {note('profile')}
+            <button className="acct-btn" type="submit" disabled={busy === 'profile'}>{busy === 'profile' ? 'Saving…' : 'Save my details'}</button>
           </form>
         )}
         {account && (
-          <form className="stack" onSubmit={savePassword}>
-            <h3>Change password</h3>
-            <div className="form-grid-2">
-              <label className="field"><span>Current password</span><PasswordInput value={pw.current} onChange={(e) => setPw({ ...pw, current: e.target.value })} autoComplete="current-password" required /></label>
-              <span />
-              <label className="field"><span>New password</span><PasswordInput value={pw.next} onChange={(e) => setPw({ ...pw, next: e.target.value })} autoComplete="new-password" minLength={8} required /></label>
-              <label className="field"><span>New password again</span><PasswordInput value={pw.again} onChange={(e) => setPw({ ...pw, again: e.target.value })} autoComplete="new-password" minLength={8} required /></label>
+          <form className="acct-part" onSubmit={savePassword}>
+            {!mustChange && <h3>Change password</h3>}
+            <div className="acct-grid">
+              <label className="wide"><span>Current password</span><PasswordInput value={pw.current} onChange={(e) => setPw({ ...pw, current: e.target.value })} autoComplete="current-password" required autoFocus={mustChange} /></label>
+              <label><span>New password</span><PasswordInput value={pw.next} onChange={(e) => setPw({ ...pw, next: e.target.value })} autoComplete="new-password" minLength={8} required /></label>
+              <label><span>New password again</span><PasswordInput value={pw.again} onChange={(e) => setPw({ ...pw, again: e.target.value })} autoComplete="new-password" minLength={8} required /></label>
             </div>
-            <div className="row"><button className="btn primary" type="submit" disabled={busy === 'password'}>{busy === 'password' ? 'Changing…' : 'Change password'}</button></div>
+            <small className="acct-hint">At least 8 characters.</small>
+            {note('password')}
+            <button className="acct-btn primary" type="submit" disabled={busy === 'password'}>{busy === 'password' ? 'Changing…' : 'Change password'}</button>
           </form>
         )}
-        {message && <p className={`notice ${message.kind === 'error' ? 'error' : message.kind}`} role="status">{message.text}</p>}
       </div>
-    </div>
-  );
+    </div>, document.body);
 }

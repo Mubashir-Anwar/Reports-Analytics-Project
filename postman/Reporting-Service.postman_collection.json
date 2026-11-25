@@ -2,7 +2,7 @@
   "info": {
     "_postman_id": "7c3800c9-feb4-5d0e-a94f-c5dbfd8485b1",
     "name": "Analysis — all APIs",
-    "description": "Build the Postman collection and environment for every API of the reporting service.\n\n    python tools/postman/build_collection.py            -> postman/Reporting-Service.postman_collection.json\n                                                           postman/Local.postman_environment.json\n\nThe collection is a complete end-to-end run (create -> use -> clean up), so it can be run as a whole in Postman\n(\"Run collection\") or from the command line:\n\n    npx newman run postman/Reporting-Service.postman_collection.json -e postman/Local.postman_environment.json\n\nIt needs a data adapter it can read: by default a local MongoDB with the demo database rs_postman_demo\n(tools/postman/seed_demo.py creates it). Everything it creates is named PM_… / pm_… / \"Postman\" and removed at\nthe end. Fill in the environment: baseUrl, username/password (a super admin, or \"admin\" + the admin token during\nfirst setup), adminToken (for the token-based requests) and mongoUri.\n",
+    "description": "Build the Postman collection and environment for every API of the reporting service.\n\n    python tools/postman/build_collection.py            -> postman/Reporting-Service.postman_collection.json\n                                                           postman/Local.postman_environment.json\n\nThe collection is a complete end-to-end run (create -> use -> clean up), so it can be run as a whole in Postman\n(\"Run collection\") or from the command line:\n\n    npx newman run postman/Reporting-Service.postman_collection.json -e postman/Local.postman_environment.json\n\nIt needs a data adapter it can read: by default a local MongoDB with the demo database rs_postman_demo\n(tools/postman/seed_demo.py creates it). Everything it creates is named PM_… / pm_… / \"Postman\" and removed at\nthe end. Fill in the environment: baseUrl, username/password (a super admin, or the one of python -m backend.app.setup during\nfirst setup), adminToken (for the token-based requests) and mongoUri.\n",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
   "item": [
@@ -320,7 +320,7 @@
           ]
         },
         {
-          "name": "Home sends to the first allowed page",
+          "name": "The first page sends to Home",
           "request": {
             "method": "GET",
             "header": [],
@@ -339,7 +339,7 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test(\"Home sends to the first allowed page: HTTP 303\", function () { pm.expect([303]).to.include(pm.response.code); });"
+                  "pm.test(\"The first page sends to Home: HTTP 303\", function () { pm.expect([303]).to.include(pm.response.code); });"
                 ]
               }
             }
@@ -347,6 +347,34 @@
           "protocolProfileBehavior": {
             "followRedirects": false
           }
+        },
+        {
+          "name": "Page /home",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/home",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "home"
+              ]
+            },
+            "description": ""
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Page /home: HTTP 200\", function () { pm.expect([200]).to.include(pm.response.code); });"
+                ]
+              }
+            }
+          ]
         },
         {
           "name": "Page /designer",
@@ -521,6 +549,36 @@
           }
         },
         {
+          "name": "Home: what this account can do",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/home",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "home"
+              ]
+            },
+            "description": ""
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Home: what this account can do: HTTP 200\", function () { pm.expect([200]).to.include(pm.response.code); });",
+                  "pm.test('has the admin part', function () { pm.expect(pm.response.json()).to.have.property('admin'); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
           "name": "Admin whoami",
           "request": {
             "method": "GET",
@@ -585,7 +643,7 @@
     },
     {
       "name": "03 Data sources",
-      "description": "Any signed-in user with Designer, Query or Report Server rights connects data sources: no Admin right needed. The old /api/admin/connections paths still answer.",
+      "description": "A data source belongs to one part (area: designer, server, analytics, query) and works only there; that part's right connects it. Without an area (administrators) it works in every part, like older ones. The old /api/admin/connections paths still answer.",
       "item": [
         {
           "name": "Test a connection before saving",
@@ -818,6 +876,656 @@
                 "type": "text/javascript",
                 "exec": [
                   "pm.test(\"Move adapter to a folder: HTTP 200\", function () { pm.expect([200]).to.include(pm.response.code); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Save a data source only for Query",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/data-sources",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "data-sources"
+              ]
+            },
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"id\": \"pm_query\",\n  \"name\": \"Postman Query\",\n  \"type\": \"mongodb\",\n  \"uri\": \"{{mongoUri}}\",\n  \"database\": \"rs_postman_query\",\n  \"area\": \"query\",\n  \"create\": true\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Save a data source only for Query: HTTP 200\", function () { pm.expect([200]).to.include(pm.response.code); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "List the data sources of Query",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/data-sources?area=query",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "data-sources"
+              ],
+              "query": [
+                {
+                  "key": "area",
+                  "value": "query"
+                }
+              ]
+            },
+            "description": ""
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"List the data sources of Query: HTTP 200\", function () { pm.expect([200]).to.include(pm.response.code); });",
+                  "pm.test('only Query and shared ones', function () { pm.response.json().connections.forEach(function (c) { pm.expect(['', 'query']).to.include(c.area); }); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Connect the same database in the Designer",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/data-sources/pm_query/copy",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "data-sources",
+                "pm_query",
+                "copy"
+              ]
+            },
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"area\": \"designer\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Connect the same database in the Designer: HTTP 200\", function () { pm.expect([200]).to.include(pm.response.code); });",
+                  "pm.test('a separate one', function () { pm.expect(pm.response.json().connection.id).to.eql('pm_query-designer'); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "What stands in for it in the Designer",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/data-sources/pm_query/targets?area=designer",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "data-sources",
+                "pm_query",
+                "targets"
+              ],
+              "query": [
+                {
+                  "key": "area",
+                  "value": "designer"
+                }
+              ]
+            },
+            "description": ""
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"What stands in for it in the Designer: HTTP 200\", function () { pm.expect([200]).to.include(pm.response.code); });",
+                  "pm.test('the copy is suggested', function () { pm.expect(pm.response.json().suggested).to.eql('pm_query-designer'); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Remember which one stands in",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/data-sources/pm_query/use-in",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "data-sources",
+                "pm_query",
+                "use-in"
+              ]
+            },
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"area\": \"designer\",\n  \"connectionId\": \"pm_query-designer\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Remember which one stands in: HTTP 200\", function () { pm.expect([200]).to.include(pm.response.code); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Query refuses a data source of the Designer",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/query/mongo/collections",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "query",
+                "mongo",
+                "collections"
+              ]
+            },
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"connectionId\": \"pm_query-designer\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Query refuses a data source of the Designer: HTTP 422\", function () { pm.expect([422]).to.include(pm.response.code); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Delete the Designer's one",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/data-sources/pm_query-designer",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "data-sources",
+                "pm_query-designer"
+              ]
+            },
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Delete the Designer's one: HTTP 200\", function () { pm.expect([200]).to.include(pm.response.code); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Give it to Analytics (Admin)",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/data-sources/pm_query/area",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "data-sources",
+                "pm_query",
+                "area"
+              ]
+            },
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"area\": \"analytics\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Give it to Analytics (Admin): HTTP 200\", function () { pm.expect([200]).to.include(pm.response.code); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Delete it",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/data-sources/pm_query",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "data-sources",
+                "pm_query"
+              ]
+            },
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Delete it: HTTP 200\", function () { pm.expect([200]).to.include(pm.response.code); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Save an older, shared data source",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/data-sources",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "data-sources"
+              ]
+            },
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"id\": \"pm_shared\",\n  \"name\": \"Postman shared\",\n  \"type\": \"mongodb\",\n  \"uri\": \"{{mongoUri}}\",\n  \"database\": \"rs_postman_shared\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Save an older, shared data source: HTTP 200\", function () { pm.expect([200]).to.include(pm.response.code); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Split it: one per part (Admin)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/data-sources/pm_shared/split",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "data-sources",
+                "pm_shared",
+                "split"
+              ]
+            },
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Split it: one per part (Admin): HTTP 200\", function () { pm.expect([200]).to.include(pm.response.code); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Delete pm_shared",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/data-sources/pm_shared",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "data-sources",
+                "pm_shared"
+              ]
+            },
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Delete pm_shared: HTTP 200\", function () { pm.expect([200]).to.include(pm.response.code); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Delete pm_shared-designer",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/data-sources/pm_shared-designer",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "data-sources",
+                "pm_shared-designer"
+              ]
+            },
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Delete pm_shared-designer: HTTP 200\", function () { pm.expect([200]).to.include(pm.response.code); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Delete pm_shared-analytics",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/data-sources/pm_shared-analytics",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "data-sources",
+                "pm_shared-analytics"
+              ]
+            },
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Delete pm_shared-analytics: HTTP 200\", function () { pm.expect([200]).to.include(pm.response.code); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Delete pm_shared-query",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/data-sources/pm_shared-query",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "data-sources",
+                "pm_shared-query"
+              ]
+            },
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Delete pm_shared-query: HTTP 200\", function () { pm.expect([200]).to.include(pm.response.code); });"
                 ]
               }
             }
@@ -1213,6 +1921,323 @@
                 "exec": [
                   "pm.test(\"Save as JRXML (for Jaspersoft Studio): HTTP 200\", function () { pm.expect([200]).to.include(pm.response.code); });",
                   "pm.test('a jasperReport file', function () { const b = pm.response.json(); pm.expect(b.xml).to.include('<jasperReport'); pm.expect(b.fileName).to.include('.jrxml'); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Saved format patterns",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/admin/patterns",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "admin",
+                "patterns"
+              ]
+            },
+            "description": ""
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Saved format patterns: HTTP 200\", function () { pm.expect([200]).to.include(pm.response.code); });",
+                  "pm.test('a list', function () { pm.expect(pm.response.json().patterns).to.be.an('array'); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Save a pattern: only one that formats something",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/admin/patterns",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "admin",
+                "patterns"
+              ]
+            },
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Not a pattern\",\n  \"pattern\": \"???\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Save a pattern: only one that formats something: HTTP 422\", function () { pm.expect([422]).to.include(pm.response.code); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Change a pattern that is not there",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/admin/patterns/00000000000000000000000000000000",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "admin",
+                "patterns",
+                "00000000000000000000000000000000"
+              ]
+            },
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"X\",\n  \"pattern\": \"0.00\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Change a pattern that is not there: HTTP 404\", function () { pm.expect([404]).to.include(pm.response.code); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Remove a pattern that is not there",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/admin/patterns/00000000000000000000000000000000",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "admin",
+                "patterns",
+                "00000000000000000000000000000000"
+              ]
+            },
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Remove a pattern that is not there: HTTP 404\", function () { pm.expect([404]).to.include(pm.response.code); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Own fonts",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/admin/fonts",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "admin",
+                "fonts"
+              ]
+            },
+            "description": ""
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Own fonts: HTTP 200\", function () { pm.expect([200]).to.include(pm.response.code); });",
+                  "pm.test('a list', function () { pm.expect(pm.response.json().fonts).to.be.an('array'); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Add a font: only TrueType (.ttf) files",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/admin/fonts",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "admin",
+                "fonts"
+              ]
+            },
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"file\": \"aGVsbG8=\",\n  \"fileName\": \"not-a-font.ttf\",\n  \"family\": \"Not a font\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Add a font: only TrueType (.ttf) files: HTTP 422\", function () { pm.expect([422]).to.include(pm.response.code); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "A font file that is not there",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/admin/fonts/000000000000000000000000/file",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "admin",
+                "fonts",
+                "000000000000000000000000",
+                "file"
+              ]
+            },
+            "description": ""
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"A font file that is not there: HTTP 404\", function () { pm.expect([404]).to.include(pm.response.code); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Remove a font that is not there",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/admin/fonts/000000000000000000000000",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "admin",
+                "fonts",
+                "000000000000000000000000"
+              ]
+            },
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Remove a font that is not there: HTTP 404\", function () { pm.expect([404]).to.include(pm.response.code); });"
                 ]
               }
             }
@@ -3649,6 +4674,43 @@
                 "type": "text/javascript",
                 "exec": [
                   "pm.test(\"Folder contents: HTTP 200\", function () { pm.expect([200]).to.include(pm.response.code); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Everything as one ZIP, by server folder",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/server/export?folder=Postman",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "server",
+                "export"
+              ],
+              "query": [
+                {
+                  "key": "folder",
+                  "value": "Postman"
+                }
+              ]
+            },
+            "description": ""
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Everything as one ZIP, by server folder: HTTP 200\", function () { pm.expect([200]).to.include(pm.response.code); });",
+                  "pm.test('a ZIP file', function () { pm.expect(pm.response.headers.get('Content-Type')).to.include('zip'); });"
                 ]
               }
             }
@@ -6856,6 +7918,51 @@
           ]
         },
         {
+          "name": "Machine learning: too few records are refused (the demo has 5)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/analytics/query",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "analytics",
+                "query"
+              ]
+            },
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"dataset\": \"{{dsOrders}}\",\n  \"detail\": true,\n  \"columns\": [\n    {\n      \"column\": \"Amount\"\n    }\n  ],\n  \"ml\": {\n    \"model\": \"kmeans\",\n    \"features\": [\n      \"Amount\"\n    ],\n    \"target\": \"\",\n    \"params\": {\n      \"clusters\": 2\n    }\n  }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Machine learning: too few records are refused (the demo has 5): HTTP 422\", function () { pm.expect([422]).to.include(pm.response.code); });",
+                  "pm.test('says why', function () { pm.expect(pm.response.json().detail).to.be.a('string'); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
           "name": "A wrong column is refused",
           "request": {
             "method": "POST",
@@ -7283,6 +8390,187 @@
           ]
         },
         {
+          "name": "Embed token for the dashboard (API key)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-API-Key",
+                "value": "{{apiKey}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/embed-tokens",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "embed-tokens"
+              ]
+            },
+            "description": "",
+            "auth": {
+              "type": "noauth"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"dashboard\": \"{{dashboardId}}\",\n  \"expiresInSeconds\": 600,\n  \"filters\": [\n    {\n      \"dataset\": \"{{dsOrders}}\",\n      \"column\": \"Branch\",\n      \"op\": \"in\",\n      \"values\": [\n        \"LHR\"\n      ]\n    }\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Embed token for the dashboard (API key): HTTP 200\", function () { pm.expect([200]).to.include(pm.response.code); });",
+                  "try { pm.environment.set('embedToken', pm.response.json().token); } catch (e) { console.log('could not save embedToken', e); }"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Embedded dashboard: the page",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/embed/view?token={{embedToken}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "embed",
+                "view"
+              ],
+              "query": [
+                {
+                  "key": "token",
+                  "value": "{{embedToken}}"
+                }
+              ]
+            },
+            "description": "",
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Embedded dashboard: the page: HTTP 200\", function () { pm.expect([200]).to.include(pm.response.code); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Embedded dashboard: its layout",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "X-Embed-Token",
+                "value": "{{embedToken}}"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/embed/dashboard",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "embed",
+                "dashboard"
+              ]
+            },
+            "description": "",
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Embedded dashboard: its layout: HTTP 200\", function () { pm.expect([200]).to.include(pm.response.code); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Embedded dashboard: its numbers",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-Embed-Token",
+                "value": "{{embedToken}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/embed/dashboard/query",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "embed",
+                "dashboard",
+                "query"
+              ]
+            },
+            "description": "",
+            "auth": {
+              "type": "noauth"
+            },
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"tiles\": [\n    \"kpi\",\n    \"col\"\n  ],\n  \"filters\": []\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"Embedded dashboard: its numbers: HTTP 200\", function () { pm.expect([200]).to.include(pm.response.code); });",
+                  "pm.test('two results', function () { pm.expect(pm.response.json().results.length).to.eql(2); });"
+                ]
+              }
+            }
+          ]
+        },
+        {
           "name": "Report Server: download (.mdash)",
           "request": {
             "method": "GET",
@@ -7568,7 +8856,7 @@
             "description": "",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"content\": \"UEsDBBQAAAAIAH18eF1hfqQcfgAAABgBAAAPAAAARGF0YU1vZGVsU2NoZW1hhY8xCoNAEEXfUcTaE9jFC6SxCxbGlURQI6sWIt4931HEQrBYdvfx/h9mJqThh6Ok1jsmYNY9kPMWKel3+jLeijeiGwt54i3rzYuMFeqrGeW1N+lEuVy04Hukncg6PWWiO7m9qKeS/dFvMfuq82H7jOLDbaczc9tz7cz2s/AHUEsDBBQAAAAIAH18eF02PitejAEAAJQFAAANAAAAUmVwb3J0L0xheW91dM1Ty2rCQBQ9n1Jcu1AptHRnRZf2iVCaLiTGmBKT1KSPEPLvPXMzEyYTQdxJyDzu49xz7sxUGCBHAB8FIqRIuBvgDld4R8XVhtYcGWKsUWLJcc/oJmKAexxoSZi9o1VlDsX+y6wNEXc6cowJbjHSXhUbIeRcaP8N/cb7IxW/iRtjJowKriPOAat12f3pncktnf25PK7pM15fam8lwuit4HFMdBc8bfckeizzUO9zYRxSQ4CVpcjkNEi21leyz3qoMb05+SntAbWojijbnugzMl/TXnQqZ7Sk+HTOtFt3xjyFGdJ7YF3P6qpaf7FCIJ5nzluHkxprfLQV387KL9v82uFcyN904alF6DJf6VvQ6DK+SYu0EKR9j9HyyJmlnb7N5aZFwsCOeiDiRld1lb/QHutOuxXtk+pqmPPeZnKeeU9JpXFTZh6IGzgd7Pv7imqrs4/Sj0z4u8rs19vkmaxj3fKtmIbFlPcnFB2h3KdjSk5rvfw+TclN4ST6lO28hdj9nvrRiW7ar0B9Zq3+f1BLAQIUABQAAAAIAH18eF1hfqQcfgAAABgBAAAPAAAAAAAAAAAAAACAAQAAAABEYXRhTW9kZWxTY2hlbWFQSwECFAAUAAAACAB9fHhdNj4rXowBAACUBQAADQAAAAAAAAAAAAAAgAGrAAAAUmVwb3J0L0xheW91dFBLBQYAAAAAAgACAHgAAABiAgAAAAA=\",\n  \"name\": \"PM sales.pbit\"\n}",
+              "raw": "{\n  \"content\": \"UEsDBBQAAAAIAG6JeV1hfqQcfgAAABgBAAAPAAAARGF0YU1vZGVsU2NoZW1hhY8xCoNAEEXfUcTaE9jFC6SxCxbGlURQI6sWIt4931HEQrBYdvfx/h9mJqThh6Ok1jsmYNY9kPMWKel3+jLeijeiGwt54i3rzYuMFeqrGeW1N+lEuVy04Hukncg6PWWiO7m9qKeS/dFvMfuq82H7jOLDbaczc9tz7cz2s/AHUEsDBBQAAAAIAG6JeV02PitejAEAAJQFAAANAAAAUmVwb3J0L0xheW91dM1Ty2rCQBQ9n1Jcu1AptHRnRZf2iVCaLiTGmBKT1KSPEPLvPXMzEyYTQdxJyDzu49xz7sxUGCBHAB8FIqRIuBvgDld4R8XVhtYcGWKsUWLJcc/oJmKAexxoSZi9o1VlDsX+y6wNEXc6cowJbjHSXhUbIeRcaP8N/cb7IxW/iRtjJowKriPOAat12f3pncktnf25PK7pM15fam8lwuit4HFMdBc8bfckeizzUO9zYRxSQ4CVpcjkNEi21leyz3qoMb05+SntAbWojijbnugzMl/TXnQqZ7Sk+HTOtFt3xjyFGdJ7YF3P6qpaf7FCIJ5nzluHkxprfLQV387KL9v82uFcyN904alF6DJf6VvQ6DK+SYu0EKR9j9HyyJmlnb7N5aZFwsCOeiDiRld1lb/QHutOuxXtk+pqmPPeZnKeeU9JpXFTZh6IGzgd7Pv7imqrs4/Sj0z4u8rs19vkmaxj3fKtmIbFlPcnFB2h3KdjSk5rvfw+TclN4ST6lO28hdj9nvrRiW7ar0B9Zq3+f1BLAQIUABQAAAAIAG6JeV1hfqQcfgAAABgBAAAPAAAAAAAAAAAAAACAAQAAAABEYXRhTW9kZWxTY2hlbWFQSwECFAAUAAAACABuiXldNj4rXowBAACUBQAADQAAAAAAAAAAAAAAgAGrAAAAUmVwb3J0L0xheW91dFBLBQYAAAAAAgACAHgAAABiAgAAAAA=\",\n  \"name\": \"PM sales.pbit\"\n}",
               "options": {
                 "raw": {
                   "language": "json"
@@ -7660,7 +8948,7 @@
             "description": "",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"content\": \"UEsDBBQAAAAIAH18eF1hfqQcfgAAABgBAAAPAAAARGF0YU1vZGVsU2NoZW1hhY8xCoNAEEXfUcTaE9jFC6SxCxbGlURQI6sWIt4931HEQrBYdvfx/h9mJqThh6Ok1jsmYNY9kPMWKel3+jLeijeiGwt54i3rzYuMFeqrGeW1N+lEuVy04Hukncg6PWWiO7m9qKeS/dFvMfuq82H7jOLDbaczc9tz7cz2s/AHUEsDBBQAAAAIAH18eF02PitejAEAAJQFAAANAAAAUmVwb3J0L0xheW91dM1Ty2rCQBQ9n1Jcu1AptHRnRZf2iVCaLiTGmBKT1KSPEPLvPXMzEyYTQdxJyDzu49xz7sxUGCBHAB8FIqRIuBvgDld4R8XVhtYcGWKsUWLJcc/oJmKAexxoSZi9o1VlDsX+y6wNEXc6cowJbjHSXhUbIeRcaP8N/cb7IxW/iRtjJowKriPOAat12f3pncktnf25PK7pM15fam8lwuit4HFMdBc8bfckeizzUO9zYRxSQ4CVpcjkNEi21leyz3qoMb05+SntAbWojijbnugzMl/TXnQqZ7Sk+HTOtFt3xjyFGdJ7YF3P6qpaf7FCIJ5nzluHkxprfLQV387KL9v82uFcyN904alF6DJf6VvQ6DK+SYu0EKR9j9HyyJmlnb7N5aZFwsCOeiDiRld1lb/QHutOuxXtk+pqmPPeZnKeeU9JpXFTZh6IGzgd7Pv7imqrs4/Sj0z4u8rs19vkmaxj3fKtmIbFlPcnFB2h3KdjSk5rvfw+TclN4ST6lO28hdj9nvrRiW7ar0B9Zq3+f1BLAQIUABQAAAAIAH18eF1hfqQcfgAAABgBAAAPAAAAAAAAAAAAAACAAQAAAABEYXRhTW9kZWxTY2hlbWFQSwECFAAUAAAACAB9fHhdNj4rXowBAACUBQAADQAAAAAAAAAAAAAAgAGrAAAAUmVwb3J0L0xheW91dFBLBQYAAAAAAgACAHgAAABiAgAAAAA=\",\n  \"name\": \"PM sales.pbit\",\n  \"folder\": \"Postman\",\n  \"pages\": [\n    0\n  ],\n  \"tables\": {\n    \"Orders\": {\n      \"dataset\": \"{{dsOrders}}\"\n    }\n  }\n}",
+              "raw": "{\n  \"content\": \"UEsDBBQAAAAIAG6JeV1hfqQcfgAAABgBAAAPAAAARGF0YU1vZGVsU2NoZW1hhY8xCoNAEEXfUcTaE9jFC6SxCxbGlURQI6sWIt4931HEQrBYdvfx/h9mJqThh6Ok1jsmYNY9kPMWKel3+jLeijeiGwt54i3rzYuMFeqrGeW1N+lEuVy04Hukncg6PWWiO7m9qKeS/dFvMfuq82H7jOLDbaczc9tz7cz2s/AHUEsDBBQAAAAIAG6JeV02PitejAEAAJQFAAANAAAAUmVwb3J0L0xheW91dM1Ty2rCQBQ9n1Jcu1AptHRnRZf2iVCaLiTGmBKT1KSPEPLvPXMzEyYTQdxJyDzu49xz7sxUGCBHAB8FIqRIuBvgDld4R8XVhtYcGWKsUWLJcc/oJmKAexxoSZi9o1VlDsX+y6wNEXc6cowJbjHSXhUbIeRcaP8N/cb7IxW/iRtjJowKriPOAat12f3pncktnf25PK7pM15fam8lwuit4HFMdBc8bfckeizzUO9zYRxSQ4CVpcjkNEi21leyz3qoMb05+SntAbWojijbnugzMl/TXnQqZ7Sk+HTOtFt3xjyFGdJ7YF3P6qpaf7FCIJ5nzluHkxprfLQV387KL9v82uFcyN904alF6DJf6VvQ6DK+SYu0EKR9j9HyyJmlnb7N5aZFwsCOeiDiRld1lb/QHutOuxXtk+pqmPPeZnKeeU9JpXFTZh6IGzgd7Pv7imqrs4/Sj0z4u8rs19vkmaxj3fKtmIbFlPcnFB2h3KdjSk5rvfw+TclN4ST6lO28hdj9nvrRiW7ar0B9Zq3+f1BLAQIUABQAAAAIAG6JeV1hfqQcfgAAABgBAAAPAAAAAAAAAAAAAACAAQAAAABEYXRhTW9kZWxTY2hlbWFQSwECFAAUAAAACABuiXldNj4rXowBAACUBQAADQAAAAAAAAAAAAAAgAGrAAAAUmVwb3J0L0xheW91dFBLBQYAAAAAAgACAHgAAABiAgAAAAA=\",\n  \"name\": \"PM sales.pbit\",\n  \"folder\": \"Postman\",\n  \"pages\": [\n    0\n  ],\n  \"tables\": {\n    \"Orders\": {\n      \"dataset\": \"{{dsOrders}}\"\n    }\n  }\n}",
               "options": {
                 "raw": {
                   "language": "json"

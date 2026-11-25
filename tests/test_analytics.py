@@ -470,7 +470,7 @@ def test_database_queries_mongo_shell_json_and_python_run_and_are_saved(bi):
     sign_in(bi, "maya")
     no_adapter = bi.post("/api/analytics/queries", json={"name": "x", "language": "source", "connectionId": "nope",
                                                           "queryLanguage": "mongosh", "text": "[]"})
-    assert no_adapter.status_code == 422 and "not registered" in no_adapter.json()["detail"]
+    assert no_adapter.status_code == 422 and "not a data source of Analytics" in no_adapter.json()["detail"]
 
 
 def test_model_check_suggest_update_and_dax_across_related_tables(bi):

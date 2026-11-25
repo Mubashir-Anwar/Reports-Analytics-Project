@@ -1,0 +1,125 @@
+/* Report Server dialogs: Add resource, Permissions, Export. Theme tokens only, so light and dark follow the theme. */
+.pop-back { position: fixed; inset: 0; z-index: 200; display: grid; grid-template-columns: minmax(0, 1fr); place-items: center; padding: 16px; background: rgb(10 15 28 / .55); animation: pop-fade .15s var(--ease); }
+.pop { width: min(580px, 100%); max-height: calc(100vh - 32px); max-height: calc(100dvh - 32px); display: grid; grid-template-columns: minmax(0, 1fr); grid-template-rows: auto minmax(0, 1fr) auto; overflow: hidden; border: 1px solid var(--line); border-radius: 26px; background: var(--panel); color: var(--text); box-shadow: var(--shadow-lg); animation: pop-in .32s var(--spring); }
+.pop.wide { width: min(700px, 100%); }
+.pop:focus { outline: none; }
+@keyframes pop-fade { from { opacity: 0; } }
+@keyframes pop-in { from { opacity: 0; transform: translateY(16px) scale(.97); } }
+.pop h2, .pop h3, .pop p { margin: 0; }
+.pop button, .pop input, .pop select { font: inherit; }
+.pop button:focus-visible { outline: none; box-shadow: var(--focus); }
+.pop-top { display: flex; align-items: center; gap: 14px; padding: 18px 18px 16px 22px; }
+.pop-top.v { background: var(--tint-v); } .pop-top.b { background: var(--tint-b); } .pop-top.g { background: var(--tint-g); }
+.pop-top > div { flex: 1; min-width: 0; }
+.pop .pop-top h2 { font: 800 21px/1.2 var(--font-head); letter-spacing: -.02em; overflow-wrap: anywhere; }
+.pop .pop-top p { margin-top: 3px; color: var(--muted); font-size: 13px; line-height: 1.45; }
+.pop-icon { flex: none; width: 48px; height: 48px; display: grid; place-items: center; border-radius: 16px; background: var(--panel); font-size: 23px; transform: rotate(-5deg); }
+.pop-x { flex: none; align-self: start; width: 36px; height: 36px; border: 0; border-radius: 99px; background: transparent; color: var(--text); cursor: pointer; }
+.pop-x:hover { background: var(--panel); }
+.pop-body { display: grid; grid-template-columns: minmax(0, 1fr); align-content: start; gap: 18px; padding: 20px 22px; overflow: auto; overscroll-behavior: contain; }
+.pop-foot { display: flex; flex-wrap: wrap; justify-content: flex-end; align-items: center; gap: 10px; padding: 14px 22px; border-top: 1px solid var(--line); }
+.pop-foot .grow { flex: 1; min-width: 120px; color: var(--muted); font-size: 12.5px; }
+.pop .pop-btn { min-height: 42px; padding: 0 20px; border: 1.5px solid var(--line); border-radius: 99px; background: var(--panel); color: var(--text); font-weight: 650; cursor: pointer; transition: transform .25s var(--spring), border-color .15s; }
+.pop .pop-btn:hover:not(:disabled) { border-color: var(--accent); transform: translateY(-1px); }
+.pop .pop-btn:disabled { opacity: .45; cursor: default; }
+.pop .pop-btn.primary { border-color: var(--accent); background: var(--accent); color: var(--on-accent); }
+.pop .pop-btn.small { min-height: 34px; padding: 0 14px; font-size: 13px; }
+.pop-field { display: grid; grid-template-columns: minmax(0, 1fr); gap: 7px; align-content: start; }
+.pop-field > span { font-size: 13.5px; font-weight: 700; }
+.pop-field > small, .pop .pop-note { color: var(--muted); font-size: 12.5px; line-height: 1.5; }
+.pop-field > input { width: 100%; height: 46px; padding: 0 14px; border: 1.5px solid var(--line); border-radius: 14px; background: var(--panel); color: var(--text); font-size: 14px; }
+.pop-field > input:focus { outline: none; border-color: var(--accent); box-shadow: var(--focus); }
+.pop-two { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
+.pop .pop-error { padding: 11px 15px; border-radius: 14px; background: var(--danger-soft); color: var(--danger); font-size: 13.5px; overflow-wrap: anywhere; }
+.pop .pop-error.ok { background: var(--ok-soft); color: var(--ok); }
+.pop-switch { display: flex; align-items: center; gap: 14px; cursor: pointer; font-size: 14px; }
+.pop-switch span { flex: 1; display: grid; gap: 1px; font-weight: 650; }
+.pop-switch small { color: var(--muted); font-weight: 400; font-size: 12.5px; }
+.pop-switch input { appearance: none; flex: none; position: relative; width: 46px; height: 27px; margin: 0; border-radius: 99px; background: var(--line-strong); cursor: pointer; transition: background .2s; }
+.pop-switch input::after { content: ""; position: absolute; top: 3px; left: 3px; width: 21px; height: 21px; border-radius: 50%; background: #fff; transition: transform .25s var(--spring); }
+.pop-switch input:checked { background: var(--accent); }
+.pop-switch input:checked::after { transform: translateX(19px); }
+.pop-switch input:focus-visible { outline: none; box-shadow: var(--focus); }
+
+/* Add resource */
+.up-drop { position: relative; display: grid; justify-items: center; gap: 8px; padding: 26px 18px; border: 2px dashed var(--line-strong); border-radius: 22px; background: var(--bg); text-align: center; cursor: pointer; transition: border-color .15s, background .15s; }
+.up-drop:hover, .up-drop:focus-within, .up-drop.over { border-color: var(--accent); background: var(--accent-soft); }
+.up-drop input { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; cursor: pointer; }
+.up-drop > i { font-style: normal; font-size: 34px; line-height: 1; transition: transform .3s var(--spring); }
+.up-drop.over > i, .up-drop:hover > i { transform: translateY(-4px) rotate(-6deg); }
+.up-drop b { font: 700 16px/1.3 var(--font-head); }
+.up-drop p { color: var(--muted); font-size: 13px; }
+.up-kinds { display: flex; flex-wrap: wrap; justify-content: center; gap: 6px; margin-top: 4px; }
+.up-kinds span { padding: 4px 11px; border-radius: 99px; font-size: 12px; font-weight: 650; }
+.up-kinds .mrd, .up-file.mrd i { background: var(--tint-b); color: var(--tint-b-tx); }
+.up-kinds .jrxml, .up-file.jrxml i { background: var(--tint-a); color: var(--tint-a-tx); }
+.up-kinds .dashboard, .up-file.dashboard i { background: var(--tint-v); color: var(--tint-v-tx); }
+.up-kinds .img { background: var(--tint-g); color: var(--tint-g-tx); }
+.up-file { display: flex; align-items: center; gap: 14px; padding: 12px 14px; border: 1.5px solid var(--line); border-radius: 20px; animation: pop-in .3s var(--spring); }
+.up-file > i { flex: none; min-width: 58px; height: 50px; padding: 0 8px; display: grid; place-items: center; border-radius: 14px; font: 800 12.5px/1 var(--font-head); }
+.up-file > div { flex: 1; min-width: 0; }
+.up-file b { display: block; font-size: 14.5px; overflow-wrap: anywhere; }
+.up-file small { display: block; color: var(--muted); font-size: 12.5px; overflow-wrap: anywhere; }
+.up-adapters { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(220px, 100%), 1fr)); gap: 8px; max-height: 200px; overflow: auto; padding: 2px; }
+.up-adapters button { display: grid; gap: 1px; min-width: 0; padding: 10px 14px; border: 1.5px solid var(--line); border-radius: 16px; background: var(--panel); color: var(--text); text-align: left; cursor: pointer; }
+.up-adapters button:hover { border-color: var(--accent); }
+.up-adapters button.on { border-color: var(--accent); background: var(--accent-soft); }
+.up-adapters b { font-size: 13.5px; overflow-wrap: anywhere; }
+.up-adapters small { color: var(--muted); font-size: 12px; overflow-wrap: anywhere; }
+
+/* Permissions */
+.pm-rules { display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px; }
+.pm-rule { display: flex; align-items: center; gap: 12px; padding: 9px 10px 9px 12px; border: 1.5px solid var(--line); border-radius: 18px; animation: pop-fade .2s; }
+.pm-face { flex: none; width: 38px; height: 38px; display: grid; place-items: center; border-radius: 13px; font-weight: 800; font-size: 14px; text-transform: uppercase; }
+.pm-face.user { background: var(--tint-b); color: var(--tint-b-tx); }
+.pm-face.team { background: var(--tint-v); color: var(--tint-v-tx); }
+.pm-face.role { background: var(--tint-a); color: var(--tint-a-tx); }
+.pm-who { flex: 1; min-width: 0; }
+.pm-who b { display: block; font-size: 14px; overflow-wrap: anywhere; }
+.pm-who small { color: var(--muted); font-size: 12px; }
+.pm-levels { flex: none; display: inline-flex; padding: 3px; border-radius: 99px; background: var(--soft); }
+.pm-levels button { min-height: 34px; padding: 0 13px; border: 0; border-radius: 99px; background: transparent; color: var(--muted); font-size: 13px; font-weight: 650; cursor: pointer; }
+.pm-levels button:hover { color: var(--text); }
+.pm-levels button.on.none, .pm-tag.none { background: var(--danger-soft); color: var(--danger); }
+.pm-levels button.on.run, .pm-tag.run { background: var(--accent-soft); color: var(--accent); }
+.pm-levels button.on.manage, .pm-tag.manage { background: var(--ok-soft); color: var(--ok); }
+.pm-out { flex: none; width: 34px; height: 34px; border: 0; border-radius: 99px; background: transparent; color: var(--muted); cursor: pointer; }
+.pm-out:hover { background: var(--danger-soft); color: var(--danger); }
+.pm-none { padding: 18px; border-radius: 18px; background: var(--bg); color: var(--muted); font-size: 13.5px; text-align: center; }
+.pop .pm-add { justify-self: start; min-height: 40px; padding: 0 18px; border: 1.5px dashed var(--line-strong); border-radius: 99px; background: transparent; color: var(--accent); font-weight: 650; cursor: pointer; }
+.pop .pm-add:hover:not(:disabled), .pop .pm-add[aria-expanded=true] { border-color: var(--accent); background: var(--accent-soft); }
+.pop .pm-add:disabled { color: var(--muted); cursor: default; }
+.pm-panel { display: grid; grid-template-columns: minmax(0, 1fr); gap: 10px; padding: 12px; border: 1.5px solid var(--line); border-radius: 18px; box-shadow: var(--shadow); animation: pop-fade .2s; }
+.pm-panel > input { width: 100%; height: 40px; padding: 0 14px; border: 1px solid var(--line); border-radius: 99px; background: var(--soft); color: var(--text); font-size: 13.5px; }
+.pm-panel > input:focus { outline: none; border-color: var(--accent); box-shadow: var(--focus); }
+.pm-found { display: grid; grid-template-columns: minmax(0, 1fr); gap: 2px; max-height: 230px; overflow: auto; overscroll-behavior: contain; }
+.pop .pm-found h3 { margin: 6px 8px 2px; color: var(--muted); font-size: 12px; font-weight: 650; }
+.pm-found button { display: flex; align-items: center; gap: 10px; padding: 6px 8px; border: 0; border-radius: 13px; background: transparent; color: var(--text); text-align: left; cursor: pointer; }
+.pm-found button:hover, .pm-found button:focus-visible { background: var(--soft); }
+.pm-found button .pm-face { width: 32px; height: 32px; border-radius: 11px; font-size: 12px; }
+.pm-found b { font-size: 13.5px; }
+.pm-found small { color: var(--muted); margin-left: 6px; font-weight: 400; }
+.pm-from { display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px; padding: 12px 14px; border-radius: 18px; background: var(--bg); font-size: 13px; }
+.pm-from > div { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.pm-tag { display: inline-block; padding: 3px 10px; border-radius: 99px; background: var(--soft); font-size: 12px; font-weight: 650; }
+.pm-all > summary { cursor: pointer; font-weight: 700; font-size: 13.5px; padding: 4px 0; }
+.pm-all ul { list-style: none; margin: 8px 0 0; padding: 0; display: grid; grid-template-columns: minmax(0, 1fr); }
+.pm-all li { display: flex; align-items: center; gap: 12px; padding: 8px 2px; border-top: 1px solid var(--line); }
+.pm-ask { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 11px 14px; border-radius: 16px; background: var(--warn-soft); color: var(--warn); font-size: 13.5px; }
+.pm-ask span { flex: 1; min-width: 180px; }
+
+@media (max-width: 640px) {
+  .pop-back { place-items: end stretch; padding: 0; }
+  .pop, .pop.wide { width: 100%; max-height: 94vh; max-height: 94dvh; border-radius: 26px 26px 0 0; }
+  .pop-top { padding: 16px; }
+  .pop-body { padding: 16px; }
+  .pop-foot { padding: 12px 16px calc(12px + env(safe-area-inset-bottom)); }
+  .pop-foot .pop-btn { flex: 1; }
+  .pop-foot .grow:empty { display: none; }
+  .pop-foot .grow { flex-basis: 100%; }
+  .pop-two { grid-template-columns: minmax(0, 1fr); }
+  .pm-rule { flex-wrap: wrap; }
+  .pm-levels { order: 3; flex: 1 0 100%; }
+  .pm-levels button { flex: 1; min-height: 40px; }
+}
+@media (prefers-reduced-motion: reduce) { .pop, .pop-back, .pop *, .pop *::after { animation: none !important; transition: none !important; } }

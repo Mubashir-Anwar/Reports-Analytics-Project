@@ -22,6 +22,7 @@ from backend.app.routers import (
     designer,
     embed,
     generate,
+    home,
     jobs,
     pages,
     public_api,
@@ -114,6 +115,7 @@ def make_app() -> FastAPI:
 
     # every area's endpoints; registration order = route matching order (same as the old make_app())
     pages.register(app, ctx)
+    home.register(app, ctx)
     designer.register(app, ctx)
     repository.register(app, ctx)
     connections.register(app, ctx)

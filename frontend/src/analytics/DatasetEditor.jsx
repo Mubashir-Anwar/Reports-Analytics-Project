@@ -1,7 +1,9 @@
 // A dataset: where its data comes from (data adapter + query, the designer's query languages), its refresh, its
 // columns (the model: label, role, summary, format, hidden), a look at the imported data and the refresh history.
 import { useCallback, useEffect, useState } from 'react';
-import { DbLogo } from '../shared/adapters.jsx';
+import { AdapterWizard, DbLogo } from '../shared/adapters.jsx';
+import { FolderPicker } from '../shared/folders.jsx';
+import { takeHandoff } from '../query/handoff.js';
 import { AGG_LABELS, bi, describeBytes, KIND_ICON } from './api.js';
 
 const LANGUAGE_NAMES = { 'aggregation-json': 'Aggregation pipeline (JSON)', mongosh: 'Mongo shell (db.coll.aggregate…)',
@@ -22,7 +24,7 @@ const when = (iso) => (iso ? new Date(iso).toLocaleString() : '—');
 
 const EMPTY = { name: '', folder: 'Analytics', description: '', connectionId: '', queryLanguage: 'aggregation-json', collection: '', querySource: '[\n  { "$match": {} }\n]', refreshEveryMinutes: 0 };
 
-export default function DatasetEditor({ datasetId, info, folders = [], notify, onSaved, onDeleted }) {
+export default function DatasetEditor({ datasetId, info, folders = [], notify, onConnected, onSaved, onDeleted }) {
   const isNew = datasetId === 'new';
   const [item, setItem] = useState(isNew ? null : undefined);
   const [form, setForm] = useState(EMPTY);
@@ -46,6 +48,15 @@ export default function DatasetEditor({ datasetId, info, folders = [], notify, o
   useEffect(() => {
     setTab('source'); setTest(null); setRows(null); setLog(null);
     if (isNew) {
+      const given = takeHandoff('analytics');          // “Use in Analytics” of the Query page
+      if (given) {
+        setItem(null); setColumns([]);
+        setForm({ ...EMPTY, name: given.name || given.collection || 'From Query', connectionId: given.connectionId, queryLanguage: given.queryLanguage, collection: given.collection || '', querySource: given.querySource });
+        if (!info.adapters.some((a) => a.id === given.connectionId)) notify('The data source of this query is not available here: choose another one.', 'warn');
+        else if (/\$[PX]!?\{/.test(given.querySource)) notify('This query has $P{…} parameters. A dataset has none: write values in their place, then Test.', 'warn');
+        else notify('The query from the Query page is filled in: check the name and create the dataset.', 'ok');
+        return;
+      }
       const first = info.adapters[0];
       setItem(null); setColumns([]);
       setForm({ ...EMPTY, connectionId: first?.id || '', queryLanguage: first && first.type !== 'mongodb' ? 'sql' : 'aggregation-json',
@@ -53,7 +64,15 @@ export default function DatasetEditor({ datasetId, info, folders = [], notify, o
     } else {
       load().catch((e) => notify(e.message, 'error'));
     }
-  }, [datasetId, isNew, info.adapters, load, notify]);
+  }, [datasetId, isNew, load, notify]); // eslint-disable-line react-hooks/exhaustive-deps -- a new data source must not empty the form
+
+  const [connecting, setConnecting] = useState(false);
+  const connected = async (saved) => {
+    setConnecting(false);
+    await onConnected?.();
+    const language = saved.type !== 'mongodb' ? 'sql' : (form.queryLanguage === 'sql' ? 'aggregation-json' : form.queryLanguage);
+    set({ connectionId: saved.id, queryLanguage: language, ...(isExample(form.querySource) ? { querySource: EXAMPLES[language] } : {}) });
+  };
 
   // while an import runs, look again every 2 seconds
   const working = item && (item.status === 'queued' || item.status === 'refreshing' || item.busy);
@@ -152,11 +171,10 @@ export default function DatasetEditor({ datasetId, info, folders = [], notify, o
           {!mayModel && <p className="muted">Datasets are made by people with the Designer or Admin right.</p>}
           <div className="grid-2 tight">
             <label className="field"><span>Name</span><input value={form.name} maxLength={120} disabled={!mayModel} onChange={(e) => set({ name: e.target.value })} placeholder="Sales orders" /></label>
-            <label className="field"><span>Folder</span>
-              <input value={form.folder} disabled={!mayModel} list="dataset-folders" maxLength={200} placeholder="Analytics" onChange={(e) => set({ folder: e.target.value })} />
-              <datalist id="dataset-folders">{folders.map((f) => <option key={f} value={f} />)}</datalist>
+            <div className="field"><span>Folder</span>
+              <FolderPicker folders={folders} value={form.folder} disabled={!mayModel} allowNew rootLabel="Analytics" rootHint="the usual folder" onChange={(folder) => set({ folder })} />
               <small className="hint">Where the dataset is filed, like a report on the server: choose a folder or type a new one. Nothing to enter here about API keys; an API key limited to some folders sees only the datasets in them.</small>
-            </label>
+            </div>
           </div>
           <label className="field"><span>Description</span><input value={form.description} maxLength={500} disabled={!mayModel} onChange={(e) => set({ description: e.target.value })} /></label>
           {mayModel && (
@@ -168,9 +186,10 @@ export default function DatasetEditor({ datasetId, info, folders = [], notify, o
                     const language = next && next.type !== 'mongodb' ? 'sql' : (form.queryLanguage === 'sql' ? 'aggregation-json' : form.queryLanguage);
                     set({ connectionId: e.target.value, queryLanguage: language, ...(isExample(form.querySource) ? { querySource: EXAMPLES[language] } : {}) });
                   }}>
-                    {info.adapters.length === 0 && <option value="">No data adapters (Admin → Data sources)</option>}
+                    {info.adapters.length === 0 && <option value="">No data source yet: connect one</option>}
                     {info.adapters.map((a) => <option key={a.id} value={a.id}>{a.name} ({a.type})</option>)}
                   </select>
+                  <button type="button" className="link-btn" onClick={(e) => { e.preventDefault(); setConnecting(true); }}>＋ Connect a database</button>
                 </label>
                 <label className="field"><span>Query language</span>
                   <select value={form.queryLanguage} onChange={(e) => set({ queryLanguage: e.target.value, ...(isExample(form.querySource) ? { querySource: EXAMPLES[e.target.value] || '' } : {}) })}>
@@ -260,6 +279,7 @@ export default function DatasetEditor({ datasetId, info, folders = [], notify, o
           )}
         </section>
       )}
+      {connecting && <AdapterWizard initial={{}} area="analytics" existingIds={info.adapters.map((a) => a.id)} notify={notify} onClose={() => setConnecting(false)} onSaved={connected} />}
     </div>
   );
 }

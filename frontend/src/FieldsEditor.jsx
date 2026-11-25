@@ -129,7 +129,7 @@ export default function FieldsEditor({ columns, design, calculated = [], onChang
 
       {view === 'details' && onFormats ? (
         <div className="fe-details">
-          {!columns.length && <p className="muted">No fields yet. Press <b>Read fields</b> above, or type names below.</p>}
+          {!columns.length && <p className="muted fe-none">No fields yet. Press <b>Read fields</b> above, or type names below.</p>}
           {columns.length > 0 && (
             <table className="grid">
               <thead><tr><th>Field</th><th>Label <small>(table headings)</small></th><th>Format</th><th>Sample{sample ? '' : ' *'}</th><th>Used</th><th /></tr></thead>
@@ -169,7 +169,7 @@ export default function FieldsEditor({ columns, design, calculated = [], onChang
           onChange={(e) => onChange(e.target.value.split(',').map((s) => s.trim()).filter(Boolean))} />
       ) : (
         <div className="fe-groups">
-          {!columns.length && <p className="muted">No fields yet. Press <b>Read fields</b> above, or type names below.</p>}
+          {!columns.length && <p className="muted fe-none">No fields yet. Press <b>Read fields</b> above, or type names below.</p>}
           {Object.entries(groups).sort(([a], [b]) => a.localeCompare(b)).map(([head, list]) => (
             <details key={head || '-'} open={search || Object.keys(groups).length < 4 ? true : undefined} className="fe-group">
               <summary>{head ? <><code>{head}.</code>…</> : 'Top level'} <small>({list.length})</small></summary>
@@ -192,7 +192,7 @@ export default function FieldsEditor({ columns, design, calculated = [], onChang
         <input value={adding} onChange={(e) => setAdding(e.target.value)} placeholder="Add fields: name, or several separated by commas (e.g. assignTo.Name)" />
         <button type="submit" className="btn sm" disabled={!adding.trim()}>＋ Add</button>
       </form>
-      <p className="fe-legend"><span className="used">used in the design</span><span className="unused">not used</span><span className="dup">same name, other capitals</span></p>
+      <p className="fe-legend" hidden={!columns.length}><span className="used">used in the design</span><span className="unused">not used</span><span className="dup">same name, other capitals</span></p>
     </div>
   );
 }

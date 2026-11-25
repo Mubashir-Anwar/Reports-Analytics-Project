@@ -1,7 +1,7 @@
 """Data sources (data adapters): list, save, test, move, delete.
 
-Every user with the Designer, Query or Report Server right connects data sources (/api/data-sources);
-no Admin right is needed. /api/admin/connections is the older address of the same endpoints."""
+A data source belongs to one part (area: designer, server, analytics, query) and works only there; a user
+with that part's right connects and changes its data sources, the Admin right covers all of them. /api/admin/connections is the older address of the same endpoints."""
 from __future__ import annotations
 
 import re
@@ -12,7 +12,7 @@ from fastapi import FastAPI, HTTPException, Request
 
 from backend.app.connectors import sql as sql_connector
 from backend.app.connectors.mongodb import _mongo_database_from_uri
-from backend.app.connectors.profiles import _profile_credentials, load_connection_profiles
+from backend.app.connectors.profiles import AREA_NAMES, AREAS, DEFAULT_REMOVED, _profile_credentials, load_connection_profiles, usable
 from backend.app.constants import ADAPTER_TYPES, CONNECTION_ID_PATTERN, ENV_KEY_PATTERN
 from backend.app.security.secrets import _load_private_secrets, _save_private_secrets
 from backend.app.storage.files import add_saved_folder, normalize_folder_path
@@ -25,12 +25,32 @@ def register(app: FastAPI, ctx: SimpleNamespace) -> None:
     state = ctx.state
     test_adapter_values = ctx.test_adapter_values
 
+    def area_of(value: Any) -> str:
+        area = str(value or "").strip().lower()
+        if area and area not in AREAS:
+            raise HTTPException(status_code=422, detail=f"area must be one of {', '.join(AREAS)}")
+        return area
+
+    def managed(request: Request, connection_id: str) -> dict[str, Any]:
+        """The data source this request changes, if the caller may (its part's right, or Admin)."""
+        profile = next((item for item in load_connection_profiles() if item["id"] == connection_id), None)
+        if profile is None:
+            raise HTTPException(status_code=404, detail=f"Data adapter not found: {connection_id}")
+        ctx.may_use_area(request, profile.get("area", ""))
+        return profile
+
+    def is_admin(request: Request) -> bool:
+        return ctx.managed_areas(request) == set(AREAS)
+
     @app.get("/api/data-sources")
     @app.get("/api/admin/connections")
     def admin_list_connections(request: Request) -> dict[str, Any]:
         require_admin(request, "sources")
-        profiles = load_connection_profiles()
-        usage = ctx.adapter_usage()
+        area, mine = area_of(request.query_params.get("area")), ctx.managed_areas(request)
+        ctx.may_use_area(request, area)
+        profiles = [item for item in load_connection_profiles()
+                    if (usable(item, area) if area else item.get("area", "") in {"", *mine})]
+        uses = ctx.adapter_uses()
         result = []
         for profile in profiles:
             uri, database = _profile_credentials(profile)
@@ -42,7 +62,9 @@ def register(app: FastAPI, ctx: SimpleNamespace) -> None:
                 "database": database,
                 "credentialSource": "Private local file" if profile.get("storage") == "file" else "Environment settings",
                 "configured": bool(uri and database),
-                "usedBy": usage.get(profile["id"], []),
+                "area": profile.get("area", ""),
+                "usedBy": uses.get(profile["id"], {}).get("server", []),
+                "uses": {key: value for key, value in uses.get(profile["id"], {}).items() if key in mine},
             })
         return {"connections": result}
 
@@ -71,6 +93,23 @@ def register(app: FastAPI, ctx: SimpleNamespace) -> None:
                 connection_id = f"mongo_{connection_id}"[:40]
         if not CONNECTION_ID_PATTERN.fullmatch(connection_id):
             raise HTTPException(status_code=422, detail="No valid ID could be made from the data source name; use letters and numbers")
+        area, create = area_of(payload.get("area")), payload.get("create") is True
+        ctx.may_use_area(request, area)
+        current = next((item for item in load_connection_profiles() if item["id"] == connection_id), None)
+        if create and current is not None:
+            if current.get("area", "") == area:
+                raise HTTPException(status_code=409, detail=f"There is already a data source with the ID {connection_id}; choose another name")
+            connection_id, current = ctx.free_adapter_id(f"{connection_id[:30]}-{area}" if area else connection_id), None
+        if current is None:
+            if not area and not is_admin(request):
+                raise HTTPException(status_code=422, detail=f"Say where the data source is for (area: {', '.join(AREAS)})")
+        else:
+            ctx.may_use_area(request, current.get("area", ""))
+            if area and current.get("area", "") != area:
+                if not current.get("area"):
+                    raise HTTPException(status_code=409, detail=f"“{current['name']}” is used by every part; an administrator can give it one part")
+                raise HTTPException(status_code=409, detail=f"The ID {connection_id} is a data source of {AREA_NAMES[current['area']]}; choose another name")
+            area = current.get("area", "")
         # Optional repository folder (like a JasperReports Server "Data Source" folder); empty = top level.
         if "folder" in payload:
             raw_folder = str(payload.get("folder") or "").strip()
@@ -107,6 +146,8 @@ def register(app: FastAPI, ctx: SimpleNamespace) -> None:
             if not database:
                 raise HTTPException(status_code=422, detail="The URL has no database name; enter the database name")
             profile = {"id": connection_id, "name": name, "type": "mongodb", "storage": "file", "database": database}
+        if area:
+            profile["area"] = area
         if adapter_folder:
             profile["folder"] = adapter_folder
             add_saved_folder(adapter_folder)
@@ -136,7 +177,7 @@ def register(app: FastAPI, ctx: SimpleNamespace) -> None:
         state["connection_signatures"].pop(connection_id, None)
         if old_client is not None:
             old_client.close()
-        return {"connection": {"id": connection_id, "name": name, "type": profile.get("type", "mongodb"), "folder": adapter_folder,
+        return {"connection": {"id": connection_id, "name": name, "type": profile.get("type", "mongodb"), "folder": adapter_folder, "area": area,
                                "database": database, "configured": True}}
 
     @app.post("/api/data-sources/test")
@@ -158,12 +199,17 @@ def register(app: FastAPI, ctx: SimpleNamespace) -> None:
     @app.delete("/api/admin/connections/{connection_id}")
     def admin_delete_connection(connection_id: str, request: Request) -> dict[str, str]:
         require_admin(request, "sources")
-        if connection_id == "default":
-            raise HTTPException(status_code=400, detail="The default connection cannot be deleted")
-        used_by = ctx.adapter_usage().get(connection_id, [])
+        managed(request, connection_id)
+        uses = ctx.adapter_uses().get(connection_id, {})
+        used_by = uses.get("server", [])
+        others = [f"{AREA_NAMES[key]}: {', '.join(names[:5])}" for key, names in uses.items() if key != "server"]
+        if others and not used_by:
+            raise HTTPException(status_code=409, detail=f"This data source is still used ({'; '.join(others)}); choose another one there first")
         if used_by:
             raise HTTPException(status_code=409, detail=f"Switch these reports (or their datasets) to another data adapter first: {', '.join(used_by)}")
         profiles = [item for item in load_connection_profiles() if item["id"] != connection_id]
+        if connection_id == "default":             # MONGODB_URI in the environment must not bring it back
+            get_store().write_json(DEFAULT_REMOVED, {"removed": True})
         get_store().write_json("connections.json", {"connections": profiles})
         private = _load_private_secrets()
         private["mongo_connections"].pop(connection_id, None)
@@ -188,6 +234,7 @@ def register(app: FastAPI, ctx: SimpleNamespace) -> None:
             folder = normalize_folder_path(raw_folder) if raw_folder else ""
         except ValueError as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from None
+        managed(request, connection_id)
         profiles = load_connection_profiles()
         target = next((item for item in profiles if item["id"] == connection_id), None)
         if target is None:
@@ -204,4 +251,78 @@ def register(app: FastAPI, ctx: SimpleNamespace) -> None:
     @app.post("/api/admin/connections/{connection_id}/test")
     def admin_test_connection(connection_id: str, request: Request) -> dict[str, Any]:
         require_admin(request, "sources")
+        managed(request, connection_id)
         return ctx.test_adapter_by_id(connection_id)
+
+    # ------------------------------------------------------------- one part each
+    @app.put("/api/data-sources/{connection_id}/area")
+    async def move_to_area(connection_id: str, request: Request) -> dict[str, Any]:
+        """Give a data source to one part (administrators). Not while another part still uses it."""
+        require_admin(request, "admin")
+        area = area_of((await ctx.json_body(request)).get("area"))
+        if not area:
+            raise HTTPException(status_code=422, detail=f"area must be one of {', '.join(AREAS)}")
+        profile = managed(request, connection_id)
+        elsewhere = {key: names for key, names in ctx.adapter_uses().get(connection_id, {}).items() if key != area}
+        if elsewhere:
+            where = "; ".join(f"{AREA_NAMES[key]}: {', '.join(names[:5])}" for key, names in elsewhere.items())
+            raise HTTPException(status_code=409, detail=f"“{profile['name']}” is still used in {where}. Split it into one per part instead")
+        profiles = load_connection_profiles()
+        for item in profiles:
+            if item["id"] == connection_id:
+                item["area"] = area
+        get_store().write_json("connections.json", {"connections": profiles})
+        ctx.audit_event(request, "data_source.area", connection_id, {"area": area})
+        return {"connectionId": connection_id, "area": area}
+
+    @app.post("/api/data-sources/{connection_id}/split")
+    def split(connection_id: str, request: Request) -> dict[str, Any]:
+        """One data source that every part uses becomes a separate one per part (administrators)."""
+        require_admin(request, "admin")
+        managed(request, connection_id)
+        ids = ctx.split_adapter(connection_id)
+        ctx.audit_event(request, "data_source.split", connection_id, {"ids": ids})
+        return {"connectionId": connection_id, "ids": ids}
+
+    def may_take(request: Request, connection_id: str, area: str) -> dict[str, Any]:
+        """Taking work from one part to another needs both rights; publishing (Designer to Server) only the Designer's."""
+        if not area:
+            raise HTTPException(status_code=422, detail=f"area must be one of {', '.join(AREAS)}")
+        profile = managed(request, connection_id)
+        if not (area == "server" and "designer" in ctx.managed_areas(request)):
+            ctx.may_use_area(request, area)
+        return profile
+
+    @app.get("/api/data-sources/{connection_id}/targets")
+    def targets(connection_id: str, request: Request, area: str = "") -> dict[str, Any]:
+        """What can stand in for this data source in another part: the suggested one and all of the same kind."""
+        require_admin(request, "sources")
+        profile = may_take(request, connection_id, area_of(area))
+        kind = profile.get("type", "mongodb")
+        found = [{"id": item["id"], "name": item["name"], "type": kind, "folder": item.get("folder", ""), "database": _profile_credentials(item)[1]}
+                 for item in load_connection_profiles() if usable(item, area_of(area)) and item.get("type", "mongodb") == kind]
+        return {"id": connection_id, "name": profile["name"], "type": kind, "suggested": ctx.counterpart(connection_id, area_of(area)), "targets": found}
+
+    @app.post("/api/data-sources/{connection_id}/copy")
+    async def copy_to_area(connection_id: str, request: Request) -> dict[str, Any]:
+        """Connect the same database in another part: a separate data source with its own name and password."""
+        require_admin(request, "sources")
+        payload = await ctx.json_body(request)
+        area = area_of(payload.get("area"))
+        profile = may_take(request, connection_id, area)
+        new_id = ctx.copy_adapter(connection_id, area, str(payload.get("name") or ""))
+        ctx.audit_event(request, "data_source.created", new_id, {"area": area, "from": connection_id})
+        return {"connection": {"id": new_id, "name": str(payload.get("name") or profile["name"]), "type": profile.get("type", "mongodb"), "area": area}}
+
+    @app.post("/api/data-sources/{connection_id}/use-in")
+    async def use_in_area(connection_id: str, request: Request) -> dict[str, Any]:
+        """Remember which data source stands in for this one in another part."""
+        require_admin(request, "sources")
+        payload = await ctx.json_body(request)
+        area, other = area_of(payload.get("area")), str(payload.get("connectionId") or "")
+        profile = may_take(request, connection_id, area)
+        target = next((item for item in load_connection_profiles() if item["id"] == other and usable(item, area)), None)
+        if target is None or target.get("type", "mongodb") != profile.get("type", "mongodb"):
+            raise HTTPException(status_code=422, detail="Choose a data source of that part and of the same kind")
+        ctx.remember_counterpart(connection_id, area, other)
+        return {"connectionId": connection_id, "area": area, "use": other}

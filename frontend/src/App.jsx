@@ -29,6 +29,7 @@ import { ZOOM_LIMITS, bandWidth, clampZoom, emptyDesign, findElement, getBand, s
 import ComponentWizard from './ComponentWizard.jsx';
 import PublishDialog from './PublishDialog.jsx';
 import { buildMrd, downloadText, fileKind, parseMrd, splitReportFiles } from './mrd.js';
+import { takeInto } from './shared/TakeAdapter.jsx';
 import { takeHandoff } from './query/handoff.js';
 import { blankReport, initialState, reducer, reportPayload } from './store.js';
 import { readClipboard } from './arrange.js';
@@ -228,7 +229,7 @@ export default function App() {
       type: 'LOAD',
       report: {
         isNew: false, id: item.id, title: item.title || item.id, description: item.description || '', folder: item.folder || 'General',
-        connectionId: item.connectionId || 'default', collection: item.collection || '',
+        connectionId: item.connectionId || '', collection: item.collection || '',
         queryLanguage: item.queryLanguage || 'mongosh', querySource: item.querySource || '',
         parameters: item.parameters || [], columns: item.columns || [], extra: rest, status: status || workspace || null,
       },
@@ -258,10 +259,12 @@ export default function App() {
       }
       const published = await api.report(item.id, item.folder);
       const saved = await api.saveWorkspace({ ...published, design: published.design }, true);
-      load(published, saved.report);
+      // the server's data sources stay on the server: the draft may have got the Designer's one instead
+      const switched = Object.keys(saved.switchedConnections || {}).length > 0;
+      load(switched ? await api.workspaceReport(published.id, published.folder) : published, saved.report);
       setRefreshKey((n) => n + 1);
       setLeftTab('workspace');
-      notify(`Copied ${item.id} from the server into your workspace`, 'ok');
+      notify(`Copied ${item.id} from the server into your workspace${Object.values(saved.switchedConnections || {}).includes('') ? ' — choose a data adapter of the Designer in Setup' : ''}`, 'ok');
     } catch (error) { notify(`Could not open the server report: ${error.message}`, 'error'); }
   };
 
@@ -330,7 +333,8 @@ export default function App() {
     const file = { name };
     try {
       const result = await api.importJrxml(text, images);
-      dispatch({ type: 'LOAD', report: { ...blankReport(), ...result.report, extra: {} }, design: result.design });
+      const fitted = await fitAdapters({ report: { ...blankReport(), ...result.report, extra: {} }, design: result.design }).catch(() => null);
+      dispatch({ type: 'LOAD', report: fitted?.state.report || { ...blankReport(), ...result.report, extra: {} }, design: result.design });
       dispatch({ type: 'REPORT', patch: {} });
       setImportInfo({ name: file.name, warnings: result.warnings, places: result.warningElements || {}, hints: result.hints, columns: result.report.columns.length, parameters: result.report.parameters.length });
       setTab('design');
@@ -338,16 +342,41 @@ export default function App() {
     } catch (error) { notify(`JRXML import failed: ${error.message}`, 'error'); }
   };
 
+  /** Adapters that are not on this server (an imported or copied report): the only one of the same kind takes their
+   *  place. → {state, used: its name when something changed, missing: an id nobody can stand in for}. */
+  const fitAdapters = async (from) => {
+    const { connections } = await api.connections('designer');
+    const known = new Set(connections.map((a) => a.id));
+    const { report, design } = from;
+    const noData = report.queryLanguage === 'none' || (!String(report.querySource || '').trim() && !String(report.collection || '').trim());
+    const standIn = (language) => {
+      const fit = connections.filter((a) => a.configured && ((a.type || 'mongodb') !== 'mongodb') === (language === 'sql'));
+      return fit.length === 1 ? fit[0] : null;
+    };
+    const out = { state: from, used: '', missing: null };
+    const check = (id, language) => {
+      const other = standIn(language);
+      if (other) { out.used = other.name || other.id; return other.id; }
+      out.missing = id;
+      return id;
+    };
+    const main = noData || known.has(report.connectionId) ? report.connectionId : check(report.connectionId || '', report.queryLanguage);
+    const datasets = (design?.datasets || []).map((d) => (!d.connectionId || known.has(d.connectionId) ? d : { ...d, connectionId: check(d.connectionId, d.queryLanguage) }));
+    if (out.used) out.state = { ...from, report: { ...report, connectionId: main }, design: design?.datasets ? { ...design, datasets } : design };
+    return out;
+  };
+
   /** Save inside the designer workspace. The server is not changed; that needs "Publish to server". */
-  const save = async () => {
-    const { report } = state;
+  const save = () => saveFrom(state);
+  const saveFrom = async (from) => {
+    const { report } = from;
     if (!report.id) {
       notify('Give the report an ID first (Setup tab)', 'error');
       setTab('setup');
       return null;
     }
     try {
-      return await saveAs(report.id, report.isNew);
+      return await saveAs(report.id, report.isNew, undefined, from);
     } catch (error) {
       if (error.status === 409 && error.data?.code === 'changed-by-someone-else') { setStale({ ...error.data, busy: false }); return null; }
       if (error.status === 409 && report.isNew) { // the ID is already in the workspace: ask replace / new ID
@@ -359,13 +388,14 @@ export default function App() {
     }
   };
   /** Save the open report under `id` (create=true refuses an ID that is already in the workspace). */
-  const saveAs = async (id, create, base) => {
+  const saveAs = async (id, create, base, from = state) => {
     // the draft was saved in status.folder before; Setup may have moved it to another folder.
     // baseVersion: the version this copy started from — the server refuses the save when someone saved after it
     const opened = state.report.status;
     const baseVersion = base ?? (!create && id === state.report.id && opened?.versionNo ? opened.versionNo : undefined);
-    const result = await api.saveWorkspace({ ...reportPayload(state), id, ...(baseVersion ? { baseVersion } : {}) }, create, opened?.folder);
+    const result = await api.saveWorkspace({ ...reportPayload(from), id, ...(baseVersion ? { baseVersion } : {}) }, create, opened?.folder);
     dispatch({ type: 'SAVED', id, status: result.report });
+    if (Object.keys(result.switchedConnections || {}).length) load(await api.workspaceReport(id, result.report.folder), result.report);
     setRefreshKey((n) => n + 1);
     const where = result.report.onServer ? 'The server still has the last published version.' : 'Not on the server yet.';
     notify(result.readyToPublish
@@ -406,22 +436,46 @@ export default function App() {
   /** Publish: save to the workspace if needed, then copy the report into a server folder. */
   const startPublish = async () => {
     let saved = null;
-    if (state.dirty || state.report.isNew) {
-      saved = await save();
+    let current = state;
+    try {
+      const fitted = await fitAdapters(state);
+      if (fitted.missing !== null) {
+        const what = fitted.missing ? `The data adapter “${fitted.missing}” of this report is not on this server.` : 'This report has no data adapter yet.';
+        notify(`${what} Choose a data adapter for it, then publish again.`, 'error');
+        goToProblem({ target: 'adapter', note: `${what} Choose the one this report reads from.` });
+        return;
+      }
+      if (fitted.used) {
+        current = fitted.state;
+        dispatch({ type: 'REPORT', patch: { connectionId: current.report.connectionId } });
+        if (current.design?.datasets) dispatch({ type: 'DESIGN', update: (d) => ({ ...d, datasets: current.design.datasets }) });
+        notify(`The report now reads from “${fitted.used}”: its own data adapter is not on this server`, 'ok');
+      }
+    } catch (error) { notify(`Could not read the data adapters: ${error.message}`, 'error'); return; }
+    if (state.dirty || state.report.isNew || current !== state) {
+      saved = await saveFrom(current);
       if (!saved) return;
       if (!saved.readyToPublish) { setTab('setup'); return; }
     }
     try {
       const repo = await api.folders();
+      const used = [...new Set([...(current.report.queryLanguage === 'none' ? [] : [current.report.connectionId]), ...(current.design?.datasets || []).map((d) => d.connectionId)].filter(Boolean))];
+      const sources = (await Promise.all(used.map((id) => api.connectionTargets(id, 'server').catch(() => null)))).filter(Boolean);
+      const picked = Object.fromEntries(sources.map((s) => [s.id, s.suggested || '']));
       const status = saved?.report || state.report.status || {}; // the fresh save knows whether it is on the server
-      setPublishing({ folders: repo.folders, folder: status.publishedFolder || state.report.folder || 'General', replace: false, busy: false, onServer: Boolean(status.onServer) });
+      setPublishing({ folders: repo.folders, folder: status.publishedFolder || state.report.folder || 'General', replace: false, busy: false, onServer: Boolean(status.onServer), sources: sources.filter((s) => s.suggested !== s.id), picked });
     } catch (error) { notify(`Could not read the server folders: ${error.message}`, 'error'); }
   };
   const confirmPublish = async () => {
     const { report } = state;
     setPublishing((p) => ({ ...p, busy: true }));
     try {
-      const result = await api.publish(report.id, { folder: publishing.folder, replace: publishing.replace }, report.status?.folder || report.folder);
+      const connections = {};
+      for (const source of publishing.sources || []) {
+        connections[source.id] = await takeInto(source.id, 'server', publishing.picked[source.id]);
+        setPublishing((p) => ({ ...p, picked: { ...p.picked, ...connections } }));   // a second try must not connect it again
+      }
+      const result = await api.publish(report.id, { folder: publishing.folder, replace: publishing.replace, connections }, report.status?.folder || report.folder);
       dispatch({ type: 'STATUS', status: result.workspace });
       setPublishing(null);
       setRefreshKey((n) => n + 1);

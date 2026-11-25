@@ -29,7 +29,7 @@ export default function Preview({ state, notify, dispatch }) {
 
   useEffect(() => () => { if (view?.url) URL.revokeObjectURL(view.url); }, [view]);
   useEffect(() => {
-    api.connections().then((r) => {
+    api.connections('designer').then((r) => {
       setAdapters(r.connections);
       const usable = r.connections.filter((a) => a.configured);
       const own = usable.find((a) => a.id === report.connectionId);

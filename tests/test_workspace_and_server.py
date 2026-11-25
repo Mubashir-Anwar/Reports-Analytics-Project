@@ -173,12 +173,20 @@ def login(client, username, password):
     return client.post("/api/server/login", json={"username": username, "password": password})
 
 
+def setup_login(client, password="Setup-pass-0123456789"):
+    """Sign in as the temporary setup admin (python -m backend.app.setup)."""
+    from backend.app.setup import make_setup_admin
+    make_setup_admin("setup_admin", password, 24, force=True)
+    return login(client, "setup_admin", password)
+
+
 def test_server_needs_login_and_logout_ends_the_session(client):
     assert client.get("/server").status_code == 200
     assert client.get("/api/server/repository").status_code == 401
     assert login(client, "admin", "wrong").status_code == 401
-    signed_in = login(client, "admin", ADMIN)  # bootstrap: no admin user yet
-    assert signed_in.status_code == 200 and signed_in.json()["bootstrap"]
+    assert login(client, "admin", ADMIN).status_code == 401     # the admin token is not a password
+    signed_in = setup_login(client)
+    assert signed_in.status_code == 200 and client.get("/api/server/me").json()["temporary"] is True
     assert "httponly" in signed_in.headers["set-cookie"].lower()
     repository = client.get("/api/server/repository").json()
     assert "R1" in [item["id"] for item in repository["reports"]]
@@ -193,7 +201,7 @@ def test_server_needs_login_and_logout_ends_the_session(client):
 
 
 def test_server_writes_must_be_json(client):
-    login(client, "admin", ADMIN)
+    setup_login(client)
     response = client.post("/api/server/reports/R1/run", data={"format": "csv"})
     assert response.status_code == 415
 
@@ -206,8 +214,8 @@ def test_users_roles_and_session_revocation(client):
     assert client.post("/api/admin/users", headers=admin, json={"username": "ali", "email": "ali@example.com", "password": "ali-pass-1", "role": "viewer"}).status_code == 200
     assert client.post("/api/admin/users", headers=admin, json={"username": "ALI", "email": "ALI@example.com", "password": "ali-pass-1"}).status_code == 409
     users = client.get("/api/admin/users", headers=admin).json()
-    assert users["bootstrapLogin"] is False and "hash" not in json.dumps(users)
-    assert login(client, "admin", ADMIN).status_code == 401           # bootstrap ends once an admin user exists
+    assert users["needsFirstAdmin"] is False and "hash" not in json.dumps(users)
+    assert login(client, "admin", ADMIN).status_code == 401
 
     assert login(client, "ali", "ali-pass-1").status_code == 200
     assert client.get("/api/server/repository").status_code == 200
@@ -237,7 +245,7 @@ def test_server_area_can_be_switched_off(tmp_path, monkeypatch, client):
     assert off.get("/server").status_code == 404
     assert off.get("/api/server/repository").status_code == 404
     # Sign-in stays on: it is how users reach /admin and /ui on this instance too.
-    assert off.post("/api/server/login", json={"username": "admin", "password": ADMIN}).status_code == 200
+    assert setup_login(off).status_code == 200
     assert off.get("/admin").status_code == 200
 
 

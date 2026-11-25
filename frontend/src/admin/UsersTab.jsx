@@ -218,8 +218,11 @@ function AccessReportCard({ notify }) {
 }
 
 export default function UsersTab({ notify }) {
-  const [data, setData] = useState({ users: [], rights: DEFAULT_RIGHTS, bootstrapLogin: false, youAreSuperAdmin: false });
-  const [form, setForm] = useState(EMPTY_FORM);
+  const [data, setData] = useState({ users: [], rights: DEFAULT_RIGHTS, youAreSuperAdmin: false });
+  const [wantsAdmin] = useState(() => new URLSearchParams(window.location.search).get('new') === 'admin');   // Create new admin (setup admin banner)
+  const [form, setForm] = useState(() => (wantsAdmin ? { ...EMPTY_FORM, superAdmin: true } : EMPTY_FORM));
+  const newUser = useRef(null);
+  useEffect(() => { if (wantsAdmin) { newUser.current?.scrollIntoView({ block: 'start' }); newUser.current?.querySelector('input')?.focus(); } }, [wantsAdmin]);
   const [formMessage, setFormMessage] = useState(null);
   const [busy, setBusy] = useState(false);
   const [contact, setContact] = useState('');      // username whose name / e-mail / phone is being edited
@@ -251,7 +254,15 @@ export default function UsersTab({ notify }) {
     if (blocked) return;
     setBusy(true);
     try {
-      await api.createUser({ ...form, username: form.username.trim(), email: form.email.trim(), phone: form.phone.trim() });
+      const made = await api.createUser({ ...form, username: form.username.trim(), email: form.email.trim(), phone: form.phone.trim() });
+      if (made.removedSetupAdmins?.length) {
+        const here = await api.whoami().then(() => true, () => false);
+        if (!here) {           // this was the setup admin: it is gone now
+          window.alert(`Admin “${made.user.username}” is ready and the setup account has been removed. Sign in with the new account now.`);
+          window.location.assign('/login');
+          return;
+        }
+      }
       setFormMessage({ text: `User ${form.username.trim()} can now sign in at /login (and chooses a new password then).`, kind: 'ok' });
       setForm({ ...EMPTY_FORM, rights: form.rights });
       await load();
@@ -267,23 +278,22 @@ export default function UsersTab({ notify }) {
             <p className="muted">Each account sees only the parts it has a right for. A super admin has every right and is the only one who may manage administrators; there can be several. Changing rights signs that user out.</p></div>
           <button className="btn" onClick={load}>Refresh</button>
         </div>
-        {data.bootstrapLogin && <div style={{ marginBottom: 12 }}><Notice message={{ kind: 'warn', text: 'No super admin exists yet. Until you create one, /login accepts the username "admin" with the admin token as the password. Create a super admin to switch that off.' }} /></div>}
         <div className="stack">
           {!data.users.length && <div className="empty">No users yet. Create the first one on the right.</div>}
           {data.users.map((user) => (
             <div key={user.username} className="item user-item">
               <div>
-                <strong>{user.fullName ? `${user.fullName} · ` : ''}{user.username}{user.superAdmin ? <span className="chip accent"> super admin</span> : null}{user.disabled ? ' (disabled)' : ''}</strong>
+                <strong>{user.fullName ? `${user.fullName} · ` : ''}{user.username}{user.superAdmin ? <span className="chip accent"> super admin</span> : null}{user.disabled ? ' (disabled)' : ''}{user.temporary ? <span className="chip warn"> setup admin · {user.expired ? 'time is over' : `ends ${formatWhen(user.expiresAt)}`}</span> : null}</strong>
                 <small>{user.email || <span className="field-bad">no e-mail</span>}{user.phone ? ` · ${user.phone}` : ''} · last sign-in: {formatWhen(user.lastLoginAt)} · created {formatWhen(user.createdAt)}{user.mustChangePassword ? ' · must choose a new password' : ''}</small>
               </div>
               {contact === user.username && (
                 <ContactEditor user={user} onClose={() => setContact('')}
                   onSave={async (change) => { if (await update(user, change, `Details of ${user.username} saved.`)) setContact(''); }} />
               )}
-              <RightsPicker compact rights={user.rights} superAdmin={user.superAdmin} allRights={allRights} canGrantAdmin={isSuper}
+              <RightsPicker compact rights={user.rights} superAdmin={user.superAdmin || user.temporary} allRights={allRights} canGrantAdmin={isSuper}
                 onChange={(rights) => (canEdit(user) ? update(user, { rights }, `Rights of ${user.username} saved.`) : notify('Only a super admin may change an administrator.', 'error'))} />
               <div className="row">
-                {isSuper && (
+                {isSuper && !user.temporary && (
                   <label className="right-chip" title="Every right, and may manage administrators">
                     <input type="checkbox" checked={user.superAdmin} onChange={(e) => update(user, { superAdmin: e.target.checked, rights: user.rights }, `${user.username} is ${e.target.checked ? 'now' : 'no longer'} a super admin.`)} />
                     Super admin
@@ -298,8 +308,8 @@ export default function UsersTab({ notify }) {
           ))}
         </div>
       </section>
-      <form className="card stack" onSubmit={create}>
-        <div><p className="eyebrow">Add</p><h2>New user</h2></div>
+      <form className={`card stack ${wantsAdmin ? 'new-admin' : ''}`} onSubmit={create} ref={newUser}>
+        <div><p className="eyebrow">Add</p><h2>{wantsAdmin && form.superAdmin ? 'New admin' : 'New user'}</h2>{wantsAdmin && form.superAdmin && <p className="muted">Your own super admin. Sign in with it afterwards; the setup account then ends by itself.</p>}</div>
         <label className="field"><span>Username (to sign in)</span><input value={form.username} onChange={(e) => setForm({ ...form, username: e.target.value })} maxLength={64} autoComplete="off" placeholder="e.g. ali.khan" required />
           <FieldNote check={check.username} takenText="this username is already taken" /></label>
         <label className="field"><span>Full name</span><input value={form.fullName} onChange={(e) => setForm({ ...form, fullName: e.target.value })} maxLength={120} autoComplete="off" placeholder="e.g. Ali Khan" /></label>

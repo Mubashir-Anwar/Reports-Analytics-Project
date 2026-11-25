@@ -47,6 +47,7 @@ def register(app: FastAPI, ctx: SimpleNamespace) -> None:
         connection_id = str(payload.get("connectionId") or "").strip()
         if not connection_id:
             raise HTTPException(status_code=422, detail="Choose a data adapter")
+        ctx.require_area(connection_id, "query")
         collection = str(payload.get("collection") or "")
         if need_collection and not COLLECTION_NAME.match(collection):
             raise HTTPException(status_code=422, detail="Choose a collection")
@@ -78,7 +79,9 @@ def register(app: FastAPI, ctx: SimpleNamespace) -> None:
     async def sql(request: Request) -> tuple[str, str, dict[str, Any]]:
         require_admin(request, "query")
         payload = await json_body(request)
-        kind, url = ctx.sql_adapter(str(payload.get("connectionId") or "").strip())
+        connection_id = str(payload.get("connectionId") or "").strip()
+        ctx.require_area(connection_id, "query")
+        kind, url = ctx.sql_adapter(connection_id)
         return kind, url, payload
 
     @app.post("/api/query/sql/schema")

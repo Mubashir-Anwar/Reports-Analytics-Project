@@ -101,12 +101,15 @@ Expected: the same things you did in sections 1–4. A backup from before the ta
    http://127.0.0.1:8770/example.html → the report shows inside the page; parameters you fixed in the token are locked.
 4. Open http://localhost:8770/example.html (a website not on the list) → the frame stays **empty**.
 
+5. A dashboard: Analytics → **Embed in a website** shows the code for your dashboard (token request, `<mrs-dashboard>`
+   tag, refresh time). With `refresh="10"` the time in its corner changes every 10 seconds.
+
 ## 8. Every API at once (Postman collection)
 
 1. Seed the demo data once: `.venv\Scripts\python.exe tools\postman\seed_demo.py` (database `rs_postman_demo` in your local MongoDB).
 2. Environment: `username` = ABCD, `password` = ABCD's password, `adminToken` = `REPORTING_ADMIN_TOKEN` from `.env`,
    `mongoUri` = `mongodb://127.0.0.1:27017`.
-3. **Run collection** (all 16 folders, in order). Expected: 178 requests, 0 failed (Health may be 503 when no default
+3. **Run collection** (all 19 folders, in order). Expected: 299 requests, 0 failed (Health may be 503 when no default
    MongoDB is configured — the service itself is fine). Folder 12c removes the analytics datasets and dashboard it made; the last folder removes everything else.
 
 ## 9. A website calling by URL (Grizzly / any server)

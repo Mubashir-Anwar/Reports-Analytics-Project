@@ -10,7 +10,7 @@ The collection is a complete end-to-end run (create -> use -> clean up), so it c
 
 It needs a data adapter it can read: by default a local MongoDB with the demo database rs_postman_demo
 (tools/postman/seed_demo.py creates it). Everything it creates is named PM_… / pm_… / "Postman" and removed at
-the end. Fill in the environment: baseUrl, username/password (a super admin, or "admin" + the admin token during
+the end. Fill in the environment: baseUrl, username/password (a super admin, or the one of python -m backend.app.setup during
 first setup), adminToken (for the token-based requests) and mongoUri.
 """
 from __future__ import annotations
@@ -129,15 +129,17 @@ folder("02 Sign in", "Signs in with {{username}} / {{password}}; Postman keeps t
 req("Sign in", "POST", "/api/server/login", body={"username": "{{username}}", "password": "{{password}}"},
     checks="pm.test('has rights', function () { pm.expect(pm.response.json().rights).to.be.an('array'); });")
 req("Who am I (session)", "GET", "/api/server/me")
-req("Home sends to the first allowed page", "GET", "/", expect=(303,), redirects=False)
-for page in ("/designer", "/query", "/server", "/admin", "/analytics"):
+req("The first page sends to Home", "GET", "/", expect=(303,), redirects=False)
+for page in ("/home", "/designer", "/query", "/server", "/admin", "/analytics"):
     req(f"Page {page}", "GET", page)
 req("The old Run reports page (/ui) goes home", "GET", "/ui", expect=(303,), redirects=False,
     checks="pm.test('redirects to /', function () { pm.expect(pm.response.headers.get('Location')).to.eql('/'); });")
+req("Home: what this account can do", "GET", "/api/home",
+    checks="pm.test('has the admin part', function () { pm.expect(pm.response.json()).to.have.property('admin'); });")
 req("Admin whoami", "GET", "/api/admin/whoami")
 req("System status and production checklist", "GET", "/api/admin/system/status")
 
-folder("03 Data sources", "Any signed-in user with Designer, Query or Report Server rights connects data sources: no Admin right needed. The old /api/admin/connections paths still answer.")
+folder("03 Data sources", "A data source belongs to one part (area: designer, server, analytics, query) and works only there; that part's right connects it. Without an area (administrators) it works in every part, like older ones. The old /api/admin/connections paths still answer.")
 req("Test a connection before saving", "POST", "/api/data-sources/test",
     body={"type": "mongodb", "uri": "{{mongoUri}}", "database": "rs_postman_demo"})
 req("Save data adapter pm_mongo", "POST", "/api/data-sources",
@@ -146,6 +148,24 @@ req("List data adapters", "GET", "/api/data-sources")
 req("List data adapters (the old Admin path still works)", "GET", "/api/admin/connections")
 req("Test saved adapter", "POST", "/api/data-sources/pm_mongo/test")
 req("Move adapter to a folder", "PUT", "/api/data-sources/pm_mongo/folder", body={"folder": "Postman"})
+req("Save a data source only for Query", "POST", "/api/data-sources",
+    body={"id": "pm_query", "name": "Postman Query", "type": "mongodb", "uri": "{{mongoUri}}", "database": "rs_postman_query", "area": "query", "create": True})
+req("List the data sources of Query", "GET", "/api/data-sources?area=query",
+    checks="pm.test('only Query and shared ones', function () { pm.response.json().connections.forEach(function (c) { pm.expect(['', 'query']).to.include(c.area); }); });")
+req("Connect the same database in the Designer", "POST", "/api/data-sources/pm_query/copy", body={"area": "designer"},
+    checks="pm.test('a separate one', function () { pm.expect(pm.response.json().connection.id).to.eql('pm_query-designer'); });")
+req("What stands in for it in the Designer", "GET", "/api/data-sources/pm_query/targets?area=designer",
+    checks="pm.test('the copy is suggested', function () { pm.expect(pm.response.json().suggested).to.eql('pm_query-designer'); });")
+req("Remember which one stands in", "POST", "/api/data-sources/pm_query/use-in", body={"area": "designer", "connectionId": "pm_query-designer"})
+req("Query refuses a data source of the Designer", "POST", "/api/query/mongo/collections", body={"connectionId": "pm_query-designer"}, expect=(422,))
+req("Delete the Designer's one", "DELETE", "/api/data-sources/pm_query-designer")
+req("Give it to Analytics (Admin)", "PUT", "/api/data-sources/pm_query/area", body={"area": "analytics"})
+req("Delete it", "DELETE", "/api/data-sources/pm_query")
+req("Save an older, shared data source", "POST", "/api/data-sources",
+    body={"id": "pm_shared", "name": "Postman shared", "type": "mongodb", "uri": "{{mongoUri}}", "database": "rs_postman_shared"})
+req("Split it: one per part (Admin)", "POST", "/api/data-sources/pm_shared/split", body={})
+for part in ("", "-designer", "-analytics", "-query"):
+    req(f"Delete pm_shared{part}", "DELETE", f"/api/data-sources/pm_shared{part}")
 
 folder("04 Repository folders (Admin)")
 req("Create folder Postman", "POST", "/api/admin/folders", body={"path": "Postman"})
@@ -164,6 +184,14 @@ req("Import a JRXML (Jaspersoft Studio)", "POST", "/api/admin/jrxml/import", bod
 req("Save as JRXML (for Jaspersoft Studio)", "POST", "/api/admin/jrxml/export", body=definition(),
     checks="pm.test('a jasperReport file', function () { const b = pm.response.json(); pm.expect(b.xml).to.include('<jasperReport'); "
            "pm.expect(b.fileName).to.include('.jrxml'); });")
+req("Saved format patterns", "GET", "/api/admin/patterns", checks="pm.test('a list', function () { pm.expect(pm.response.json().patterns).to.be.an('array'); });")
+req("Save a pattern: only one that formats something", "POST", "/api/admin/patterns", body={"name": "Not a pattern", "pattern": "???"}, expect=(422,))
+req("Change a pattern that is not there", "PUT", "/api/admin/patterns/00000000000000000000000000000000", body={"name": "X", "pattern": "0.00"}, expect=(404,))
+req("Remove a pattern that is not there", "DELETE", "/api/admin/patterns/00000000000000000000000000000000", body={}, expect=(404,))
+req("Own fonts", "GET", "/api/admin/fonts", checks="pm.test('a list', function () { pm.expect(pm.response.json().fonts).to.be.an('array'); });")
+req("Add a font: only TrueType (.ttf) files", "POST", "/api/admin/fonts", body={"file": "aGVsbG8=", "fileName": "not-a-font.ttf", "family": "Not a font"}, expect=(422,))
+req("A font file that is not there", "GET", "/api/admin/fonts/000000000000000000000000/file", expect=(404,))
+req("Remove a font that is not there", "DELETE", "/api/admin/fonts/000000000000000000000000", body={}, expect=(404,))
 req("Import an existing design (PNG, PDF, Word, .ai)", "POST", "/api/admin/designer/import-design",
     body={"file": PAGE_PNG, "name": "page.png", "mode": "elements", "page": 1, "textOnTop": True},
     description="Nothing is saved: the answer is the page size, a background picture and the elements found.")
@@ -273,6 +301,8 @@ req("A decided request cannot be decided again", "POST", "/api/admin/password-re
 folder("08 Report Server")
 req("Repository", "GET", "/api/server/repository")
 req("Folder contents", "GET", "/api/server/folders/contents?path=Postman")
+req("Everything as one ZIP, by server folder", "GET", "/api/server/export?folder=Postman",
+    checks="pm.test('a ZIP file', function () { pm.expect(pm.response.headers.get('Content-Type')).to.include('zip'); });")
 req("Create subfolder", "POST", "/api/server/folders", body={"path": "Postman/Sub"})
 req("Report details", "GET", f"/api/server/reports/{REPORT}")
 req("Edit title", "PUT", f"/api/server/reports/{REPORT}", body={"title": "Postman Orders (server edit)"})
@@ -466,6 +496,9 @@ req("Suggested relationships", "GET", "/api/analytics/relationships/suggest")
 req("Change the relationship", "PUT", "/api/analytics/relationships/{{relationshipId}}", body={"active": True})
 req("One visual: amount by branch", "POST", "/api/analytics/query", body=SUM_BY_BRANCH,
     checks="pm.test('rows by branch', function () { pm.expect(pm.response.json().rows.length).to.be.above(0); });")
+req("Machine learning: too few records are refused (the demo has 5)", "POST", "/api/analytics/query", expect=(422,),
+    body={"dataset": "{{dsOrders}}", "detail": True, "columns": [{"column": "Amount"}], "ml": {"model": "kmeans", "features": ["Amount"], "target": "", "params": {"clusters": 2}}},
+    checks="pm.test('says why', function () { pm.expect(pm.response.json().detail).to.be.a('string'); });")
 req("A wrong column is refused", "POST", "/api/analytics/query",
     body={"dataset": "{{dsOrders}}", "groupBy": [{"column": "Nope"}], "values": [{"column": "Amount", "agg": "sum"}]}, expect=(422,))
 req("Create dashboard PM sales", "POST", "/api/analytics/dashboards", expect=(201,),
@@ -490,6 +523,13 @@ req("Report Server: dashboards are listed with the reports", "GET", "/api/server
 req("Report Server: open the dashboard (read-only)", "GET", "/api/server/dashboards/{{dashboardId}}")
 req("Report Server: its visuals", "POST", "/api/server/dashboards/{{dashboardId}}/query-batch",
     body={"queries": [{"dataset": "{{dsOrders}}", "values": [{"column": "Amount", "agg": "sum"}]}]})
+req("Embed token for the dashboard (API key)", "POST", "/api/v1/embed-tokens", auth="key",
+    body={"dashboard": "{{dashboardId}}", "expiresInSeconds": 600, "filters": [{"dataset": "{{dsOrders}}", "column": "Branch", "op": "in", "values": ["LHR"]}]},
+    save={"embedToken": "pm.response.json().token"})
+req("Embedded dashboard: the page", "GET", "/embed/view?token={{embedToken}}", auth="none")
+req("Embedded dashboard: its layout", "GET", "/api/embed/dashboard", auth="none", extra_headers={"X-Embed-Token": "{{embedToken}}"})
+req("Embedded dashboard: its numbers", "POST", "/api/embed/dashboard/query", auth="none", body={"tiles": ["kpi", "col"], "filters": []}, extra_headers={"X-Embed-Token": "{{embedToken}}"},
+    checks="pm.test('two results', function () { pm.expect(pm.response.json().results.length).to.eql(2); });")
 req("Report Server: download (.mdash)", "GET", "/api/server/dashboards/{{dashboardId}}/file")
 req("Report Server: upload the file into Postman/Copies (its datasets are reused)", "POST", "/api/server/dashboards/upload", expect=(201,),
     raw_body='{"content": {{dashFile}}, "folder": "Postman/Copies"}', save={"dashboardCopyId": "pm.response.json().dashboard.id"},

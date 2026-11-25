@@ -2,7 +2,7 @@
 
 This guide covers running **Analysis** (the reporting and analytics service; the name can be changed in
 Admin → Branding) on a server: which paths to expose and to whom, logs, and how a
-Java/Grizzly application connects to it. All settings are environment variables; `.env.example` lists
+Java/Grizzly application connects to it. All settings are environment variables; `docs/SETTINGS.md` lists
 every one with a comment.
 
 ## 1. Paths and who needs them
@@ -25,8 +25,8 @@ every one with a comment.
 * **Admin token** (`REPORTING_ADMIN_TOKEN`): everything, including data sources (MongoDB URLs), deleting
   reports and folders, and reading logs.
 * **Designer token** (`REPORTING_DESIGNER_TOKEN`, at least 24 characters): open `/designer`, create and save
-  reports, preview and run them on any data adapter, import JRXML. Cannot add/change/delete data sources,
-  delete reports or folders, or read logs (these answer `403`).
+  reports, preview and run them on the Designer's data sources (and Query's), connect those, import JRXML. Cannot
+  touch the data sources of the Server or Analytics, delete reports or folders, or read logs (these answer `403`).
 * **Report access** (`REPORTING_ACCESS_SECRET`): only `/generate` and `/reports` — for your website/Java server.
 
 ### Switching areas off per instance
@@ -87,8 +87,8 @@ server {
 5. **Secrets** in the server's environment (not in files in the code folder):
    `REPORTING_ADMIN_TOKEN`, `REPORTING_DESIGNER_TOKEN` (optional), `REPORTING_ACCESS_SECRET`.
    Generate each with `python -c "import secrets; print(secrets.token_urlsafe(48))"`.
-6. **Accounts and rights**: sign in at `/login` as `admin` with the admin token (first setup only), then create
-   one or more **super admins** in Admin → Users & rights. Give every other account only the rights it needs:
+6. **Accounts and rights**: run `python -m backend.app.setup` on the server (an admin for 24 hours), sign in at `/login` with it, then create
+   one or more **super admins** in Admin → Users & rights (the first one removes the setup admin at once). Give every other account only the rights it needs:
    Admin, Designer, Report Server, Analytics, Run reports. Pages and APIs check these rights; the admin token is
    for automation only and is never handed to a browser.
 7. **Start with one worker**:
@@ -116,8 +116,20 @@ docker run -d -p 8000:8000 -v analysis-data:/data -e REPORTING_ADMIN_TOKEN=... -
 Repository Explorer: **Data adapters** at the top level, then folders inside folders (for example
 `cascade / KMBLGL / Data Source`, `Reports`, `Images`). A data adapter can be saved at the top level or inside
 any folder, and moved later without re-entering its URL (`PUT /api/admin/connections/<id>/folder`, admin
-token). The folder only organises the adapter; its ID stays unique on the server, and a report or run can use
-any adapter wherever it is. A folder that still holds reports, adapters or subfolders cannot be deleted.
+token). The folder only organises the adapter; its ID stays unique on the server, and a report on the
+Server can use any of the Server's data sources wherever it is. A folder that still holds reports, adapters or subfolders cannot be deleted.
+
+**Each part has its own data sources.** A data source has an `area` (`designer`, `server`, `analytics` or `query`) and works
+only there; the right for that part connects and changes it (Analytics needs the Designer right too), the Admin right covers
+all (`/admin → Data sources`, or the connect buttons of each part and of Home).
+
+* Publishing (Designer → Server) asks which of the Server's data sources the report reads from, or connects the same database
+  there as a separate one. The choice is remembered. Over the API: `POST …/publish {"connections": {"<designer id>": "<server id>"}}`;
+  without it the remembered one, or one with exactly the same connection, is used, else the answer is 422.
+* A server report opened in the Designer, and a query taken from Query to the Designer or Analytics, switch the same way.
+* Data sources from before this rule (and those an administrator saves over the API without `area`) are **shared**: they work in
+  every part. `/admin → Data sources` gives one to a single part, or splits it into one per part (published reports, drafts,
+  datasets and saved queries keep working, each with the one of its own part).
 
 No data adapter is preselected for Preview or Run: pick any one each time. The adapter saved on the report is
 used only by `/generate` and `/ui`.
@@ -291,6 +303,23 @@ webhook URL and requests per minute). The key stays on the website's server: `X-
    Events on the element: `mrs-ready`, `mrs-ran`, `mrs-error`; methods `run("pdf")`, `preview()`, `setToken(…)`.
    A complete example page: `tools/embed/example.html`.
 
+### A dashboard in the website's page
+
+Analytics → **Embed in a website** shows these steps with the code for the chosen dashboard. The website's server asks
+`POST /api/v1/embed-tokens` with `{"dashboard": "dash_…", "expiresInSeconds": 3600}` (optional fixed
+`"filters": [{"column": "Branch", "op": "in", "values": ["LHR"]}]`; name the `dataset` too when the dashboard uses
+several), and the page shows it:
+
+```html
+<script src="https://reports.example.com/assets/embed/sdk.js"></script>
+<mrs-dashboard token-url="/dashboard-token" refresh="60" theme="light" height="640"></mrs-dashboard>
+```
+
+`token-url` is an address of the website that answers the token; it is asked again before a token ends. `refresh` is
+in seconds (0 = never, at least 10); it asks the dataset again, while new records come with the dataset's own import
+schedule. Without `height` the frame follows its content. Events: `mrs-ready`, `mrs-error`; methods `reload()`,
+`setToken(…)`.
+
 Safety: the viewer page may only be framed by the listed websites (`Content-Security-Policy: frame-ancestors …`;
 every other page of the service stays unframeable). Each use checks the key again (enabled, not expired, folders,
 requests per minute); changing or deleting the key ends its embedded reports at once. Every preview and download
@@ -308,6 +337,11 @@ docker run -d --name analysis -p 8000:8000 -v analysis-data:/data --env-file .en
 ```
 
 * The `default` data adapter comes from `MONGODB_URI` / `MONGODB_DATABASE`; add more on `/admin → Data sources`.
+* The packages are exactly the tested versions (`constraints.txt`; the ranges are in `requirements.txt`).
+* The image carries Noto Naskh Arabic, so Urdu / Arabic text prints in a PDF even when the report's font has no such
+  letters. Fonts uploaded in Admin (e.g. Noto Nastaliq Urdu) come first; `REPORT_RTL_FONT_PATH` sets another one.
+* The service runs as user 10001. A volume made by an older image may belong to root: once,
+  `docker run --rm -u 0 -v analysis-data:/data analysis chown -R 10001 /data`.
 * The container's health check only tests that the process answers (`backend/app/healthcheck.py`). Use the JSON of
   `GET /health` (status `ok` / `unavailable`) for readiness and alerting about MongoDB.
 * `GET /ready` answers 200 when the storage works (files or a database) — use it for the load balancer.
@@ -384,7 +418,7 @@ changed there instead. Every switch is in the audit trail (`storage.switched`).
 load balancing, 25 MB uploads):
 
 ```bash
-cp deploy/.env.example deploy/.env          # fill in the secrets; never commit deploy/.env
+python deploy/make_env.py --url https://reports.example.com   # deploy/.env with random secrets; run again: values stay
 mkdir -p deploy/certs                        # fullchain.pem + privkey.pem
 docker compose -f deploy/docker-compose.yml --env-file deploy/.env up -d --build
 ```
@@ -471,8 +505,14 @@ query any registered data adapter, so adapter users must be limited in the datab
    previous file, so dashboards keep working, and the error shows on the dataset.
 2. **Model**: relationships between datasets on a shared column (for example orders `Branch` = branches `Code`), even
    when the datasets come from different databases. A visual can then group or filter one dataset by columns of the other.
-3. **Dashboards**: cards (KPI), column, bar, line, area, pie, donut, scatter, table and slicer visuals on a 12-column
-   grid. Clicking a bar or a slice filters the other visuals; slicers and dashboard filters do the same.
+3. **Dashboards**: cards (KPI), column, bar, line, area, pie, donut, scatter, map, machine learning, table and slicer visuals on a 12-column
+   grid (map: country names or codes, well-known cities, or latitude and longitude columns). **Auto refresh** in a dashboard's toolbar asks again every 10 seconds to every hour. Clicking a bar or a slice filters the other visuals; slicers and dashboard filters do the same.
+
+4. **ML lab**: regression (linear, ridge, polynomial, logistic), decision tree, random forest, nearest neighbours,
+   forecast, K-means groups, unusual records, correlation and PCA on a dataset; compares models on records kept aside,
+   answers "what if", and adds the result to a dashboard. Large datasets are sampled; models are trained again on every
+   query and are not stored.
+5. **From a query**: Query page → **Use in Analytics** opens a new dataset with that query filled in.
 
 | Right | May |
 |---|---|
@@ -575,11 +615,11 @@ password?*. Tip: keep **two** super admins, so one can always reset the other.
 ## What to keep (deployment record)
 
 Keep one document per environment (staging, production) in your password manager or a restricted wiki. **Never** in
-Git, e-mail or chat. `.env.example` lists every setting.
+Git, e-mail or chat. `docs/SETTINGS.md` lists every setting.
 
 | Keep | Why | If lost |
 |---|---|---|
-| `REPORTING_ADMIN_TOKEN` | First sign-in, automation | Set a new one in `.env` and restart (sessions are signed out unless `REPORTING_SESSION_SECRET` is set) |
+| `REPORTING_ADMIN_TOKEN` | Automation | Set a new one in `.env` and restart (sessions are signed out unless `REPORTING_SESSION_SECRET` is set) |
 | `REPORTING_SESSION_SECRET` | Signs sign-ins and API-key links | Set a new one: everybody signs in again, links given out stop working |
 | `REPORTING_SECRETS_KEY` | Decrypts data-source passwords | Re-enter every data adapter's password in Admin → Data sources |
 | `REPORTING_ACCESS_SECRET`, `REPORTING_DESIGNER_TOKEN` | Older token access | Make new ones, give them to the systems that use them |

@@ -10,7 +10,7 @@ from typing import Any
 
 from backend.app.db import model
 from backend.app.db.base import DuplicateSeq, RecordsBackend
-from backend.app.storage.files import data_directory
+from backend.app.storage.files import data_directory, long_path
 
 _LOCK = threading.RLock()   # one process writes the files; several processes need a database backend
 
@@ -25,7 +25,7 @@ class FileRecords(RecordsBackend):
 
     @property
     def folder(self) -> Path:
-        return (self._root or data_directory()) / "records"
+        return long_path(self._root or data_directory()) / "records"
 
     def _day_path(self, kind: str, day: str) -> Path:
         return self.folder / ("request_log" if kind == "requests" else "api_calls") / f"{day}.jsonl"

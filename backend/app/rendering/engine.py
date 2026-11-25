@@ -18,7 +18,9 @@ import re
 from datetime import date, datetime
 from typing import Any, Iterable
 
+from backend.app import fonts as own_fonts
 from backend.app.expressions import jexpr
+from backend.app.rendering import rtl, shaping
 
 BAND_KEYS = ("title", "pageHeader", "columnHeader", "detail", "columnFooter", "pageFooter", "lastPageFooter",
              "summary", "noData", "background")
@@ -26,7 +28,26 @@ BAND_KEYS = ("title", "pageHeader", "columnHeader", "detail", "columnFooter", "p
 
 def band_present(band: dict[str, Any] | None) -> bool:
     """Like a band that exists in a JRXML: it has a height or elements. Absent bands are not printed."""
-    return bool(band and (band.get("height") or band.get("elements")))
+    return bool(band and any(part.get("height") or part.get("elements") for part in band_parts(band)))
+
+
+def band_parts(band: dict[str, Any] | None) -> list[dict[str, Any]]:
+    """The band and the ones added to its section ("Detail 2", "Summary 2"…: band["more"]), in print order."""
+    return [band, *(band.get("more") or [])] if band else []
+
+
+def section_height(band: dict[str, Any] | None) -> float:
+    return sum(part.get("height") or 0 for part in band_parts(band))
+
+
+def design_bands(design: dict[str, Any]) -> list[dict[str, Any]]:
+    """Every band of a design: sections, the bands added to them, group headers and footers."""
+    bands = design["bands"]
+    sections = [bands[key] for key in BAND_KEYS if bands.get(key)] + [
+        band for side in ("groupHeaders", "groupFooters") for band in (bands.get(side) or {}).values()]
+    return [part for band in sections for part in band_parts(band)]
+
+
 ELEMENT_TYPES = {"staticText", "textField", "line", "rectangle", "image", "chart", "ellipse", "frame", "break", "barcode",
                  "table", "crosstab", "list", "subreport", "note"}
 # Elements that print many records and make their band grow (Jasper components fed by a dataset).
@@ -55,7 +76,8 @@ CALCULATIONS = {"Sum", "Count", "Average", "Min", "Max", "First"}
 RESET_TYPES = {"Report", "Group"}
 CHART_TYPES = {"bar", "line", "pie", "spider"}
 BUILTIN_VARIABLES = {"PAGE_NUMBER", "PAGE_COUNT", "REPORT_COUNT", "CURRENT_DATE"}
-MAX_ELEMENTS = 400
+MAX_ELEMENTS = 3000
+MAX_BANDS = 60          # bands in one section (Detail 1, Detail 2, …)
 MAX_ROWS_RENDER = 50_000
 NAME_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]{0,63}$")
 COLOR_RE = re.compile(r"^#[0-9a-fA-F]{6}$")
@@ -333,6 +355,11 @@ def tokens_in(expression: str) -> list[tuple[str, str]]:
     return TOKEN_RE.findall(expression or "")
 
 
+def _font_choice(name: Any) -> str:
+    """A built-in font or the name of an own one (kept when its file is not there yet: it prints in SansSerif)."""
+    return name if isinstance(name, str) and (name in FONT_NAMES or own_fonts.NAME_RE.fullmatch(name)) else "SansSerif"
+
+
 def validate_design(design: Any, columns: list[str], parameter_names: set[str]) -> dict[str, Any]:
     """Return a normalized copy of `design` or raise ValueError (English message)."""
     if not isinstance(design, dict):
@@ -446,6 +473,7 @@ def validate_design(design: Any, columns: list[str], parameter_names: set[str]) 
     datasets_by_name = {d["name"]: d for d in datasets}
 
     counter = {"elements": 0, "image_bytes": 0}
+    seen_images: set[str] = set()
 
     def check_expression(expression: str, where: str, fields: set[str] | None = None) -> None:
         for kind, name in tokens_in(expression):
@@ -473,7 +501,7 @@ def validate_design(design: Any, columns: list[str], parameter_names: set[str]) 
             "width": _num(raw.get("width"), "width", 1, 15000, 100),
             "height": _num(raw.get("height"), "height", 0, 5000, 20),
             "fontSize": _num(raw.get("fontSize"), "fontSize", 4, 96, 10),
-            "fontName": raw.get("fontName") if raw.get("fontName") in FONT_NAMES else "SansSerif",
+            "fontName": _font_choice(raw.get("fontName")),
             "bold": raw.get("bold") is True,
             "italic": raw.get("italic") is True,
             "underline": raw.get("underline") is True,
@@ -499,7 +527,7 @@ def validate_design(design: Any, columns: list[str], parameter_names: set[str]) 
             element["borders"] = {side: _num(raw_borders.get(side), f"borders.{side}", 0, 20, 0) for side in ("top", "right", "bottom", "left")}
         else:
             element["borders"] = None
-        print_when = str(raw.get("printWhenExpression", "") or "").strip()[:500]
+        print_when = str(raw.get("printWhenExpression", "") or "").strip()[:4000]
         if print_when:
             if not jexpr.check_syntax(print_when):
                 raise ValueError(f"{band_name}: the Print When expression could not be understood: {print_when[:60]}")
@@ -566,10 +594,16 @@ def validate_design(design: Any, columns: list[str], parameter_names: set[str]) 
                     size = len(base64.b64decode(match.group(2), validate=True))
                 except ValueError:
                     raise ValueError(f"{band_name}: invalid image data") from None
-                counter["image_bytes"] += size
+                counter["image_bytes"] += 0 if src in seen_images else size      # the same picture used again costs nothing
+                seen_images.add(src)
                 if size > 2_500_000 or counter["image_bytes"] > 8_000_000:
                     raise ValueError("Keep the images under 8 MB in total (up to 2.5 MB each)")
             element["src"] = src
+            # a picture from the data: the expression gives base64 text, a data URL or bytes (PNG/JPEG)
+            element["expression"] = str(raw.get("expression", "") or "").strip()[:4000]
+            if element["expression"].startswith("=") and not jexpr.check_syntax(element["expression"][1:]):
+                raise ValueError(f"{band_name}: the image expression could not be understood: {element['expression'][:60]}")
+            check_expression(element["expression"], f"{band_name} image")
             # where the picture came from, shown on the server's resource page (the bytes are in src)
             element["srcName"] = re.sub(r"[\x00-\x1f]", "", str(raw.get("srcName") or ""))[:200]
             url = str(raw.get("srcUrl") or "").strip()
@@ -681,7 +715,7 @@ def validate_design(design: Any, columns: list[str], parameter_names: set[str]) 
                 element.update({"reportId": report_id, "parameters": mapped, "showTitle": raw.get("showTitle", True) is not False})
         return element
 
-    def clean_band(raw: Any, name: str) -> dict[str, Any]:
+    def clean_band(raw: Any, name: str, first: bool = True) -> dict[str, Any]:
         if raw is None:
             return {"height": 0, "elements": []}
         if not isinstance(raw, dict):
@@ -690,7 +724,19 @@ def validate_design(design: Any, columns: list[str], parameter_names: set[str]) 
         elements = raw.get("elements", []) or []
         if not isinstance(elements, list):
             raise ValueError(f"The elements of band '{name}' must be a list")
-        return {"height": height, "elements": [clean_element(item, name) for item in elements]}
+        band: dict[str, Any] = {"height": height, "elements": [clean_element(item, name) for item in elements]}
+        print_when = str(raw.get("printWhenExpression", "") or "").strip()[:4000]
+        if print_when:                                     # Jasper: a band's own Print When Expression
+            if not jexpr.check_syntax(print_when):
+                raise ValueError(f"Band '{name}': the Print When expression could not be understood: {print_when[:60]}")
+            check_expression(print_when, f"Band {name} Print When")
+            band["printWhenExpression"] = print_when
+        more = raw.get("more") or []
+        if first and more:
+            if not isinstance(more, list) or len(more) >= MAX_BANDS:
+                raise ValueError(f"At most {MAX_BANDS} bands in one section ({name})")
+            band["more"] = [clean_band(item or {}, f"{name} {number}", False) for number, item in enumerate(more, start=2)]
+        return band
 
     raw_bands = design.get("bands") or {}
     if not isinstance(raw_bands, dict):
@@ -1043,6 +1089,7 @@ class _Render:
         self.total_pages = total_pages
         self.hex = HexColor
         self.fonts = _font_names()
+        self.own_families: dict[str, Any] = {}
         self.page = design["page"]
         self.bands = design["bands"]
         self.groups = design["groups"]
@@ -1167,6 +1214,28 @@ class _Render:
         except jexpr.JExprError:
             return True
 
+    def printed(self, band: dict[str, Any] | None, row: dict[str, Any] | None) -> list[dict[str, Any]]:
+        """The bands of a section that print for this record: those whose own Print When Expression is true."""
+        out = []
+        for part in band_parts(band):
+            expression = part.get("printWhenExpression")
+            if expression:
+                try:
+                    if not jexpr.evaluate(expression, lambda kind, name: self.resolve(kind, name, row)):
+                        continue
+                except jexpr.JExprError:               # e.g. $F{X}.split(",") of an empty field: there is nothing to print
+                    continue
+            out.append(part)
+        return out
+
+    def draw_section(self, canvas, band: dict[str, Any] | None, top: float, row: dict[str, Any] | None) -> float:
+        """Draw a section's bands one below the other; the height they take."""
+        used = 0.0
+        for part in self.printed(band, row):
+            self.draw_band(canvas, part, top + used, row)
+            used += self.band_height(part, row)
+        return used
+
     def shown(self, element: dict[str, Any], row: dict[str, Any] | None) -> bool:
         """Is the element printed for this record? Print When Expression, then Jasper's "Print Repeated Values"
         (off: a value equal to the one printed before is left out), unless it is the first whole band on a new
@@ -1235,6 +1304,11 @@ class _Render:
     # ---- drawing
     def family(self, element: dict[str, Any]) -> tuple[str, str, str, str]:
         """Regular/bold/italic/bold-italic PDF fonts for the element's font name (a configured TTF wins)."""
+        name = element.get("fontName", "SansSerif")
+        if name not in self.own_families:
+            self.own_families[name] = own_fonts.pdf_family(name)
+        if self.own_families[name]:
+            return self.own_families[name]
         if self.fonts[0] == "ReportFont":
             return self.fonts
         return PDF_FAMILIES[FONT_FAMILY.get(element.get("fontName", "SansSerif"), "Helvetica")]
@@ -1243,13 +1317,56 @@ class _Render:
         regular, bold, italic, both = self.family(element)
         return both if element["bold"] and element["italic"] else bold if element["bold"] else italic if element["italic"] else regular
 
+    def plain_font(self, element: dict[str, Any]) -> str:
+        """For Latin words and numbers an own Urdu font does not have."""
+        regular, bold, italic, both = self.fonts
+        return both if element["bold"] and element["italic"] else bold if element["bold"] else italic if element["italic"] else regular
+
+    def prepared(self, element: dict[str, Any], text: str) -> tuple[dict[str, Any], str]:
+        """Right-to-left text ready for wrapping: letters joined, in a font that has them, as plain text (the lines are
+        put in order one by one, which formatted paragraphs cannot do)."""
+        text = str(text or "")
+        if not rtl.has_rtl(text):
+            return element, text
+        if element.get("markup", "none") != "none":
+            text = markup_to_text(text, element["markup"])
+        from reportlab.pdfbase import pdfmetrics
+        glyphs = getattr(getattr(pdfmetrics.getFont(self.font(element)), "face", None), "charToGlyph", None)
+        if not glyphs or not any(ord(ch) in glyphs for ch in text if rtl.has_rtl(ch)):
+            family = own_fonts.right_to_left_family()
+            if family:
+                element = {**element, "fontName": family}
+                glyphs = getattr(pdfmetrics.getFont(self.font(element)).face, "charToGlyph", None)
+        element = {**element, "markup": "none", "align": "right" if element["align"] == "justified" else element["align"]}
+        if shaping.available(self.font(element)):
+            above, height = shaping.line_metrics(self.font(element))
+            return {**element, "_shaped": True, "_above": above, "_line": height}, text
+        return element, rtl.shape(text, (lambda ch: ord(ch) in glyphs) if glyphs else (lambda _ch: False))
+
+    def image_src(self, element: dict[str, Any], row: dict[str, Any] | None) -> str:
+        """The picture of an image element as a data URL: its own file, or the one its expression reads from the data."""
+        if not element.get("expression"):
+            return element.get("src") or ""
+        value = self.raw_value(element["expression"], row)
+        if isinstance(value, str):
+            found = IMAGE_RE.fullmatch("".join(value.split()))
+            if found:
+                return found.group(0)
+            try:
+                value = jexpr.Base64Decoder().decode(value) if value.strip() else b""
+            except jexpr.JExprError:
+                value = b""
+        data = bytes(value) if isinstance(value, (bytes, bytearray)) else b""
+        kind = "png" if data.startswith(b"\x89PNG\r\n") else "jpeg" if data.startswith(b"\xff\xd8\xff") else ""
+        return f"data:image/{kind};base64,{base64.b64encode(data).decode('ascii')}" if kind and len(data) <= 6_000_000 else element.get("src") or ""
+
     def element_text(self, element: dict[str, Any], row: dict[str, Any] | None) -> str:
         return element.get("text", "") if element["type"] == "staticText" else self.evaluate(element, row)
 
     @staticmethod
     def leading(element: dict[str, Any], size: float) -> float:
         """Paragraph → Line Spacing (Jasper): Single, 1½, Double, Proportional (× size), Fixed / At Least (points)."""
-        base, amount = size * 1.2, element.get("lineSpacingSize", 1) or 1
+        base, amount = size * element.get("_line", 1.2), element.get("lineSpacingSize", 1) or 1
         spacing = element.get("lineSpacing", "Single")
         if spacing == "1_1_2":
             return base * 1.5
@@ -1279,15 +1396,18 @@ class _Render:
                 out = ""
                 for index, part in enumerate(paragraph.split("\t")):
                     if index:
-                        used = _string_width(out, name, size)
+                        used = shaping.width(out, name, size, self.plain_font(element)) if element.get("_shaped") else _string_width(out, name, size)
                         next_stop = (used // tab + 1) * tab
                         out += " " * max(1, round((next_stop - used) / space))
                     out += part
                 paragraph = out
-            head = simpleSplit(paragraph, name, size, max(room - first, 1)) or [""]
-            rest = paragraph[len(head[0]):].lstrip(" ") if len(head) > 1 else ""
-            tail = simpleSplit(rest, name, size, room) if rest else []
-            parts = [head[0], *tail]
+            if element.get("_shaped"):
+                parts = shaping.wrap(paragraph, name, size, room, self.plain_font(element), max(room - first, 1))
+            else:
+                head = simpleSplit(paragraph, name, size, max(room - first, 1)) or [""]
+                rest = paragraph[len(head[0]):].lstrip(" ") if len(head) > 1 else ""
+                tail = simpleSplit(rest, name, size, room) if rest else []
+                parts = [head[0], *tail]
             for index, line in enumerate(parts):
                 lines.append((line, left + (first if index == 0 else 0), index == 0, index == len(parts) - 1))
         return lines
@@ -1306,6 +1426,7 @@ class _Render:
 
     def block_height(self, element: dict[str, Any], text: str, size: float, width: float) -> float:
         """Height of the text block (without the padding) at this font size."""
+        element, text = self.prepared(element, text)
         if element.get("markup", "none") != "none" or element["align"] == "justified":
             from reportlab.platypus import Paragraph
             style = self.paragraph_style(element, size)
@@ -1647,18 +1768,21 @@ class _Render:
         child.page_number = self.page_number
         bands = child.bands
         if not child.rows:
-            if band_present(bands.get("noData")):
-                yield ("row", bands["noData"], None, child, None)
+            for part in child.printed(bands.get("noData"), None):
+                yield ("row", part, None, child, None)
             return
-        if sub.get("showTitle", True) and band_present(bands["title"]):
-            yield ("row", bands["title"], None, child, None)
-        if band_present(bands["columnHeader"]):
-            yield ("header", bands["columnHeader"], None, child, None)
+        if sub.get("showTitle", True):
+            for part in child.printed(bands["title"], None):
+                yield ("row", part, None, child, None)
+        for part in child.printed(bands["columnHeader"], None):
+            if part["height"] or part["elements"]:
+                yield ("header", part, None, child, None)
         for band_item, band_row, band_level in child.sequence():
             yield ("row", band_item, band_row, child, band_level)
         for key in ("columnFooter", "summary"):
-            if band_present(bands[key]):
-                yield ("footer", bands[key], None, child, None)
+            for part in child.printed(bands[key], None):
+                if part["height"] or part["elements"]:
+                    yield ("footer", part, None, child, None)
 
     def sequence(self):
         """The group headers, Detail rows and group footers in print order (variables are updated as it goes)."""
@@ -1682,17 +1806,21 @@ class _Render:
             if previous is not None:
                 for level in range(len(self.groups) - 1, changed_from - 1, -1):
                     name = self.groups[level]["name"]
-                    yield self.bands["groupFooters"][name], previous_row, level
+                    for part in self.printed(self.bands["groupFooters"][name], previous_row):
+                        yield part, previous_row, level
                     self.reset_variables(name)
             for level in range(changed_from, len(self.groups)):
-                yield self.bands["groupHeaders"][self.groups[level]["name"]], row, level
+                for part in self.printed(self.bands["groupHeaders"][self.groups[level]["name"]], row):
+                    yield part, row, level
             self.report_count += 1
             self.accumulate(row)
-            yield self.bands["detail"], row, detail_level
+            for part in self.printed(self.bands["detail"], row):
+                yield part, row, detail_level
             previous, previous_row = current, row
         if previous is not None:
             for level in range(len(self.groups) - 1, -1, -1):
-                yield self.bands["groupFooters"][self.groups[level]["name"]], previous_row, level
+                for part in self.printed(self.bands["groupFooters"][self.groups[level]["name"]], previous_row):
+                    yield part, previous_row, level
 
     def stroke(self, canvas, element, width=None) -> None:
         canvas.setStrokeColor(self.hex(element.get("borderColor") or element.get("color") or "#000000"))
@@ -1738,10 +1866,14 @@ class _Render:
             self.stroke(canvas, element)
             canvas.line(x, y + h, x + w, y)
             canvas.restoreState()
-        elif kind == "image" and element.get("src"):
+        elif kind == "image" and (src := self.image_src(element, row)):
             from reportlab.lib.utils import ImageReader
-            data = base64.b64decode(IMAGE_RE.fullmatch(element["src"]).group(2))
-            canvas.drawImage(ImageReader(io.BytesIO(data)), x, y, w, h, preserveAspectRatio=True, anchor="c", mask="auto")
+            data = base64.b64decode(IMAGE_RE.fullmatch(src).group(2))
+            try:
+                canvas.drawImage(ImageReader(io.BytesIO(data)), x, y, w, h, preserveAspectRatio=True, anchor="c", mask="auto")
+            except Exception:  # noqa: BLE001 - a damaged picture in the data must not stop the report
+                if not element.get("expression"):
+                    raise
         elif kind == "chart":
             self.draw_chart(canvas, element, x, y, w, h)
 
@@ -1791,9 +1923,12 @@ class _Render:
         try:
             paragraph = Paragraph(body, style)
             _width, block = paragraph.wrap(max(w - 2 * pad, 1), 1_000_000)
+            if paragraph.minWidth() > w - 2 * pad >= 1:       # a word that only the right padding breaks ("1." in a narrow box)
+                _width, block = paragraph.wrap(max(w - pad, 1), 1_000_000)
         except Exception:  # noqa: BLE001 - malformed markup: fall back to the plain text
             paragraph = Paragraph(markup_to_paragraph(markup_to_text(text, element.get("markup", "none")), "none"), style)
             _width, block = paragraph.wrap(max(w - 2 * pad, 1), 1_000_000)
+        side, pad = pad, min(pad, max((h - block) / 2, 0))
         block += style.spaceBefore + style.spaceAfter
         if element.get("vAlign") == "middle":
             bottom = y + (h - block) / 2
@@ -1805,7 +1940,7 @@ class _Render:
         path = canvas.beginPath()
         path.rect(x, y, w, h)
         canvas.clipPath(path, stroke=0, fill=0)
-        paragraph.drawOn(canvas, x + pad, bottom + style.spaceAfter)
+        paragraph.drawOn(canvas, x + side, bottom + style.spaceAfter)
         canvas.restoreState()
 
     def draw_text(self, canvas, element, text, x, y, w, h) -> None:
@@ -1828,6 +1963,7 @@ class _Render:
             self.draw_text(canvas, {**element, "rotation": "None", "width": box_w, "height": box_h}, text, 0, 0, box_w, box_h)
             canvas.restoreState()
             return
+        element, text = self.prepared(element, text)
         if element.get("textAdjust") == "ScaleFont":
             # Text Adjust → Scale Font: a smaller font until the whole text fits in the box
             pad = element.get("padding", 2)
@@ -1844,20 +1980,28 @@ class _Render:
         before, after = element.get("spacingBefore", 0), element.get("spacingAfter", 0)
         right_indent = element.get("rightIndent", 0)
         canvas.saveState()
+        block = self.block_height(element, text, size, max(w - 2 * pad, 1))
+        # one tall (Nastaliq) line in a box made for another font: centred and not cut off
+        # a box just too low for its text (made for another font): the padding above, then a little line height, gives way
+        vertical = min(pad, max((h - block) / 2, 0))
+        if block > h and len(lines) > 1 and element.get("_line", 1.2) <= 1.2 and element.get("lineSpacing", "Single") == "Single":
+            leading = max(size * 1.1, leading - (block - h) / len(lines))
+            block = block - len(lines) * (size * element.get("_line", 1.2) - leading)
+        over = max(block - h, 0) if len(lines) == 1 and element.get("_line", 1.2) > 1.2 else 0
         path = canvas.beginPath()
-        path.rect(x, y, w, h)
+        path.rect(x, y - over / 2, w, h + over)
         canvas.clipPath(path, stroke=0, fill=0)
         canvas.setFillColor(self.hex(element["color"]))
         canvas.setFont(name, size)
-        block = self.block_height(element, text, size, max(w - 2 * pad, 1))
-        if element.get("vAlign") == "middle":
+        if element.get("vAlign") == "middle" or over:
             top_edge = y + (h + block) / 2
         elif element.get("vAlign") == "bottom":
-            top_edge = y + block + pad
+            top_edge = y + block + vertical
         else:
-            top_edge = y + h - pad
+            top_edge = y + h - vertical
         # the first baseline sits one font size below the top (Single spacing: as before); bigger spacing adds room above
-        cursor = top_edge - size - (leading - size * 1.2 if leading > size * 1.2 else 0)
+        single = size * element.get("_line", 1.2)
+        cursor = top_edge - size * element.get("_above", 1) - (leading - single if leading > single else 0)
         for line, indent, first, last in lines:
             if first:
                 cursor -= before
@@ -1867,14 +2011,24 @@ class _Render:
                 cursor -= after
             if baseline < y - size or baseline > y + h + size:
                 continue
-            line_width = canvas.stringWidth(line, name, size)
+            if element.get("_shaped"):
+                pieces = shaping.parts(line, name, size, self.plain_font(element))
+            else:
+                line = rtl.visual(line)
+                pieces = [(name, line, canvas.stringWidth(line, name, size))]
+            line_width = sum(piece[2] for piece in pieces)
             if element["align"] == "right":
                 start = x + w - pad - right_indent - line_width
             elif element["align"] == "center":
                 start = x + indent + (w - indent - right_indent - line_width) / 2
             else:
                 start = x + pad + indent
-            canvas.drawString(start, baseline, line)
+            at = start
+            for piece_font, piece, piece_width in pieces:
+                if element.get("_shaped"):
+                    canvas.setFont(piece_font, size)
+                shaping.draw(canvas, at, baseline, piece, size)
+                at += piece_width
             if element.get("underline") and line:
                 canvas.setStrokeColor(self.hex(element["color"]))
                 canvas.setLineWidth(max(0.5, size / 18))
@@ -1955,8 +2109,8 @@ class _Render:
         top_limit, height = margins["top"], self.page["height"]
         canvas = canvas_factory
         bands = self.bands
-        page_footer = bands["pageFooter"]["height"]
-        column_footer = bands["columnFooter"]["height"]
+        page_footer = section_height(bands["pageFooter"])
+        column_footer = section_height(bands["columnFooter"])
         bottom_limit = height - margins["bottom"] - page_footer - column_footer
         last_footer = bands.get("lastPageFooter")
         has_last_footer = band_present(last_footer)
@@ -1975,8 +2129,7 @@ class _Render:
         if not self.rows and no_data in ("Auto", "NoDataSection") and band_present(bands.get("noData")):
             self.page_number += 1
             self.pages_drawn += 1
-            self.draw_band(canvas, bands["noData"], top_limit, None)
-            self.content_end = top_limit + bands["noData"]["height"]
+            self.content_end = top_limit + self.draw_section(canvas, bands["noData"], top_limit, None)
             self.early_exit = True
             canvas.showPage()
             return
@@ -1986,10 +2139,11 @@ class _Render:
             self.pages_drawn += 1
             state["y"] = top_limit
             if band_present(bands.get("background")):
-                self.draw_band(canvas, bands["background"], top_limit, None)  # behind everything else on the page
+                self.draw_section(canvas, bands["background"], top_limit, None)  # behind everything else on the page
             if first and band_present(self.bands["title"]):
                 before = self.pages_drawn
-                place(self.bands["title"], None)  # a Table in the Title can run over several pages
+                for part in self.printed(self.bands["title"], None):
+                    place(part, None)  # a Table in the Title can run over several pages
                 if self.page.get("titleNewPage"):
                     canvas.showPage()  # Jasper "Title on a new page": the title page has no page header or footer
                     start_page(False)
@@ -1997,8 +2151,7 @@ class _Render:
                 if self.pages_drawn != before:
                     return  # the later pages already printed their page and column headers
             for key in ("pageHeader", "columnHeader"):
-                self.draw_band(canvas, self.bands[key], state["y"], None)
-                state["y"] += self.band_height(self.bands[key], None)
+                state["y"] += self.draw_section(canvas, self.bands[key], state["y"], None)
             # a Table / Crosstab that continues on this page prints its header again
             for header, header_row, header_engine in state.get("repeat") or []:
                 self.draw_band(canvas, header, state["y"], header_row, engine=header_engine)
@@ -2007,11 +2160,11 @@ class _Render:
         def end_page(last: bool = False) -> None:
             # On the last page the Last Page Footer (when there is one) replaces the Page Footer.
             footer = last_footer if last and has_last_footer else bands["pageFooter"]
-            footer_top = height - margins["bottom"] - footer["height"]
+            footer_top = height - margins["bottom"] - section_height(footer)
             # "Float column footer": right under the last Detail row instead of at the bottom of the page
             column_top = state["y"] if self.page.get("floatColumnFooter") else footer_top - column_footer
-            self.draw_band(canvas, bands["columnFooter"], column_top, None)
-            self.draw_band(canvas, footer, footer_top, None)
+            self.draw_section(canvas, bands["columnFooter"], column_top, None)
+            self.draw_section(canvas, footer, footer_top, None)
             canvas.showPage()
 
         def place(band: dict[str, Any], row: dict[str, Any] | None, level: int | None = None, engine: "_Render | None" = None,
@@ -2073,9 +2226,10 @@ class _Render:
         if self.page.get("summaryNewPage") and band_present(self.bands["summary"]) and state["y"] > top_limit:
             end_page()  # Jasper "Summary on a new page"
             start_page(False)
-        place(self.bands["summary"], None)
+        for part in self.printed(self.bands["summary"], None):
+            place(part, None)
         if has_last_footer:
-            last_limit = height - margins["bottom"] - last_footer["height"] - column_footer
+            last_limit = height - margins["bottom"] - section_height(last_footer) - column_footer
             if state["y"] > last_limit and state["y"] > top_limit:  # a taller last footer needs its own page
                 end_page()
                 start_page(False)
@@ -2099,7 +2253,7 @@ def render_design_pdf(design: dict[str, Any], title: str, columns: list[str], ro
         measure.run(pdf_canvas.Canvas(io.BytesIO(), pagesize=(probe["page"]["width"], 14400)))
         if measure.pages_drawn == 1:
             footer = design["bands"]["lastPageFooter"] if band_present(design["bands"].get("lastPageFooter")) else design["bands"]["pageFooter"]
-            extra = design["bands"]["columnFooter"]["height"] + footer["height"]
+            extra = section_height(design["bands"]["columnFooter"]) + section_height(footer)
             height = min(14400, max(100, measure.content_end + extra + design["page"]["margins"]["bottom"]))
             design = {**design, "page": {**design["page"], "height": height}}
         else:
@@ -2137,18 +2291,22 @@ def _tabular_columns(design: dict[str, Any]) -> list[dict[str, Any]]:
             tokens = tokens_in(element.get("expression", ""))
             label = tokens[0][1] if tokens else (element.get("text") or "")
         columns.append({"label": str(label or ""), "element": element, "header": match})
+    # the fields of Detail 2, 3… follow as columns of their own (one row per record)
+    for part in band_parts(design["bands"]["detail"])[1:]:
+        for element in sorted((e for e in part["elements"] if e["type"] == "textField"), key=lambda e: (e["y"], e["x"])):
+            tokens = tokens_in(element.get("expression", ""))
+            columns.append({"label": tokens[0][1] if tokens else "", "element": element, "header": None})
     return columns
 
 
 def has_tabular_layout(design: dict[str, Any]) -> bool:
     """Excel/CSV can be made from the design: text in Detail, or (page layout) any printed element in any band,
     e.g. a Table or Crosstab in the Summary."""
-    if any(e["type"] in ("textField", "staticText") for e in design["bands"]["detail"]["elements"]):
+    if any(e["type"] in ("textField", "staticText") for part in band_parts(design["bands"]["detail"]) for e in part["elements"]):
         return True
     if design["page"].get("sheetLayout") != "grid":
         return False
-    bands = [design["bands"][key] for key in BAND_KEYS] + [b for side in ("groupHeaders", "groupFooters") for b in design["bands"][side].values()]
-    return any(e["type"] not in ("break", "note") for band in bands for e in band["elements"])
+    return any(e["type"] not in ("break", "note") for band in design_bands(design) for e in band["elements"])
 
 
 def _numeric_format(pattern: str) -> str | None:
@@ -2187,9 +2345,7 @@ def _cell_value(engine: "_Render", element: dict[str, Any], row: dict[str, Any])
 
 def _report_end_values(design, title, columns, rows, parameters) -> dict[str, Any]:
     """Final variable values for elements with Evaluation Time Report/Auto (Excel/CSV are filled in one pass)."""
-    if not any(e.get("evaluationTime") in ("Report", "Auto") for key in BAND_KEYS for e in design["bands"][key]["elements"]) \
-            and not any(e.get("evaluationTime") in ("Report", "Auto") for side in ("groupHeaders", "groupFooters")
-                        for band in design["bands"][side].values() for e in band["elements"]):
+    if not any(e.get("evaluationTime") in ("Report", "Auto") for band in design_bands(design) for e in band["elements"]):
         return {}
     engine = _Render(design, title, columns, rows, parameters, 1)
     for row in engine.rows:
@@ -2229,8 +2385,8 @@ class _GridCollector(_Render):
         self.final = _report_end_values(design, title, columns, rows, parameters)
         self.items: list[dict[str, Any]] = []
         self.cursor = 0.0
-        self.skip = {id(design["bands"]["pageFooter"]), id(design["bands"]["columnFooter"]),
-                     id(design["bands"].get("lastPageFooter")), id(design["bands"].get("background"))}
+        self.skip = {id(part) for key in ("pageFooter", "columnFooter", "lastPageFooter", "background")
+                     for part in band_parts(design["bands"].get(key))}
 
     def draw_band(self, canvas, band, top, row, scope_rows=None, engine=None) -> None:
         if id(band) in self.skip:
@@ -2239,7 +2395,7 @@ class _GridCollector(_Render):
 
     def record(self, band, row, engine=None) -> None:
         eng = engine or self
-        if not band_present(band):
+        if not (band["height"] or band["elements"]):
             return
         height, boxes = eng.band_layout(band, row)
         for element, (y, h) in zip(band["elements"], boxes):
@@ -2257,8 +2413,11 @@ class _GridCollector(_Render):
                 else:
                     item["value"], item["format"] = _cell_value(eng, element, row or {})
                     item["text"] = markup_to_text(eng.evaluate(element, row or {}), element.get("markup", "none"))  # CSV: as printed
-            elif element["type"] == "image" and not element.get("src"):
-                continue
+            elif element["type"] == "image":
+                src = eng.image_src(element, row)
+                if not src:
+                    continue
+                item["element"] = {**element, "src": src}
             self.items.append(item)
         self.cursor += height
 
@@ -2268,9 +2427,9 @@ class _GridCollector(_Render):
         if not self.early_exit:
             self.skip.clear()
             self.total_pages = self.page_number  # one sheet: "Page X of Y" shows the last page of Y
-            self.record(bands["columnFooter"], None)
             footer = bands["lastPageFooter"] if band_present(bands.get("lastPageFooter")) else bands["pageFooter"]
-            self.record(footer, None)
+            for part in self.printed(bands["columnFooter"], None) + self.printed(footer, None):
+                self.record(part, None)
         return self.items
 
 
@@ -2353,9 +2512,9 @@ def render_mixed_xlsx(design, title, columns, rows, parameters) -> bytes:
     from openpyxl import Workbook
     from openpyxl.utils import get_column_letter
     bands = design["bands"]
-    every = [bands[key] for key in BAND_KEYS if bands.get(key)] + [b for side in ("groupHeaders", "groupFooters") for b in bands[side].values()]
+    heads = {id(part) for key in HEAD_BANDS for part in band_parts(bands[key])}
     collector = _GridCollector(design, title, columns, rows, parameters)
-    collector.skip = {id(band) for band in every if not any(band is bands[key] for key in HEAD_BANDS)}
+    collector.skip = {id(part) for part in design_bands(design) if id(part) not in heads}
     collector.run(_NullCanvas())                      # records only the heading bands (the rest is skipped cheaply)
     head = collector.items
     engine, layout, data = _tabular(design, title, columns, rows, parameters)
@@ -2382,7 +2541,7 @@ def render_mixed_xlsx(design, title, columns, rows, parameters) -> bytes:
     for r in range(1, len(ys)):
         sheet.row_dimensions[r].height = max(1.0, ys[r] - ys[r - 1])
     _paint_grid(sheet, head, ys)
-    header_ids = {id(e) for e in bands["columnHeader"]["elements"]}
+    header_ids = {id(e) for part in band_parts(bands["columnHeader"]) for e in part["elements"]}
     heading_rows = [item["r2"] + 1 for item in head if id(item["element"]) in header_ids]
     first_data = max(len(ys), 1)                      # the row below the headings (1-based)
     places = [index(xs, e["x"]) + 1 for e in detail]
@@ -2592,7 +2751,8 @@ def render_design_xlsx(design, title, columns, rows, parameters) -> bytes:
     row_number = 1
     # headings above the table: the Title band, then the Page Header band (each text on its own row)
     title_elements = [e for key in ("title", "pageHeader")
-                      for e in sorted((e for e in design["bands"][key]["elements"] if e["type"] in ("staticText", "textField")), key=lambda e: (e["y"], e["x"]))]
+                      for part in band_parts(design["bands"][key])
+                      for e in sorted((e for e in part["elements"] if e["type"] in ("staticText", "textField")), key=lambda e: (e["y"], e["x"]))]
     for element in title_elements:
         text = element.get("text", "") if element["type"] == "staticText" else engine.evaluate(element, None)
         text = markup_to_text(text, element.get("markup", "none"))

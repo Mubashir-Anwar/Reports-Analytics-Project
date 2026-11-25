@@ -1,6 +1,6 @@
 // Actions behind the right-click menus of the Outline and the canvas (like Jaspersoft Studio's).
 import {
-  BUILTIN_VARIABLES, NAME_PATTERN, PALETTE_GROUPS, addElementToBand, bandKeys, bandLabel, bandPresent, contentBottom, createBand, deleteBand,
+  BUILTIN_VARIABLES, NAME_PATTERN, PALETTE_GROUPS, addBandAfter, addElementToBand, bandKeys, bandNumber, moveBand, sectionBands, sectionOf, bandLabel, bandPresent, contentBottom, createBand, deleteBand,
   findElement, getBand, groupOfBand, mapElements, moveElementToBand, nextName, placeField, removeElement, removeGroup,
   renameCalculated, renameGroup, renameInElements, renameToken, reorderElement, setBand,
 } from './designModel.js';
@@ -85,6 +85,22 @@ export function makeActions({ get, dispatch, notify, ui = { current: {} } }) {
     return name;
   };
   const createBandAt = (key) => { design$((d) => createBand(d, key)); select({ kind: 'band', key }); notify(`${bandLabel(key)} band created`, 'ok'); };
+
+  /** Another band in the same section (Detail 2, Summary 2…), right after `key`. */
+  const addBandAt = (key) => {
+    const { design } = get();
+    if (!bandPresent(getBand(design, key))) { createBandAt(key); return; }
+    const added = addBandAfter(design, key);
+    if (added.key === key) { notify('This section has as many bands as it can have', 'warn'); return; }
+    design$(() => added.design);
+    select({ kind: 'band', key: added.key });
+    notify(`${bandLabel(added.key)} band added`, 'ok');
+  };
+  const moveBandBy = (key, step) => {
+    const moved = moveBand(get().design, key, step);
+    design$(() => moved.design);
+    select({ kind: 'band', key: moved.key });
+  };
 
   /* ---------- delete ---------- */
   const deleteBandAt = (key) => {
@@ -404,7 +420,14 @@ export function makeActions({ get, dispatch, notify, ui = { current: {} } }) {
   const createBandMenu = () => {
     const { design } = get();
     const absent = bandKeys(design).filter((key) => !bandPresent(getBand(design, key)));
-    return { label: 'Create Band', icon: '▭', disabled: !absent.length, items: absent.map((key) => ({ label: bandLabel(key), onClick: () => createBandAt(key) })) };
+    const last = {};                                   // the last band of each section: another one goes after it
+    bandKeys(design).forEach((key) => { if (bandPresent(getBand(design, key))) last[sectionOf(key)] = key; });
+    const items = absent.map((key) => ({ label: bandLabel(key), onClick: () => createBandAt(key) }));
+    if (Object.keys(last).length) {
+      items.push(...(items.length ? ['-'] : []), { header: 'One more of' },
+        ...Object.values(last).map((key) => ({ label: bandLabel(sectionOf(key)).replace(/ 1$/, ''), icon: '＋', onClick: () => addBandAt(key) })));
+    }
+    return { label: 'Create Band', icon: '▭', disabled: !items.length, items };
   };
 
   const reportMenu = () => [
@@ -445,6 +468,12 @@ export function makeActions({ get, dispatch, notify, ui = { current: {} } }) {
         { label: 'Select all elements', icon: '⬚', disabled: !band.elements.length, onClick: () => select(selectionOf(band.elements.map((el) => el.id))) },
         { label: 'Fit band to content', icon: '↕', disabled: !band.elements.length, onClick: () => design$((d) => setBand(d, key, { ...getBand(d, key), height: contentBottom(getBand(d, key)) })) },
         { label: 'Properties', icon: '⚙', onClick: () => select({ kind: 'band', key }) },
+        '-',
+        { label: `Add another band after ${bandLabel(key)}`, icon: '＋', onClick: () => addBandAt(key) },
+        ...(sectionBands(design, key).length > 1 ? [
+          { label: 'Move band up', icon: '↑', disabled: bandNumber(key) === 1, onClick: () => moveBandBy(key, -1) },
+          { label: 'Move band down', icon: '↓', disabled: bandNumber(key) === sectionBands(design, key).length, onClick: () => moveBandBy(key, 1) },
+        ] : []),
         '-',
         { label: 'Delete Band', icon: '✕', danger: true, shortcut: 'Del', onClick: () => deleteBandAt(key) },
       );
@@ -588,7 +617,7 @@ export function makeActions({ get, dispatch, notify, ui = { current: {} } }) {
   ];
 
   return {
-    makeField, convertText, joinSelected, rename, deleteSelection, createBandAt, createGroup, createParameter, createVariable, createCalc,
+    makeField, convertText, joinSelected, rename, deleteSelection, createBandAt, addBandAt, moveBandBy, createGroup, createParameter, createVariable, createCalc,
     align, distribute, matchSize, nudge, order, toggleLock, patchSelected, copy, cut, paste, duplicateSelected, selectAll, removeSelected,
     selectColumn, selectSimilar, setBorders, toggleHidden, toggleStretch, matchFormat,
     reportMenu, bandMenu, elementMenu, parametersMenu, parameterMenu, fieldsMenu, fieldMenu,

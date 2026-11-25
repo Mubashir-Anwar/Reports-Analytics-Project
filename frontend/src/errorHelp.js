@@ -394,7 +394,7 @@ const bandWords = (where) => {
   if (/^table\b/i.test(w)) return `the table (${w.replace(/^table\s*/i, '') || 'cell'} cells)`;
   if (/^groupHeader:/i.test(w)) return `the header of group ${w.split(':')[1]}`;
   if (/^groupFooter:/i.test(w)) return `the footer of group ${w.split(':')[1]}`;
-  return `the ${w} band`;
+  return `the ${w.replace(/([a-z])([A-Z])/g, '$1 $2').toLowerCase()} band`;
 };
 
 /**

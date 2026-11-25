@@ -860,29 +860,16 @@ body[data-dock-target="left"]::before, body[data-dock-target="right"]::after { b
 .to-table th, .to-table td { padding: 2px 5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 120px; }
 .to-bottom { display: flex; justify-content: space-between; margin-top: 8px; color: #475569; }
 
-/* Text Field / Static Text: alignment, rotation and font toggles; Format Pattern dialog */
+/* Text Field / Static Text: alignment, rotation and font toggles */
 .toggles { display: inline-flex; gap: 2px; flex-wrap: wrap; }
 .toggles .btn.sm { min-width: 28px; padding: 2px 6px; }
 .toggles .btn.on { background: var(--accent-soft, #e0e7ff); border-color: var(--accent, #4f46e5); color: var(--accent, #4f46e5); }
 .font-toggles { margin: 2px 0 8px; }
 .pattern-preview b { font-family: var(--mono, monospace); }
-.modal.pattern-modal { width: min(680px, 94vw); }
-.pattern-body { display: grid; grid-template-columns: 150px 1fr; gap: 14px; min-height: 260px; }
 .pattern-cats { list-style: none; margin: 0; padding: 4px; border: 1px solid var(--line); border-radius: var(--radius, 6px); background: var(--bg); }
 .pattern-cats li { padding: 5px 8px; border-radius: 4px; cursor: pointer; margin: 0; }
 .pattern-cats li:hover { background: var(--line); }
 .pattern-cats li.on { background: var(--accent, #4f46e5); color: #fff; }
-.pattern-options { display: grid; gap: 4px; align-content: start; }
-.pattern-options input:not([type=checkbox]) { width: 100%; }
-.pattern-options .check-row { justify-content: flex-start; margin: 4px 0; }
-.pattern-options .check-row input { width: auto; margin: 0; }
-.pattern-presets { display: grid; grid-template-columns: 1fr 1fr; gap: 4px; margin-bottom: 6px; max-height: 190px; overflow: auto; }
-.pattern-presets .btn { justify-content: space-between; display: flex; gap: 6px; text-align: left; }
-.pattern-presets small { color: var(--muted); }
-.pattern-presets .btn.primary small { color: inherit; opacity: .85; }
-.pattern-sample { display: flex; gap: 10px; align-items: baseline; padding: 8px 10px; border: 1px dashed var(--line); border-radius: 6px; background: var(--bg); }
-.pattern-sample span { font-size: 11px; color: var(--muted); }
-.pattern-sample b { font-family: var(--mono, monospace); }
 
 /* ---------- ribbon Help / Formulas / Review dialogs */
 .modal.help-modal.wide { width: min(860px, 94vw); }
@@ -913,11 +900,10 @@ kbd { font: 11.5px ui-monospace, monospace; background: var(--bg); border: 1px s
 .date-choice { display: flex; gap: 6px; }
 .date-choice select { flex: 1; min-width: 0; }
 .date-choice input[type=date] { flex: 1; min-width: 0; }
-/* phone: Pattern and Function List categories as one row of chips */
+/* phone: Function List categories as one row of chips */
 @media (max-width: 640px) {
-  .pattern-body { grid-template-columns: 1fr; min-height: 0; }
-  .pattern-body .pattern-cats, .help-split .pattern-cats { display: flex; gap: 4px; overflow-x: auto; scrollbar-width: none; padding: 4px !important; }
-  .pattern-body .pattern-cats li, .help-split .pattern-cats li { flex: none; white-space: nowrap; }
+  .help-split .pattern-cats { display: flex; gap: 4px; overflow-x: auto; scrollbar-width: none; padding: 4px !important; }
+  .help-split .pattern-cats li { flex: none; white-space: nowrap; }
 }
 
 /* Formulas → Custom Functions */
@@ -1395,3 +1381,92 @@ kbd { font: 11.5px ui-monospace, monospace; background: var(--bg); border: 1px s
 .setup.is-guided .seg.bare { border: 1px solid var(--line); border-top: 0; }
 .setup.is-guided details.coach-example { display: block; }
 .setup.is-guided details.coach-example > summary { width: max-content; }
+
+/* Files → Data adapters: nothing connected yet */
+.adapter-empty { display: grid; gap: 6px; justify-items: start; margin: 10px 8px; padding: 14px; border: 1.5px dashed var(--line-strong, var(--line)); border-radius: 14px; }
+.adapter-empty small { color: var(--muted); white-space: normal; line-height: 1.4; }
+
+/* ---------- Format pattern */
+.pat-back { position: fixed; inset: 0; z-index: 1150; display: grid; grid-template-columns: minmax(0, 1fr); place-items: center; padding: 16px; background: rgb(10 15 28 / .55); }
+.pat-dialog { grid-template-columns: minmax(0, 1fr); width: min(820px, 100%); height: min(720px, calc(100vh - 32px)); display: grid; grid-template-rows: auto minmax(0, 1fr) auto; overflow: hidden; border: 1px solid var(--line); border-radius: 18px; background: var(--panel); color: var(--text); box-shadow: var(--shadow-lg); }
+.pat-dialog h2, .pat-dialog h3, .pat-dialog p { margin: 0; }
+.pat-dialog button, .pat-dialog input { font: inherit; }
+.pat-dialog code { padding: 0; border: 0; background: none; color: inherit; font-family: var(--mono); }
+.pat-top { display: flex; justify-content: space-between; gap: 12px; align-items: flex-start; padding: 18px 20px 14px; border-bottom: 1px solid var(--line); }
+.pat-top h2 { font: 700 19px/1.2 var(--font-head); }
+.pat-top p, .pat-head p { margin-top: 3px; color: var(--muted); font-size: 13px; }
+.pat-body { display: grid; grid-template-columns: 176px minmax(0, 1fr); min-height: 0; }
+.pat-cats { display: grid; align-content: start; gap: 2px; padding: 12px; overflow: auto; border-right: 1px solid var(--line); background: var(--bg); }
+.pat-cats button { display: flex; align-items: center; gap: 10px; padding: 8px 10px; border: 0; border-radius: 10px; background: transparent; color: var(--text); text-align: left; cursor: pointer; }
+.pat-cats button:hover { background: var(--soft); }
+.pat-cats button.on { background: var(--accent-soft); color: var(--text); font-weight: 650; }
+.pat-cats i { flex: none; width: 30px; height: 26px; display: grid; place-items: center; border-radius: 7px; background: var(--soft); color: var(--muted); font: 650 11px/1 var(--mono); }
+.pat-cats button.on i { background: var(--accent); color: var(--on-accent); }
+.pat-cats em { margin-left: auto; padding: 0 7px; border-radius: 99px; background: var(--soft); color: var(--muted); font-size: 11px; font-style: normal; }
+.pat-main { display: grid; grid-template-columns: minmax(0, 1fr); align-content: start; gap: 14px; padding: 16px 20px; overflow: auto; min-width: 0; }
+.pat-head { display: flex; justify-content: space-between; gap: 12px; align-items: center; }
+.pat-head h3 { font: 700 15px/1.2 var(--font-head); }
+.pat-options { display: flex; flex-wrap: wrap; gap: 10px 18px; align-items: center; }
+.pat-field { display: inline-flex; align-items: center; gap: 8px; font-size: 13px; }
+.pat-field input { width: 76px; }
+.pat-stepper { display: inline-flex; align-items: center; border: 1px solid var(--line-strong); border-radius: 9px; overflow: hidden; }
+.pat-stepper button { width: 30px; height: 30px; padding: 0; border: 0; background: var(--soft); color: var(--text); cursor: pointer; }
+.pat-stepper button:hover { background: var(--accent-soft); }
+.pat-stepper b { min-width: 30px; text-align: center; font-variant-numeric: tabular-nums; }
+.pat-check { display: inline-flex; align-items: center; gap: 7px; font-size: 13px; cursor: pointer; }
+.pat-check input { width: auto; margin: 0; }
+.pat-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 8px; }
+.pat-cards button { display: grid; gap: 2px; min-width: 0; padding: 9px 12px; border: 1px solid var(--line); border-radius: 11px; background: var(--panel); color: var(--text); text-align: left; cursor: pointer; }
+.pat-cards button:hover { border-color: var(--accent); }
+.pat-cards button.on { border-color: var(--accent); background: var(--accent-soft); box-shadow: inset 0 0 0 1px var(--accent); }
+.pat-cards b { font-size: 14px; font-weight: 650; overflow-wrap: anywhere; }
+.pat-cards code { color: var(--muted); font-size: 11.5px; overflow-wrap: anywhere; }
+.pat-saved { display: grid; gap: 6px; margin: 0; padding: 0; list-style: none; }
+.pat-saved li { display: flex; align-items: center; gap: 2px; padding-right: 6px; border: 1px solid var(--line); border-radius: 11px; }
+.pat-saved li.on { border-color: var(--accent); background: var(--accent-soft); }
+.pat-use { flex: 1; display: flex; justify-content: space-between; gap: 12px; align-items: center; min-width: 0; padding: 9px 12px; border: 0; background: transparent; color: var(--text); text-align: left; cursor: pointer; }
+.pat-use span { display: grid; gap: 1px; min-width: 0; }
+.pat-use code { color: var(--muted); font-size: 11.5px; overflow-wrap: anywhere; }
+.pat-use small { font-size: 13px; text-align: right; overflow-wrap: anywhere; }
+.pat-icon { flex: none; width: 30px; height: 30px; padding: 0; border: 0; border-radius: 8px; background: transparent; color: var(--muted); cursor: pointer; }
+.pat-icon:hover { background: var(--soft); color: var(--text); }
+.pat-icon.danger:hover { background: var(--danger-soft); color: var(--danger); }
+.pat-empty { display: grid; gap: 2px; color: var(--muted); font-size: 13px; }
+div.pat-empty { padding: 18px; border: 1px dashed var(--line-strong); border-radius: 12px; text-align: center; }
+div.pat-empty b { color: var(--text); }
+.pat-write { display: grid; gap: 8px; padding-top: 14px; border-top: 1px solid var(--line); }
+.pat-label { font-size: 12.5px; font-weight: 650; }
+.pat-input, .pat-form { display: flex; gap: 8px; }
+.pat-input input, .pat-form input { flex: 1; min-width: 0; }
+.pat-input input { font: 600 15px/1.3 var(--mono); }
+.pat-input input[aria-invalid=true] { border-color: var(--danger); }
+.pat-input .btn, .pat-form .btn { flex: none; white-space: nowrap; }
+.pat-form { padding: 10px; border-radius: 11px; background: var(--accent-soft); }
+.pat-dialog .pat-problem { color: var(--danger); font-size: 12.5px; }
+.pat-note { padding: 8px 12px; border-radius: 9px; background: var(--ok-soft); color: var(--ok); font-size: 13px; }
+.pat-note.error { background: var(--danger-soft); color: var(--danger); }
+.pat-parts { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.pat-switch { display: inline-flex; flex: 0 0 100%; gap: 4px; }
+.pat-switch button { padding: 3px 11px; border: 1px solid var(--line); border-radius: 99px; background: transparent; color: var(--muted); font-size: 12px; cursor: pointer; }
+.pat-switch button.on { border-color: var(--accent); background: var(--accent-soft); color: var(--text); font-weight: 650; }
+.pat-chip { display: inline-flex; gap: 6px; align-items: center; padding: 4px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--soft); color: var(--muted); font-size: 12px; cursor: pointer; }
+.pat-chip:hover { border-color: var(--accent); }
+.pat-chip code { color: var(--text); font-weight: 650; }
+.pat-results { display: grid; gap: 6px; padding: 12px 14px; border-radius: 12px; background: var(--bg); border: 1px solid var(--line); }
+.pat-results-head { display: flex; justify-content: space-between; gap: 12px; align-items: center; }
+.pat-results-head input { width: 190px; font-size: 12.5px; }
+.pat-result { display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1.4fr); gap: 10px; align-items: baseline; }
+.pat-result span, .pat-result i { color: var(--muted); font-size: 12.5px; font-style: normal; }
+.pat-result b { font-size: 14px; white-space: pre-wrap; overflow-wrap: anywhere; }
+.pat-foot { display: flex; gap: 8px; align-items: center; padding: 12px 20px; border-top: 1px solid var(--line); }
+.pat-foot > span { flex: 1; }
+@media (max-width: 640px) {
+  .pat-back { padding: 0; place-items: end stretch; }
+  .pat-dialog { height: 94vh; border-radius: 18px 18px 0 0; }
+  .pat-body { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto minmax(0, 1fr); }
+  .pat-cats { display: flex; overflow-x: auto; padding: 8px 12px; border-right: 0; border-bottom: 1px solid var(--line); scrollbar-width: none; }
+  .pat-cats button { flex: none; }
+  .pat-cards { grid-template-columns: 1fr 1fr; }
+  .pat-input, .pat-form { flex-wrap: wrap; }
+  .pat-input input, .pat-form input { flex-basis: 100%; }
+}

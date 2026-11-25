@@ -1,6 +1,7 @@
 // Report schedules and background runs (JasperReports Server: Schedule → Recurrence, Parameters, Output, Notifications;
 // and the list of report outputs).
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { Notice, formatWhen } from '../portal/Shell.jsx';
 import { FORMAT_LABELS } from './RunPanel.jsx';
 import { serverApi } from './serverApi.js';
@@ -110,7 +111,7 @@ export function ScheduleDialog({ report, job, info, onClose, onSaved }) {
     } catch (failure) { setError({ kind: 'error', text: failure.message }); } finally { setBusy(false); }
   };
 
-  return (
+  return createPortal(
     <div className="dialog-back" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
       <div className="card dialog schedule-dialog" role="dialog" aria-label="Schedule">
         <div className="card-head">
@@ -230,8 +231,7 @@ export function ScheduleDialog({ report, job, info, onClose, onSaved }) {
           {!job && stepIndex < STEPS.length - 1 && <button className="btn quiet" disabled={busy} onClick={save} title="Save now; the other steps keep their defaults">Create now</button>}
         </div>
       </div>
-    </div>
-  );
+    </div>, document.body);
 }
 
 const dueSoon = (items) => items?.some((job) => (job.enabled && job.nextRunAt && new Date(job.nextRunAt) - Date.now() < 15 * 60000)

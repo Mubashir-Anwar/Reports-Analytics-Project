@@ -1,9 +1,9 @@
 import { useCallback, useEffect, useState } from 'react';
 import { api } from '../api.js';
-import { signOut } from '../shared/session.js';
 import AnalyticsTab from './AnalyticsTab.jsx';
 import ApiKeysTab from './ApiKeysTab.jsx';
 import { Notice, Topbar } from '../portal/Shell.jsx';
+import DataSourcesPanel from '../shared/DataSourcesPanel.jsx';
 import DeveloperTab from './DeveloperTab.jsx';
 import SystemDbTab from './SystemDbTab.jsx';
 import BrandingTab from './BrandingTab.jsx';
@@ -11,8 +11,10 @@ import LimitsTab from './LimitsTab.jsx';
 import LogsTab from './LogsTab.jsx';
 import OverviewTab from './OverviewTab.jsx';
 import UsersTab from './UsersTab.jsx';
+import { SetupAdminBanner } from '../shared/SetupAdmin.jsx';
+import { signOut, useMe } from '../shared/session.js';
 
-const TABS = [['overview', 'Overview'], ['users', 'Users & rights'], ['keys', 'API keys'], ['developer', 'API & Postman'], ['analytics', 'Analytics'], ['systemdb', 'System database'], ['limits', 'Limits'], ['branding', 'Name & look'], ['logs', 'Logs']];
+const TABS = [['overview', 'Overview'], ['users', 'Users & rights'], ['keys', 'API keys'], ['developer', 'API & Postman'], ['sources', 'Data sources'], ['analytics', 'Analytics'], ['systemdb', 'System database'], ['limits', 'Limits'], ['branding', 'Name & look'], ['logs', 'Logs']];
 /** Side navigation of the new look: icon (SVG path), colour tint and the group a tab sits in. */
 export const TAB_LOOK = {
   overview: { tint: 'b', group: '', path: 'M4 13h6V4H4zM14 20h6v-9h-6zM4 20h6v-4H4zM14 7h6V4h-6z' },
@@ -33,10 +35,9 @@ export function TabIcon({ id }) {
 /** /admin needs a signed-in account with the Admin right (the server sends anyone else to /login or a "no access" page). */
 
 export default function AdminApp() {
-  // data sources moved to the Server (every user connects their own): old links go there
-  if (window.location.hash === '#sources') window.location.replace('/server#sources');
   const [state, setState] = useState('checking'); // checking | denied | ready
   const [who, setWho] = useState(null);
+  const me = useMe();
   const [message, setMessage] = useState(null);
   const [tab, setTab] = useState(() => (TABS.some(([id]) => `#${id}` === window.location.hash) ? window.location.hash.slice(1) : 'overview'));
 
@@ -94,10 +95,12 @@ export default function AdminApp() {
                 </div>
                 <span className={`adm-head-ico tint-${TAB_LOOK[tab].tint}`} aria-hidden="true"><TabIcon id={tab} /></span>
               </div>
+              {me?.temporary && <SetupAdminBanner me={me} />}
               {message && <div style={{ marginBottom: 14 }}><Notice message={message} /></div>}
               {tab === 'overview' && <OverviewTab who={who} notify={notify} onOpen={(id) => { setTab(id); setMessage(null); }} />}
               {tab === 'users' && <UsersTab notify={notify} />}
               {tab === 'keys' && <ApiKeysTab notify={notify} />}
+              {tab === 'sources' && <DataSourcesPanel notify={notify} />}
               {tab === 'analytics' && <AnalyticsTab notify={notify} />}
               {tab === 'developer' && <DeveloperTab notify={notify} />}
               {tab === 'systemdb' && <SystemDbTab notify={notify} />}

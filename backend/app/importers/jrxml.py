@@ -12,6 +12,7 @@ from typing import Any
 
 from defusedxml import ElementTree as SafeET
 
+from backend.app import fonts as own_fonts
 from backend.app.expressions import jexpr
 from backend.app.rendering import engine as designer_render
 
@@ -135,22 +136,25 @@ def translate_expression(expression: str, aliases: dict[str, tuple[str, str]], w
     return "", ""
 
 
+def _java_text(source: str, aliases: dict[str, tuple[str, str]]) -> str:
+    """The Java text with the importer's derived parameters replaced by the ones the user fills."""
+    def alias_token(match: re.Match) -> str:
+        kind, name = match.group(1), match.group(2)
+        if kind == "P" and name in aliases and aliases[name][0] in ("start", "end"):
+            return "$P{" + aliases[name][1] + "}"
+        return match.group(0)
+    return TOKEN.sub(alias_token, source.strip())
+
+
 def java_condition(expression: str, aliases: dict[str, tuple[str, str]], warnings: list[str], where: str) -> str:
     """A Java expression used as it is (Print When, Pattern Expression): kept when the safe expression
     language understands it, otherwise left out with a warning."""
     source = (expression or "").strip()
     if not source:
         return ""
-
-    def alias_token(match: re.Match) -> str:
-        kind, name = match.group(1), match.group(2)
-        if kind == "P" and name in aliases and aliases[name][0] in ("start", "end"):
-            return "$P{" + aliases[name][1] + "}"
-        return match.group(0)
-
-    text = TOKEN.sub(alias_token, source)
+    text = _java_text(source, aliases)
     if jexpr.check_syntax(text):
-        return text[:500]
+        return text[:4000]
     warnings.append(f"{where}: the Java expression could not be translated; write it again in the designer: {source[:400]}")
     return ""
 
@@ -208,6 +212,7 @@ def clean_resources(resources: Any) -> dict[str, str]:
 class _Ctx:
     def __init__(self, styles, aliases, warnings, resources=None):
         self.styles, self.aliases, self.warnings, self.counter = styles, aliases, warnings, 0
+        self.missing: set[str] = set()        # picture names already reported
         self.places: dict[str, str] = {}      # warning -> id of the design element it is about (the first one)
         # image files sent with the .jrxml: lower-case file name -> (original name, data URL)
         self.resources = {name.lower(): (name, data) for name, data in (resources or {}).items()}
@@ -230,6 +235,11 @@ def _font_name(value: str | None, ctx: "_Ctx", band_name: str) -> str:
     if not value:
         return "SansSerif"
     name = _FONT_ALIASES.get(value, value)
+    if name in own_fonts.families():
+        return name
+    if name not in _FONT_NAMES and own_fonts.NAME_RE.fullmatch(name):
+        ctx.warnings.append(f"Font '{name}' is not on this server: add its .ttf under Fonts and it is used; until then SansSerif prints")
+        return name
     if name not in _FONT_NAMES:
         ctx.warnings.append(f"{band_name}: font '{value}' is not available; SansSerif is used instead")
         return "SansSerif"
@@ -240,7 +250,7 @@ _VALIGN = {"Top": "top", "Middle": "middle", "Bottom": "bottom"}
 def _convert_element(node: ET.Element, ctx: _Ctx, band_name: str, dx: float = 0, dy: float = 0, cell_style: str = "") -> dict[str, Any] | None:
     kind = _local(node.tag)
     if kind not in ("staticText", "textField", "line", "rectangle", "image"):
-        if kind not in ("reportElement", "box", "textElement", "graphicElement", "property"):
+        if kind not in ("printWhenExpression", "reportElement", "box", "textElement", "graphicElement", "property"):
             ctx.warnings.append(f"{band_name}: the '{kind}' element is not supported yet (skipped)")
         return None
     rep = _kid(node, "reportElement")
@@ -285,8 +295,16 @@ def _convert_element(node: ET.Element, ctx: _Ctx, band_name: str, dx: float = 0,
         reference = _text(_kid(node, "imageExpression")).strip()
         name = _image_file_name(reference)
         found = ctx.resources.get(name.lower()) if name else None
-        element.update({"src": found[1] if found else "", "srcName": found[0] if found else name, "reference": reference[:300]})
-        if not found:
+        java = _java_text(reference, ctx.aliases)
+        if not found and TOKEN.search(reference) and not re.search(r"\.(png|jpe?g|gif|svg|bmp)$", name, re.I) and jexpr.check_syntax(java):
+            # a picture kept in the data (base64): read for each record
+            element.update({"src": "", "srcName": "", "reference": "", "expression": "=" + java})
+            found = ("", "")
+            name = ""
+        if "expression" not in element:
+            element.update({"src": found[1] if found else "", "srcName": found[0] if found else name, "reference": reference[:300]})
+        if not found and (not name or name.lower() not in ctx.missing):      # the same picture in many places: said once
+            ctx.missing.add(name.lower())
             what = f"'{name}'" if name else f"from the expression {reference[:80]!r}" if reference else "(no image expression)"
             ctx.warnings.append(f"{band_name}: image {what} was not included; choose it together with the .jrxml, or upload it in the designer")
     if kind in ("staticText", "textField"):
@@ -343,10 +361,24 @@ def _convert_element(node: ET.Element, ctx: _Ctx, band_name: str, dx: float = 0,
     return element
 
 
+def _convert_section(holder: ET.Element | None, name: str, ctx: _Ctx, table_out: dict[str, Any]) -> dict[str, Any]:
+    """Every <band> of a section: Jasper allows several in Detail and in group headers / footers, each with its own
+    Print When Expression. The first is the band, the others go to band["more"]."""
+    nodes = _kids(holder, "band") if holder is not None else []
+    result = _convert_band(nodes[0] if nodes else None, name, ctx, table_out)
+    more = [_convert_band(node, f"{name} {number}", ctx, table_out) for number, node in enumerate(nodes[1:], start=2)]
+    if more:
+        result["more"] = more
+    return result
+
+
 def _convert_band(band: ET.Element | None, name: str, ctx: _Ctx, table_out: dict[str, Any]) -> dict[str, Any]:
     result = {"height": _num(band.get("height")) if band is not None else 0, "elements": []}
     if band is None:
         return result
+    print_when = _text(_kid(band, "printWhenExpression"))
+    if print_when:
+        result["printWhenExpression"] = java_condition(print_when, ctx.aliases, ctx.warnings, f"{name} band print when")
     # A table inside a band (e.g. a letter laid out entirely in the Title band) is split in three:
     # the part above the table stays in this band, the table becomes the columnHeader/detail rows,
     # and the part below it is returned in table_out["below"] (it becomes the Summary band, printed once after the rows).
@@ -646,8 +678,7 @@ def import_jrxml(xml_text: str, resources: dict[str, str] | None = None) -> dict
     for key in ("title", "pageHeader", "columnHeader", "detail", "columnFooter", "pageFooter", "lastPageFooter",
                 "summary", "noData", "background"):
         holder = _kid(root, key)
-        band = _kid(holder, "band") if holder is not None else None
-        bands[key] = _convert_band(band, key, ctx, table_info)
+        bands[key] = _convert_section(holder, key, ctx, table_info)
     if table_info:
         generated = _convert_table(table_info, ctx)
         for key in ("columnHeader", "detail"):
@@ -679,7 +710,7 @@ def import_jrxml(xml_text: str, resources: dict[str, str] | None = None) -> dict
         if not token or token.group(1) != "F":
             printed = any(len(band) for holder_name in ("groupHeader", "groupFooter")
                           for holder in [_kid(group, holder_name)] if holder is not None
-                          for band in [_kid(holder, "band")] if band is not None)
+                          for band in _kids(holder, "band"))
             if printed:                       # an empty group (often TAB_GROUP of a table) changes nothing: no warning
                 warnings.append(f"Group {gname}: groups by \"{raw_expr[:200] or '(nothing)'}\", which is not a single field; "
                                 f"the group was skipped. To group the report, add a group on a field in Design → Outline → Groups")
@@ -687,7 +718,7 @@ def import_jrxml(xml_text: str, resources: dict[str, str] | None = None) -> dict
         groups.append({"name": gname, "field": token.group(2)})
         for holder_name, out in (("groupHeader", group_headers), ("groupFooter", group_footers)):
             holder = _kid(group, holder_name)
-            out[gname] = _convert_band(_kid(holder, "band") if holder is not None else None, f"{holder_name}:{gname}", ctx, {})
+            out[gname] = _convert_section(holder, f"{holder_name}:{gname}", ctx, {})
     variables: list[dict[str, Any]] = []
     for var in _kids(root, "variable"):
         vname = var.get("name", "")
@@ -730,8 +761,9 @@ def import_jrxml(xml_text: str, resources: dict[str, str] | None = None) -> dict
     for band_key in list(bands) + ["groupHeaders", "groupFooters"]:
         pool = design["bands"][band_key]
         for band in (pool.values() if band_key.startswith("group") else [pool]):
-            for el in band["elements"]:
-                for kind, name in TOKEN.findall(el.get("expression", "")):
+            for part in designer_render.band_parts(band):
+                texts = [el.get(name) or "" for el in part["elements"] for name in ("expression", "printWhenExpression", "patternExpression")]
+                for kind, name in TOKEN.findall(" ".join([part.get("printWhenExpression") or "", *texts])):
                     if kind == "F":
                         used.add(name)
     if columns_from_design:
@@ -767,7 +799,7 @@ def import_jrxml(xml_text: str, resources: dict[str, str] | None = None) -> dict
             folder = "General"
     report = {
         "id": report_id, "title": report_id.replace("_", " "), "description": "", "folder": folder,
-        "connectionId": "default", "collection": collection,
+        "connectionId": "", "collection": collection,
         "queryLanguage": "mongosh",
         "querySource": 'db.getCollection("' + collection + '").aggregate(' + literal + ")",
         "parameters": user_params, "columns": columns,

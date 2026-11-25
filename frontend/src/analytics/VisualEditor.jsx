@@ -2,6 +2,7 @@
 // Fields can be dragged from the field list into a well, or chosen in the well's own list.
 import { useMemo, useState } from 'react';
 import { AGG_LABELS, BUCKET_LABELS, KIND_ICON } from './api.js';
+import MlSetup from './MlSetup.jsx';
 
 export const VISUAL_TYPES = [
   ['kpi', 'Card', 'M4 6h16v12H4zM8 13h8M8 10h3'],
@@ -13,6 +14,8 @@ export const VISUAL_TYPES = [
   ['donut', 'Donut', 'M12 3a9 9 0 1 0 9 9M12 8a4 4 0 1 0 4 4'],
   ['scatter', 'Scatter', 'M6 16h.01M10 10h.01M15 14h.01M18 6h.01M8 6h.01M4 20h16'],
   ['table', 'Table', 'M3 5h18v14H3zM3 10h18M3 15h18M9 5v14'],
+  ['map', 'Map', 'M9 4L3 6v14l6-2 6 2 6-2V4l-6 2zM9 4v14M15 6v14'],
+  ['ml', 'ML', 'M5 7a2 2 0 1 0 .01 0M5 17a2 2 0 1 0 .01 0M12 12a2 2 0 1 0 .01 0M19 8a2 2 0 1 0 .01 0M6.6 8.4l4 3M6.6 15.6l4-2.8M13.8 11.2l3.6-2'],
   ['slicer', 'Slicer', 'M4 6h16M7 12h10M10 18h4'],
 ];
 
@@ -28,6 +31,9 @@ const WELLS = {
     { key: 'values', at: 0, max: 1, label: 'X axis' }, { key: 'values', at: 1, max: 1, label: 'Y axis' }],
   table: [{ key: 'groupBy', at: 0, max: 3, label: 'Rows' }, { key: 'values', at: 0, max: 8, label: 'Values' }],
   tableDetail: [{ key: 'columns', at: 0, max: 40, label: 'Columns', hint: 'records as they are' }],
+  map: [{ key: 'groupBy', at: 0, max: 1, label: 'Place', hint: 'country (name or code) or a big city' }, { key: 'values', at: 0, max: 1, label: 'Value' }],
+  mapPoints: [{ key: 'groupBy', at: 0, max: 3, label: 'Latitude, longitude, name', hint: 'in this order; the name is optional' }, { key: 'values', at: 0, max: 1, label: 'Value', hint: 'size of the bubble' }],
+  ml: [],
   slicer: [{ key: 'groupBy', at: 0, max: 1, label: 'Field', hint: 'people pick values to filter the dashboard' }],
 };
 const OPERATORS = [['in', 'is one of'], ['not_in', 'is not one of'], ['eq', '='], ['ne', '≠'], ['gt', '>'], ['gte', '≥'], ['lt', '<'], ['lte', '≤'],
@@ -67,7 +73,7 @@ export default function VisualEditor({ tile, datasets, relationships, onChange, 
   };
   const ref = (datasetId, column) => (datasetId === tile.dataset ? { column } : { dataset: datasetId, column });
   const set = (change) => onChange({ ...tile, ...change });
-  const wells = tile.type === 'table' && tile.detail ? WELLS.tableDetail : WELLS[tile.type];
+  const wells = tile.type === 'table' && tile.detail ? WELLS.tableDetail : tile.type === 'map' && tile.options?.mapBy === 'points' ? WELLS.mapPoints : WELLS[tile.type];
 
   const itemsOf = (well) => {
     const list = tile[well.key] || [];
@@ -123,7 +129,7 @@ export default function VisualEditor({ tile, datasets, relationships, onChange, 
       <div className="viz-types" role="radiogroup" aria-label="Visual type">
         {VISUAL_TYPES.map(([id, name, path]) => (
           <button key={id} type="button" role="radio" aria-checked={tile.type === id} className={tile.type === id ? 'on' : ''} title={name}
-            onClick={() => set({ type: id, ...(id !== 'table' ? { detail: false } : {}) })}>
+            onClick={() => set({ type: id, ...(id !== 'table' ? { detail: false } : {}), ...((id === 'ml') !== (tile.type === 'ml') ? { groupBy: [], values: [], columns: [], sort: [], ml: undefined } : {}) })}>
             <TypeIcon path={path} /><span>{name}</span>
           </button>
         ))}
@@ -131,7 +137,7 @@ export default function VisualEditor({ tile, datasets, relationships, onChange, 
 
       <label className="field"><span>Title</span><input value={tile.title} maxLength={120} onChange={(e) => set({ title: e.target.value })} placeholder="Shown on the tile" /></label>
       <label className="field"><span>Dataset</span>
-        <select value={tile.dataset} onChange={(e) => set({ dataset: e.target.value, groupBy: [], values: [], filters: [], columns: [], sort: [] })}>
+        <select value={tile.dataset} onChange={(e) => set({ dataset: e.target.value, groupBy: [], values: [], filters: [], columns: [], sort: [], ml: undefined })}>
           <option value="">Choose…</option>
           {datasets.map((d) => <option key={d.id} value={d.id} disabled={!d.columns.length}>{d.name}{d.columns.length ? '' : ' (not imported yet)'}</option>)}
         </select>
@@ -141,6 +147,14 @@ export default function VisualEditor({ tile, datasets, relationships, onChange, 
         <>
           {tile.type === 'table' && (
             <label className="check"><input type="checkbox" checked={!tile.detail} onChange={(e) => set({ detail: !e.target.checked, columns: [], groupBy: [], values: [] })} /> Summarise (group and total)</label>
+          )}
+          {tile.type === 'ml' && <MlSetup tile={tile} columns={base.columns} onChange={onChange} />}
+          {tile.type === 'map' && (
+            <label className="field"><span>Places are</span>
+              <select value={tile.options?.mapBy || 'names'} onChange={(e) => set({ options: { ...tile.options, mapBy: e.target.value }, groupBy: [] })}>
+                <option value="names">Country or city names</option><option value="points">Latitude and longitude columns</option>
+              </select>
+            </label>
           )}
           {wells.map((well, w) => {
             const { start, items } = itemsOf(well);
@@ -222,7 +236,7 @@ export default function VisualEditor({ tile, datasets, relationships, onChange, 
                 </select>
               </label>
             )}
-            {tile.type !== 'kpi' && tile.type !== 'slicer' && (
+            {!['kpi', 'slicer', 'ml'].includes(tile.type) && (
               <label className="field"><span>Show at most (rows / categories)</span>
                 <input type="number" min="1" max="5000" value={tile.limit || ''} placeholder="All (up to the server limit)"
                   onChange={(e) => set({ limit: e.target.value ? Number(e.target.value) : null })} />
@@ -236,7 +250,7 @@ export default function VisualEditor({ tile, datasets, relationships, onChange, 
             )}
           </details>
 
-          <div className="field-list">
+          {tile.type !== 'ml' && <div className="field-list">
             <div className="well-head"><b>Fields</b><small className="muted">drag into a well above</small></div>
             <input type="search" placeholder="Find a field…" value={search} onChange={(e) => setSearch(e.target.value)} aria-label="Find a field" />
             {usable.map((d) => (
@@ -249,7 +263,7 @@ export default function VisualEditor({ tile, datasets, relationships, onChange, 
                 ))}
               </div>
             ))}
-          </div>
+          </div>}
         </>
       )}
     </aside>

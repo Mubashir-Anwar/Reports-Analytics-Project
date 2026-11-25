@@ -8,9 +8,10 @@ logo in **Admin → Branding**.
 
 | Path | What it is | Right needed |
 |---|---|---|
+| `/home` | What you can do here, by your rights, next step, recent work (first page after signing in) | any |
 | `/designer` | Report designer: bands, elements, queries, preview, publish | Designer |
-| `/server` | Report Server: folders, reports and dashboards, runs, schedules, versions, folder permissions | Report Server |
-| `/analytics` | Datasets, model (relationships), dashboards; import `.mdash` and Power BI `.pbit` / `.pbix` | Analytics (+ Designer or Admin for datasets) |
+| `/server` | Report Server: folders, reports and dashboards, ZIP export, runs, schedules, versions, folder permissions | Report Server |
+| `/analytics` | Datasets, model (relationships), dashboards, maps, machine learning (ML lab), embedding guide; import `.mdash` and Power BI `.pbit` / `.pbix` | Analytics (+ Designer or Admin for datasets) |
 | `/admin` | Users and rights, API keys, data sources, analytics, branding, system database, logs and audit | Admin |
 | `/ui` | Report runner | Run reports |
 | `/api/v1/…`, `/generate/…` | Public API and report URLs for websites (API keys) | — |
@@ -20,7 +21,7 @@ logo in **Admin → Branding**.
 ```bash
 python -m venv .venv && . .venv/bin/activate        # Windows: .venv\Scripts\Activate.ps1
 pip install -r requirements-dev.txt
-cp .env.example .env                                  # every setting is documented in this file
+python -m backend.app.setup                           # checks the environment, makes .env and the first sign-in
 python -m uvicorn backend.app.main:app --reload --reload-dir backend --host 127.0.0.1 --port 8000
 ```
 
@@ -28,8 +29,13 @@ python -m uvicorn backend.app.main:app --reload --reload-dir backend --host 127.
 `.py` file under the folder, including other copies of the project (git worktrees in `.claude/worktrees`), and a
 restart cuts off a Preview or Run that is in progress ("The reporting server is not answering").
 
-Open `http://127.0.0.1:8000/login`. The first time, sign in as `admin` with the admin token (from
-`REPORTING_ADMIN_TOKEN` or `data/private_secrets.json`), then create a super admin in **Admin → Users & rights**.
+Or all of it at once: `.\setup.ps1` (Windows) or `sh setup.sh` (Linux, macOS) makes the virtual environment, installs the
+packages and runs the setup command.
+
+Open `http://127.0.0.1:8000/login` and sign in with the setup admin the command printed. It works for **24 hours**: press
+**Create new admin** on the home page and use your own account from then on. The setup admin is removed the moment your
+own admin exists, whether the 24 hours are over or not. Time over too early? Run the setup command
+again. Every setting: [docs/SETTINGS.md](docs/SETTINGS.md).
 
 Frontend (React 18 + Vite; the build goes to `ui/app/`, which the service serves):
 
@@ -56,7 +62,7 @@ ui/                 Served as is: app/ (built React pages), the /ui runner (inde
 tests/              pytest suite (service_names.py: every module's names in one namespace, for older tests)
 postman/            Collection and environment for every endpoint (built by tools/postman/build_collection.py)
 tools/              Postman builder and demo data, embed example, theme generator
-deploy/             docker-compose (PostgreSQL + 2 instances + nginx HTTPS), nginx.conf, .env.example
+deploy/             docker-compose (PostgreSQL + 2 instances + nginx HTTPS), nginx.conf
 Dockerfile          Multi-stage image (frontend build, then the Python service; no data inside)
 data/               Runtime data (local only: never in git or the image)
 ```

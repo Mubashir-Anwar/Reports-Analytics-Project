@@ -24,7 +24,7 @@ export default function BrandingTab({ who, notify }) {
   const [busy, setBusy] = useState(false);
   const [drag, setDrag] = useState(false);
   const picker = useRef(null);
-  const mayChange = Boolean(who?.superAdmin || who?.bootstrap);
+  const mayChange = Boolean(who?.superAdmin);
   useEffect(() => {
     request('/api/branding').then((value) => { setForm(value); setSaved(value); }).catch((error) => notify(error.message, 'error'));
   }, [notify]);

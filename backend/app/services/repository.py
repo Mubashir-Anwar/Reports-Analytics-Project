@@ -80,8 +80,14 @@ def save_report_payload(ctx: SimpleNamespace, payload: Any, expected_id: str | N
         raise HTTPException(status_code=409, detail=f"/{definition.folder} already has a report with the ID {definition.report_id}")
     existing = previous if previous is not None else (at_target if expected_id else None)
     profile_ids = {item["id"] for item in load_connection_profiles()}
-    if definition.connection_id not in profile_ids:
-        raise HTTPException(status_code=422, detail=f"Unknown connectionId: {definition.connection_id}")
+    # a page of fixed text reads nothing: an adapter that is not there does not matter to it
+    unused = definition.connection_id if definition.query_language == "none" and definition.connection_id not in profile_ids else ""
+    if definition.connection_id not in profile_ids and not unused:
+        raise HTTPException(status_code=422, detail=f"Unknown connectionId: {definition.connection_id}. This data adapter is not on this server; "
+                                                    "choose another one (Setup, Data adapter)")
+    for connection_id in ctx.report_connection_ids(definition.editor_config or payload):
+        if connection_id != unused:
+            ctx.require_area(connection_id, "server")
     store = get_store()
     key = report_definition_key(definition.report_id, definition.editor_config["folder"])
     config = definition.editor_config or payload
@@ -263,6 +269,8 @@ def design_summary(ctx: SimpleNamespace, design: Any) -> dict[str, Any]:
             found += [(f"{key[:-1]} {name}", item) for name, item in band.items() if isinstance(item, dict)]
         elif isinstance(band, dict):
             found.append((key, band))
+    found = [(name if index == 0 else f"{name} {index + 1}", part) for name, band in found
+             for index, part in enumerate([band, *[p for p in band.get("more") or [] if isinstance(p, dict)]])]
     present = [(name, band) for name, band in found if band.get("height") or band.get("elements")]
     elements = [el for _, band in present for el in band.get("elements") or [] if isinstance(el, dict)]
     components: dict[str, int] = {}
@@ -280,7 +288,7 @@ def design_summary(ctx: SimpleNamespace, design: Any) -> dict[str, Any]:
                 "name": str(el.get("srcName") or "") or (f"image.{kind.group(1)}" if kind else ""),
                 "url": str(el.get("srcUrl") or ""), "reference": str(el.get("reference") or ""),
                 "format": kind.group(1) if kind else "", "bytes": (len(src) - kind.end()) * 3 // 4 if kind else 0,
-                "missing": not src,               # an image without its picture prints as an empty box
+                "missing": not src and not el.get("expression"),               # an image without its picture prints as an empty box
                 "size": f"{round(float(el.get('width') or 0))}×{round(float(el.get('height') or 0))}",
             })
     return {"bands": [name for name, _ in present], "elements": len(elements), "components": components,

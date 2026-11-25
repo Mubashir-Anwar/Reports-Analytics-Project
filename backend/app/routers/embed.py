@@ -6,6 +6,10 @@
     POST /api/embed/preview          (X-Embed-Token) {"parameters"} -> first 200 rows
     POST /api/embed/run              (X-Embed-Token) {"format", "parameters"} -> the file
 
+A dashboard of Analytics: {"dashboard": "dash_…", "filters": [fixed filters]} instead of "report" -> a token for
+    GET  /api/embed/dashboard        (X-Embed-Token) its layout
+    POST /api/embed/dashboard/query  (X-Embed-Token) {"tiles": [ids], "filters": [picked values]} -> its numbers
+
 The viewer may only be framed by the key's embedOrigins (Content-Security-Policy frame-ancestors). Every use
 checks the key again (enabled, not expired, folder, requests per minute) and is recorded in the run log
 (channel "embed").
@@ -22,11 +26,13 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import HTMLResponse, Response
 from pymongo.errors import PyMongoError
 
+from backend.app.analytics import bundle, store as analytics_store
 from backend.app.connectors.errors import ConnectorQueryError, MongoReadAccessError
 from backend.app.connectors.mongo_fallback import _row_value
 from backend.app.constants import OUTPUT_FORMATS
 from backend.app.definitions import _safe_value, clean_folder, resolve_default, run_form_rules, validate_parameters
 from backend.app.security import api_keys, embed_tokens
+from backend.app.security.access import enabled_areas
 from backend.app.security.headers import CSP
 
 PREVIEW_ROWS = 200
@@ -69,6 +75,12 @@ def register(app: FastAPI, ctx: SimpleNamespace) -> None:
         if not key.get("embedOrigins"):
             raise HTTPException(status_code=422, detail="List the websites that may show reports for this key first (Admin → API keys → Embedding)")
         payload = await json_body(request)
+        try:
+            lifetime = int(payload.get("expiresInSeconds", embed_tokens.DEFAULT_LIFETIME))
+        except (TypeError, ValueError):
+            raise HTTPException(status_code=422, detail="expiresInSeconds must be a number") from None
+        if payload.get("dashboard"):
+            return dashboard_token(request, key, payload, lifetime)
         folder = clean_folder(payload.get("folder"))
         definition = reports_by_id.find(str(payload.get("report", "")), folder, lambda item: report_in_scope(request, item))
         if definition is None or definition.editor_config is None:
@@ -80,10 +92,6 @@ def register(app: FastAPI, ctx: SimpleNamespace) -> None:
         unknown = sorted(set(fixed) - prompted)
         if unknown:
             raise HTTPException(status_code=422, detail=f"Not a parameter of this report: {', '.join(unknown)}")
-        try:
-            lifetime = int(payload.get("expiresInSeconds", embed_tokens.DEFAULT_LIFETIME))
-        except (TypeError, ValueError):
-            raise HTTPException(status_code=422, detail="expiresInSeconds must be a number") from None
         token, expires = embed_tokens.issue(key["id"], definition.ref, {str(k): v for k, v in fixed.items()}, lifetime,
                                             str(payload.get("onBehalfOf") or ""))
         ctx.audit_event(request, "embed.token_issued", definition.report_id, {"fixed": sorted(fixed), "expires": expires},
@@ -91,7 +99,84 @@ def register(app: FastAPI, ctx: SimpleNamespace) -> None:
         return {"token": token, "expiresAt": datetime.fromtimestamp(expires, timezone.utc).isoformat(timespec="seconds"),
                 "viewUrl": f"/embed/view?token={token}", "sdk": "/assets/embed/sdk.js"}
 
+    def dashboard_for(key: dict[str, Any], dashboard_id: str) -> dict[str, Any] | None:
+        item = analytics_store.dashboard(dashboard_id) if "analytics" in enabled_areas() else None
+        return item if item is not None and api_keys.folder_allowed(key, item.get("folder") or "Analytics") else None
+
+    def dashboard_token(request: Request, key: dict[str, Any], payload: dict[str, Any], lifetime: int) -> dict[str, Any]:
+        item = dashboard_for(key, str(payload["dashboard"]))
+        if item is None:
+            raise HTTPException(status_code=404, detail="Dashboard not found (or not in this key's folders)")
+        fixed = payload.get("filters") or []
+        if not isinstance(fixed, list) or len(fixed) > 10:
+            raise HTTPException(status_code=422, detail="filters must be a list of at most 10 filters")
+        try:
+            fixed = [analytics_store.clean_filter(entry, f"filters[{i}]") for i, entry in enumerate(fixed)]
+        except (ValueError, TypeError) as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from None
+        used = set(bundle.used_datasets(item))
+        for entry in fixed:
+            if not entry.get("dataset") and len({tile.get("dataset") for tile in item.get("tiles") or []}) > 1:
+                raise HTTPException(status_code=422, detail="This dashboard uses several datasets: name the dataset in every filter")
+            if entry.get("dataset") and entry["dataset"] not in used:
+                raise HTTPException(status_code=422, detail=f"The dashboard does not use the dataset {entry['dataset']}")
+        token, expires = embed_tokens.issue(key["id"], "", {}, lifetime, str(payload.get("onBehalfOf") or ""), dashboard=item["id"], filters=fixed)
+        if len(token) > 5000:
+            raise HTTPException(status_code=422, detail="The fixed filters are too long for a token")
+        ctx.audit_event(request, "embed.token_issued", item["id"], {"dashboard": item.get("name"), "filters": [entry["column"] for entry in fixed],
+                                                                   "expires": expires}, actor=key["name"], actor_type="api-key")
+        return {"token": token, "expiresAt": datetime.fromtimestamp(expires, timezone.utc).isoformat(timespec="seconds"),
+                "viewUrl": f"/embed/view?token={token}", "sdk": "/assets/embed/sdk.js"}
+
     # ---------------------------------------------------------------- checking a token on every use
+    def embedded_board(request: Request, token: str) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any]]:
+        """(key, dashboard, token body) or HTTPException."""
+        try:
+            body = embed_tokens.read(token)
+        except ValueError as exc:
+            raise HTTPException(status_code=401, detail=str(exc)) from None
+        key = api_keys.key_for_owner(str(body.get("k", "")))
+        if key is None:
+            raise HTTPException(status_code=401, detail="The website's API key is disabled or expired")
+        wait = api_keys.over_limit(key)
+        if wait:
+            raise HTTPException(status_code=429, detail=f"Too many requests; try again in {wait} s", headers={"Retry-After": str(wait)})
+        item = dashboard_for(key, str(body.get("d") or ""))
+        if item is None:
+            raise HTTPException(status_code=404, detail="This dashboard is no longer available")
+        return key, item, body
+
+    def is_dashboard(token: str) -> bool:
+        try:
+            return bool(embed_tokens.read(token).get("d"))
+        except ValueError:
+            return False
+
+    def dashboard_page(request: Request, token: str) -> HTMLResponse:
+        try:
+            key, _item, _body = embedded_board(request, token)
+        except HTTPException as exc:
+            return _page("Dashboard not available", "<main class='mrs-empty'><h1>Dashboard not available</h1>"
+                         f"<p>{html.escape(str(exc.detail))}</p></main>", [], exc.status_code)
+        origins = key.get("embedOrigins") or []
+        page = ctx.react_page("embed.html")
+        page.headers.update({"Content-Security-Policy": _frame_policy(origins), "Cache-Control": "no-store", "Referrer-Policy": "no-referrer"})
+        return page
+
+    @app.get("/api/embed/dashboard", include_in_schema=False)
+    def embed_dashboard(request: Request) -> dict[str, Any]:
+        _key, item, body = embedded_board(request, header_token(request))
+        return {"dashboard": ctx.embedded_dashboard(item),
+                "expiresAt": datetime.fromtimestamp(int(body["x"]), timezone.utc).isoformat(timespec="seconds")}
+
+    @app.post("/api/embed/dashboard/query", include_in_schema=False)
+    async def embed_dashboard_query(request: Request) -> dict[str, Any]:
+        key, item, body = embedded_board(request, header_token(request))
+        payload = await json_body(request)
+        results = ctx.embedded_query(item, payload.get("tiles"), payload.get("filters"), body.get("f") or [],
+                                          f"api-key:{key['id']}")
+        return {"results": results}
+
     def embedded(request: Request, token: str) -> tuple[dict[str, Any], Any, dict[str, Any]]:
         """(key, report, token body) or HTTPException."""
         try:
@@ -136,6 +221,8 @@ def register(app: FastAPI, ctx: SimpleNamespace) -> None:
     # ---------------------------------------------------------------- the viewer page
     @app.get("/embed/view", include_in_schema=False)
     def embed_view(request: Request, token: str = "") -> HTMLResponse:
+        if is_dashboard(token):
+            return dashboard_page(request, token)
         try:
             key, definition, _body = embedded(request, token)
         except HTTPException as exc:

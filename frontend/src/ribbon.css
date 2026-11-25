@@ -238,3 +238,42 @@
 .cmdk-none { color: var(--muted); cursor: default !important; }
 .cmdk-foot { padding: 9px 16px; border-top: 1px solid var(--line); font-size: 12px; color: var(--muted); }
 .cmdk-list li.off b { opacity: .55; }
+
+/* The report's name is the File menu: it looks like a button before it is pressed */
+.rb-doc { height: auto; min-height: 42px; max-width: 34vw; padding: 4px 6px 4px 8px; gap: 10px; border: 1px solid var(--line-strong, var(--line)); background: var(--soft); text-align: left; }
+.rb-doc:hover, .rb-doc[aria-expanded="true"] { border-color: var(--accent); background: var(--soft); box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 22%, transparent); }
+.rb-doc-icon { flex: none; display: grid; place-items: center; color: var(--accent); }
+.rb-doc-text { display: grid; min-width: 0; line-height: 1.2; }
+.rb-doc-name { display: flex; align-items: center; gap: 5px; min-width: 0; }
+.rb-doc-text small { display: block; font-size: 11.5px; color: var(--text); opacity: .72; overflow: hidden; text-overflow: ellipsis; }
+.rb-doc-file { flex: none; display: inline-flex; align-items: center; gap: 5px; min-height: 30px; padding: 0 10px; border-radius: calc(var(--radius) - 2px); background: var(--accent); color: var(--on-accent, #fff); font-weight: 700; font-size: 13px; }
+.rb-doc-file .rb-caret { color: inherit; font-size: 11px; }
+@media (max-width: 720px) { .rb-doc-text small, .rb-doc-icon { display: none; } }
+
+/* another band in the same section */
+.band-tools { position: absolute; right: 4px; bottom: 3px; z-index: 6; }
+.band-tools button { padding: 3px 9px; border: 1px solid var(--accent); border-radius: 99px; background: var(--panel); color: var(--accent); font: inherit; font-size: 11.5px; font-weight: 600; cursor: pointer; }
+.band-tools button:hover { background: var(--accent); color: var(--on-accent, #fff); }
+.band-add { margin-left: 6px; width: 20px; height: 20px; padding: 0; border: 1px solid var(--line); border-radius: 6px; background: transparent; color: var(--accent); cursor: pointer; line-height: 1; opacity: .55; }
+.outline-node:hover .band-add, .outline-node.active .band-add, .band-add:focus-visible { opacity: 1; }
+
+/* Fonts */
+.fonts-back { position: fixed; inset: 0; z-index: 1150; display: grid; place-items: center; padding: 16px; background: rgb(10 15 28 / .55); }
+.fonts-dialog { width: min(560px, 100%); max-height: calc(100vh - 32px); overflow: auto; display: grid; gap: 14px; padding: 20px; border-radius: 16px; background: var(--panel); color: var(--text); box-shadow: 0 24px 70px rgb(0 0 0 / .35); }
+.fonts-dialog header { display: flex; justify-content: space-between; gap: 12px; align-items: flex-start; }
+.fonts-dialog h2 { margin: 0; font-size: 19px; }
+.fonts-dialog header p, .fonts-hint, .fonts-empty { margin: 4px 0 0; color: var(--muted); font-size: 13px; }
+.fonts-drop { display: grid; gap: 4px; justify-items: center; padding: 20px; border: 2px dashed var(--accent); border-radius: 12px; background: var(--soft); cursor: pointer; text-align: center; }
+.fonts-drop small { color: var(--muted); }
+.fonts-drop.busy { opacity: .7; cursor: progress; }
+.fonts-note { margin: 0; padding: 9px 12px; border-radius: 10px; background: #e8f6ee; color: #14532d; }
+.fonts-note.error { background: #fdeaea; color: #8f1d1d; }
+.fonts-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 10px; }
+.fonts-list li { padding: 12px 14px; border: 1px solid var(--line); border-radius: 12px; }
+.fonts-head { display: flex; gap: 8px; align-items: center; }
+.fonts-chip { padding: 1px 8px; border-radius: 99px; background: var(--soft); font-size: 12px; }
+.fonts-sample { margin: 6px 0; font-size: 20px; }
+.fonts-files { display: flex; flex-wrap: wrap; gap: 6px; }
+.fonts-files > span { display: inline-flex; gap: 6px; align-items: center; padding: 2px 4px 2px 9px; border: 1px solid var(--line); border-radius: 99px; font-size: 12px; }
+.fonts-files button { width: 20px; height: 20px; padding: 0; border: 0; border-radius: 50%; background: transparent; color: inherit; cursor: pointer; }
+.fonts-files button:hover { background: #fdeaea; color: #8f1d1d; }

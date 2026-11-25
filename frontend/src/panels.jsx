@@ -21,22 +21,22 @@ function readCollapsed() {
 }
 
 /* ---------------------------------------------------------------- Server (repository) */
+const NO_ADAPTERS = [];
 /** Like Jaspersoft Studio's Repository Explorer: Data Adapters on top, then folders inside folders,
     each holding its data adapters and reports (▤). */
 export function ServerPanel({ report, onOpenFromServer, notify, refreshKey, onChanged, openMenu }) {
   const [folders, setFolders] = useState([]);
   const [reports, setReports] = useState([]);
-  const [adapters, setAdapters] = useState([]);
+  const adapters = NO_ADAPTERS;       // the server's data sources are on /server; the Designer has its own
   const [collapsed, setCollapsed] = useState(readCollapsed);
   const [status, setStatus] = useState({});
   const [menu, setMenu] = useState('');
 
   const load = async () => {
     try {
-      const [f, r, c] = await Promise.all([api.folders(), api.reports(), api.connections()]);
+      const [f, r] = await Promise.all([api.folders(), api.reports()]);
       setFolders(f.folders);
       setReports(r.reports);
-      setAdapters(c.connections);
     } catch (error) {
       notify(`Could not load the repository: ${error.message}`, 'error');
     }
@@ -327,7 +327,7 @@ export function WorkspacePanel({ report, onOpen, onNew, notify, refreshKey, onCh
         <button className="btn sm" onClick={() => createFolder('')}>+ Folder</button>
         <button className="btn sm" onClick={load} title="Refresh">↻</button>
       </div>
-      <input type="search" className="panel-find" placeholder="⌕  Find a report" value={find} onChange={(e) => setFind(e.target.value)} />
+      <input type="search" className="panel-find" placeholder="Find a report" value={find} onChange={(e) => setFind(e.target.value)} />
       <ul className="tree repo">
         {childrenOf('').map((path) => folderNode(path, 0))}
         {reports.filter((r) => (!r.folder || r.folder === 'General') && (!find.trim() || `${r.title} ${r.id}`.toLowerCase().includes(find.trim().toLowerCase()))).map((item) => reportRow(item, 0))}
@@ -350,7 +350,7 @@ export function AdaptersPanel({ notify, refreshKey, onChanged, openMenu }) {
 
   const load = async () => {
     try {
-      const [c, f] = await Promise.all([api.connections(), api.folders()]);
+      const [c, f] = await Promise.all([api.connections('designer'), api.folders()]);
       setList(c.connections);
       setFolders(completeFolders(f.folders, [], c.connections));
     } catch (error) { notify(`Could not load data adapters: ${error.message}`, 'error'); }
@@ -369,12 +369,12 @@ export function AdaptersPanel({ notify, refreshKey, onChanged, openMenu }) {
   };
   const move = async (item, folder) => {
     try { await api.moveConnection(item.id, folder); await load(); onChanged?.(); notify(`${item.name} moved to ${folder || 'Data Adapters'}`, 'ok'); }
-    catch (error) { notify(error.status === 403 ? 'Moving a data adapter needs the admin token' : error.message, 'error'); }
+    catch (error) { notify(error.message, 'error'); }
   };
   const remove = async (item) => {
     if (!window.confirm(`Delete the data adapter “${item.name}”? Reports that use it can then only run on another adapter.`)) return;
     try { await api.deleteConnection(item.id); await load(); onChanged?.(); notify(`Data adapter ${item.name} deleted`, 'ok'); }
-    catch (error) { notify(error.status === 403 ? 'Deleting a data adapter needs the admin token' : error.message, 'error'); }
+    catch (error) { notify(error.message, 'error'); }
   };
 
   const adapterMenu = (item) => [
@@ -385,7 +385,7 @@ export function AdaptersPanel({ notify, refreshKey, onChanged, openMenu }) {
     { label: 'Move to folder', icon: '📁', items: [{ label: 'Data Adapters (top level)', disabled: !item.folder, onClick: () => move(item, '') }, ...folders.map((f) => ({ label: f.split('/').join(' / '), disabled: f === item.folder, onClick: () => move(item, f) }))] },
     '-',
     { label: 'Create Data Adapter…', icon: '＋', onClick: () => setWizard({ folder: item.folder || '' }) },
-    { label: 'Delete', icon: '✕', danger: true, disabled: item.id === 'default', hint: item.id === 'default' ? 'The default adapter comes from the service settings' : '', onClick: () => remove(item) },
+    { label: 'Delete', icon: '✕', danger: true, onClick: () => remove(item) },
   ];
   const rootMenu = (folder = '') => [{ label: 'Create Data Adapter…', icon: '＋', onClick: () => setWizard(folder ? { folder } : {}) }, { label: 'Refresh', icon: '↻', onClick: load }];
   const menu = (items) => (event) => { event.preventDefault(); event.stopPropagation(); openMenu(event, items()); };
@@ -433,7 +433,7 @@ export function AdaptersPanel({ notify, refreshKey, onChanged, openMenu }) {
                   {!collapsed[folder] && <ul className="tree nested flat">{list.filter((a) => a.folder === folder).sort((a, b) => a.name.localeCompare(b.name)).map((item) => row(item, 2))}</ul>}
                 </li>
               ))}
-              {!list.length && <li className="muted pad">No data adapters yet. Right-click → Create Data Adapter.</li>}
+              {!list.length && <li className="adapter-empty"><b>No data adapter yet</b><small>Connect MongoDB, PostgreSQL, MySQL, SQL Server or Oracle for your reports.</small><button type="button" className="btn primary sm" onClick={() => setWizard({})}>Connect a database</button></li>}
             </ul>
           )}
         </li>
@@ -446,10 +446,11 @@ export function AdaptersPanel({ notify, refreshKey, onChanged, openMenu }) {
           <div className="row"><button className="btn sm" onClick={() => test(chosen)}>Test</button><button className="btn sm" onClick={() => setWizard({ id: chosen.id, name: chosen.name, database: chosen.database || '', folder: chosen.folder || '', uri: '', type: chosen.type || 'mongodb' })}>Edit…</button></div>
         </div>
       )}
-      <p className="hint">Right-click an adapter: Edit, Duplicate, Test, Move, Delete. Choose the adapter for a run on the Preview tab. Saving, moving and deleting adapters needs the admin token.</p>
+      <p className="hint">Right-click an adapter: Edit, Duplicate, Test, Move, Delete. Choose the adapter for a run on the Preview tab. They are only for the Designer; Server, Analytics and Query have their own.</p>
       {wizard && (
         <AdapterWizard
           initial={wizard}
+          area="designer"
           folders={folders}
           existingIds={list.map((a) => a.id)}
           notify={notify}
@@ -615,7 +616,8 @@ export function Outline({ report, design, selection, dispatch, actions, openMenu
               const group = groupName ? groupsByName[groupName] : null;
               const title = group && renaming?.kind === 'group' && renaming.name === groupName && key.startsWith('groupHeader:')
                 ? <RenameBox value={groupName} onDone={renameDone} />
-                : <>{bandLabel(key)}{group ? <small> by {group.field}</small> : null}</>;
+                : <>{bandLabel(key)}{group ? <small> by {group.field}</small> : null}{present && <button type="button" className="band-add" title={`Add another band after ${bandLabel(key)}`} aria-label={`Add another band after ${bandLabel(key)}`}
+                  onClick={(e) => { e.stopPropagation(); actions.addBandAt(key); }}>＋</button>}</>;
               return (
                 <OutlineBranch closed={closed} toggle={toggle}
                   key={key}
@@ -644,7 +646,7 @@ export function Outline({ report, design, selection, dispatch, actions, openMenu
           </ul>
         </li>
       </ul>
-      <p className="hint">Right-click any node: Create / Delete Band, Add element, Create Parameter / Variable / Group, Rename (F2), Delete (Del). Grey bands are not in the report.</p>
+      <p className="hint">＋ on a band adds another one after it (Detail 2, Summary 2…). Right-click any node: Create / Delete Band, Add element, Create Parameter / Variable / Group, Rename (F2), Delete (Del). Grey bands are not in the report.</p>
     </div>
   );
 }

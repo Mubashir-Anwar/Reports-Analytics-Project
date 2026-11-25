@@ -4,7 +4,7 @@ export const BAND_LABELS = {
   title: 'Title',
   pageHeader: 'Page Header',
   columnHeader: 'Column Header',
-  detail: 'Detail 1',
+  detail: 'Detail',
   columnFooter: 'Column Footer',
   pageFooter: 'Page Footer',
   lastPageFooter: 'Last Page Footer',
@@ -112,8 +112,18 @@ export function emptyDesign() {
 let counter = 0;
 export const newId = (prefix = 'el') => `${prefix}-${Date.now().toString(36)}${(counter++).toString(36)}`;
 
-/** Band keys in print order: 'title', 'groupHeader:Name', 'detail', 'groupFooter:Name', ... */
+/** A section can have several bands: 'detail' is Detail 1, 'detail#2' is Detail 2 (bands.detail.more[0]), and so on. */
+export const sectionOf = (key) => key.split('#')[0];
+export const bandNumber = (key) => Number(key.split('#')[1] || 1);
+export const bandKind = (key) => sectionOf(key).split(':')[0];
+const numbered = (section, number) => (number > 1 ? `${section}#${number}` : section);
+
+/** Band keys in print order: 'title', 'groupHeader:Name', 'detail', 'detail#2', 'groupFooter:Name', ... */
 export function bandKeys(design) {
+  return sectionKeys(design).flatMap((section) => sectionBands(design, section).map((_, index) => numbered(section, index + 1)));
+}
+
+function sectionKeys(design) {
   const keys = ['title', 'pageHeader', 'columnHeader'];
   design.groups.forEach((g) => keys.push(`groupHeader:${g.name}`));
   keys.push('detail');
@@ -123,23 +133,67 @@ export function bandKeys(design) {
 }
 
 export function bandLabel(key) {
-  if (key.startsWith('groupHeader:')) return `${key.split(':')[1]} Group Header`;
-  if (key.startsWith('groupFooter:')) return `${key.split(':')[1]} Group Footer`;
-  return BAND_LABELS[key] || key;
+  const section = sectionOf(key);
+  const kind = bandKind(key);
+  const name = kind === 'groupHeader' ? `${groupOfBand(key)} Group Header` : kind === 'groupFooter' ? `${groupOfBand(key)} Group Footer` : BAND_LABELS[section] || section;
+  const number = bandNumber(key);
+  return number > 1 || section === 'detail' ? `${name} ${number}` : name;
 }
 
-export const groupOfBand = (key) => (key.includes(':') ? key.split(':')[1] : null);
+export const groupOfBand = (key) => (key.includes(':') ? sectionOf(key).split(':')[1] : null);
+
+function readSection(design, section) {
+  const kind = bandKind(section);
+  if (kind === 'groupHeader') return design.bands.groupHeaders?.[groupOfBand(section)];
+  if (kind === 'groupFooter') return design.bands.groupFooters?.[groupOfBand(section)];
+  return design.bands[section];
+}
+/** The bands of a section in print order (always at least one). */
+export function sectionBands(design, key) {
+  const { more = [], ...first } = readSection(design, sectionOf(key)) || emptyBand();
+  return [first, ...more];
+}
+function setSection(design, key, list) {
+  const section = sectionOf(key);
+  const [first = emptyBand(), ...more] = list;
+  const band = more.length ? { ...first, more } : first;
+  const bands = { ...design.bands };
+  const kind = bandKind(section);
+  if (kind === 'groupHeader') bands.groupHeaders = { ...bands.groupHeaders, [groupOfBand(section)]: band };
+  else if (kind === 'groupFooter') bands.groupFooters = { ...bands.groupFooters, [groupOfBand(section)]: band };
+  else bands[section] = band;
+  return { ...design, bands };
+}
+export const MAX_BANDS = 60;
+/** One more band in the section, right after `key` (Detail 1 → Detail 2): { design, key of the new band }. */
+export function addBandAfter(design, key) {
+  const list = sectionBands(design, key);
+  if (list.length >= MAX_BANDS) return { design, key };
+  const number = Math.min(bandNumber(key), list.length);
+  const band = { height: DEFAULT_BAND_HEIGHT[bandKind(key)] || 30, elements: [] };
+  return { design: setSection(design, key, [...list.slice(0, number), band, ...list.slice(number)]), key: numbered(sectionOf(key), number + 1) };
+}
+/** Print a band earlier (-1) or later (1) than its neighbour in the same section. */
+export function moveBand(design, key, step) {
+  const list = [...sectionBands(design, key)];
+  const at = bandNumber(key) - 1;
+  const to = at + step;
+  if (!list[at] || !list[to]) return { design, key };
+  [list[at], list[to]] = [list[to], list[at]];
+  return { design: setSection(design, key, list), key: numbered(sectionOf(key), to + 1) };
+}
 
 /** "Create Band": give an absent band its default height. */
 export function createBand(design, key) {
   const band = getBand(design, key);
-  const kind = key.split(':')[0];
+  const kind = bandKind(key);
   return setBand(design, key, { ...band, height: Math.max(band.height, DEFAULT_BAND_HEIGHT[kind] || 30) });
 }
 
 /** "Delete Band": remove the band and everything in it (it is then not printed). */
 export function deleteBand(design, key) {
-  return setBand(design, key, emptyBand());
+  const list = sectionBands(design, key);
+  return setSection(design, key, list.length > 1 ? list.filter((_, index) => index !== bandNumber(key) - 1) : [emptyBand()]);
 }
 
 export const NAME_PATTERN = /^[A-Za-z_][A-Za-z0-9_]*$/;
@@ -161,7 +215,7 @@ export function renameToken(text, letter, from, to) {
 
 /** Apply `fn` to every text/expression of every element in every band. */
 export function mapElements(design, fn) {
-  const mapBand = (band) => ({ ...band, elements: band.elements.map(fn) });
+  const mapBand = (band) => ({ ...band, elements: band.elements.map(fn), ...(band.more ? { more: band.more.map(mapBand) } : {}) });
   const bands = { ...design.bands };
   Object.keys(bands).forEach((key) => {
     if (key === 'groupHeaders' || key === 'groupFooters') {
@@ -173,8 +227,11 @@ export function mapElements(design, fn) {
 
 /** Rename a token in every element's text and expression (what Jaspersoft Studio's refactoring does). */
 export function renameInElements(design, letter, from, to) {
-  return mapElements(design, (el) => ({
+  const renamed = bandKeys(design).filter((key) => getBand(design, key).printWhenExpression)
+    .reduce((d, key) => setBand(d, key, { ...getBand(d, key), printWhenExpression: renameToken(getBand(d, key).printWhenExpression, letter, from, to) }), design);
+  return mapElements(renamed, (el) => ({
     ...el,
+    ...(el.printWhenExpression ? { printWhenExpression: renameToken(el.printWhenExpression, letter, from, to) } : {}),
     ...(el.text !== undefined ? { text: renameToken(el.text, letter, from, to) } : {}),
     ...(el.expression !== undefined ? { expression: renameToken(el.expression, letter, from, to) } : {}),
   }));
@@ -243,7 +300,7 @@ export function moveElementToBand(design, fromKey, toKey, id) {
   if (!element || fromKey === toKey) return design;
   const next = setBand(design, fromKey, { ...source, elements: source.elements.filter((el) => el.id !== id) });
   const target = getBand(next, toKey);
-  const kind = toKey.split(':')[0];
+  const kind = bandKind(toKey);
   const height = Math.max(target.height, DEFAULT_BAND_HEIGHT[kind] || 30, Math.ceil(element.y + element.height));
   return setBand(next, toKey, { ...target, height, elements: [...target.elements, element] });
 }
@@ -254,7 +311,7 @@ export function addElementToBand(design, bandKey, type, extra = {}) {
   const element = { ...defaultElement(type, 0, 0), ...extra };
   if (element.type === 'break') element.width = bandWidth(design);
   element.x = Math.min(element.x, Math.max(0, bandWidth(design) - element.width));
-  const kind = bandKey.split(':')[0];
+  const kind = bandKind(bandKey);
   const height = Math.max(band.height, DEFAULT_BAND_HEIGHT[kind] || 30, Math.ceil(element.y + element.height));
   // images and rectangles go behind the other elements (fields placed on them stay visible and clickable)
   const elements = BACKDROP_TYPES.has(element.type) ? [element, ...band.elements] : [...band.elements, element];
@@ -271,17 +328,14 @@ export function placeField(design, field) {
 }
 
 export function getBand(design, key) {
-  if (key.startsWith('groupHeader:')) return design.bands.groupHeaders[key.split(':')[1]] || emptyBand();
-  if (key.startsWith('groupFooter:')) return design.bands.groupFooters[key.split(':')[1]] || emptyBand();
-  return design.bands[key] || emptyBand();
+  return sectionBands(design, key)[bandNumber(key) - 1] || emptyBand();
 }
 
 export function setBand(design, key, band) {
-  const bands = { ...design.bands };
-  if (key.startsWith('groupHeader:')) bands.groupHeaders = { ...bands.groupHeaders, [key.split(':')[1]]: band };
-  else if (key.startsWith('groupFooter:')) bands.groupFooters = { ...bands.groupFooters, [key.split(':')[1]]: band };
-  else bands[key] = band;
-  return { ...design, bands };
+  const list = sectionBands(design, key);
+  const { more, ...own } = band;                   // the section's other bands stay as they are
+  list[bandNumber(key) - 1] = own;
+  return setSection(design, key, list);
 }
 
 export function findElement(design, id) {
@@ -301,7 +355,8 @@ export function bandWidth(design) {
 export function bandPurpose(key) {
   if (key.startsWith('groupHeader:')) return 'Printed once before each new group value (whenever the group field changes).';
   if (key.startsWith('groupFooter:')) return 'Printed once at the end of each group; put group totals (group-reset $V) here.';
-  return {
+  const note = bandNumber(key) > 1 ? ' It prints right after the band above it.' : '';
+  return (({
     title: 'Printed once at the start of the report (first page only).',
     pageHeader: 'Printed at the top of every page.',
     columnHeader: 'Printed on every page before the Detail rows — put column headings here.',
@@ -312,7 +367,7 @@ export function bandPurpose(key) {
     summary: 'Printed once at the end of the report — put grand totals and charts here.',
     noData: 'Printed instead of the whole report when the query returns no rows.',
     background: 'Printed behind the other bands on every page — for a watermark, frame or logo.',
-  }[key] || '';
+  }[sectionOf(key)] || '') + note).trim();
 }
 
 /** Lowest point used by the elements of a band (for "fit band to content"). */
@@ -346,6 +401,8 @@ export function pagePreset(page) {
 
 export const PAGE_LIMITS = { min: 100, max: 14400 };
 
+/** The CSS of a font name: a built-in one, or an own font by its name. */
+export const cssFont = (name) => (!name ? undefined : CSS_FONT[name] || `"${name}", Arial, sans-serif`);
 /** Font names offered like Jaspersoft Studio. PDF maps them to Helvetica / Times / Courier; Excel keeps the name. */
 export const FONT_NAMES = ['SansSerif', 'Arial', 'Helvetica', 'Verdana', 'Tahoma', 'Calibri', 'Segoe UI', 'Serif', 'Times New Roman', 'Georgia', 'Monospaced', 'Courier New'];
 export const CSS_FONT = {

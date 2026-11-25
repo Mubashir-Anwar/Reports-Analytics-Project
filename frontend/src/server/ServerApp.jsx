@@ -12,6 +12,7 @@ import ResourcePanel from './ResourcePanel.jsx';
 import { RunsList, SchedulesList } from './Schedules.jsx';
 import LogsView from './LogsView.jsx';
 import UploadDialog from './UploadDialog.jsx';
+import ExportDialog from './ExportDialog.jsx';
 import { DashboardCard, KIND_FILTERS, KindChips, ReportCard, RunningStrip, reportFacts, useActivity } from './ReportCard.jsx';
 
 const DashboardViewer = lazy(() => import('./DashboardViewer.jsx'));     // charts load only when a dashboard is opened
@@ -188,7 +189,7 @@ function LoginForm({ onSignedIn, message }) {
         <button type="button" className="btn quiet link-btn gz-forgot" onClick={() => setMode('forgot')}>Forgot your password?</button>
         <details className="gz-help">
           <summary>First time here?</summary>
-          <p>Ask your administrator for an account. You will see the parts your account has rights for.</p>
+          <p>Ask your administrator for an account. You will see the parts your account has rights for. New installation? Run <code>setup.ps1</code> (Windows) or <code>setup.sh</code> on the server: it prints the first sign-in.</p>
         </details>
       </form>
     </LoginShell>
@@ -218,6 +219,7 @@ function Repository({ user, onUser }) {
   const [permFolder, setPermFolder] = useState(null); // folder whose Permissions dialog is open ('' = root)
   const [scheduleInfo, setScheduleInfo] = useState(null);
   const [runsVersion, setRunsVersion] = useState(0);
+  const [exporting, setExporting] = useState(null); // folder whose Export ZIP dialog is open ('' = everything)
   const [newFolder, setNewFolder] = useState(null); // parent path while the New folder dialog is open
   const [guideHidden, setGuideHidden] = useState(readGuideHidden);
   const [kind, setKind] = useState('all'); // the filter chips over the cards
@@ -367,6 +369,7 @@ function Repository({ user, onUser }) {
   const folderMenu = (path) => [
     { header: path ? `/${path}` : 'Repository' },
     { label: 'Add Resource: upload .mrd / .jrxml / .mdash', icon: '⤒', disabled: !canManageFolder(path), onClick: () => { setFolder(path); setUploading(true); } },
+    { label: path ? 'Export this folder (ZIP)…' : 'Export everything (ZIP)…', icon: '⬇', disabled: !designer, onClick: () => setExporting(path) },
     { label: 'New folder', icon: '📁', disabled: !canManageFolder(path), onClick: () => createFolder(path) },
     { label: clipboard ? `Paste “${clipboard.title}”${clipboard.mode === 'cut' ? ' (move)' : ''}` : 'Paste', icon: '📋', disabled: !canManageFolder(path) || !clipboard, onClick: () => paste(path) },
     '-',
@@ -400,11 +403,11 @@ function Repository({ user, onUser }) {
             ))}
           </div>
           {view === 'repository' && designer && <button className="btn primary" onClick={() => setUploading(true)}>⤒ Add Resource</button>}
+          {view === 'repository' && designer && <button className="btn" onClick={() => setExporting(folder)} title="Every report and dashboard as one ZIP, in the server's folders">⬇ Export ZIP</button>}
           {view === 'repository' && <button className="btn" onClick={load}>↻ Refresh</button>}
           {view === 'repository' && guideHidden && <button className="btn quiet" onClick={() => { showGuideAgain(); setGuideHidden(false); }} title="Show the Get started steps again">? Get started</button>}
         </div>
       </div>
-      {user.bootstrap && <Notice message={{ kind: 'warn', text: 'You are signed in with the first-setup admin login. Create a real admin user in Admin → Users; this login then stops working.' }} />}
       {message && <div style={{ marginTop: 10 }}><Notice message={message} /></div>}
       {view === 'repository' && <RunningStrip running={activity.running} onOpen={() => setView('runs')} />}
       {clipboard && <div className="clip-bar">📋 {clipboard.mode === 'cut' ? 'Cut' : 'Copied'}: <b>{clipboard.title}</b> — right-click a folder → Paste <button className="btn quiet sm" onClick={() => setClipboard(null)}>✕</button></div>}
@@ -414,7 +417,7 @@ function Repository({ user, onUser }) {
       )}
       {view === 'schedules' && <section className="card"><SchedulesList info={scheduleInfo} onMessage={showMessage} /></section>}
       {view === 'runs' && <section className="card"><RunsList onMessage={showMessage} version={runsVersion} /></section>}
-      {view === 'sources' && <div style={{ marginTop: 14 }}><DataSourcesPanel notify={notifySources} folders={folders} /></div>}
+      {view === 'sources' && <div style={{ marginTop: 14 }}><DataSourcesPanel area="server" notify={notifySources} folders={folders} /></div>}
       {view === 'logs' && admin && <section className="card"><LogsView /></section>}
       {view === 'repository' && openDash && (
         <Suspense fallback={<section className="card"><p className="muted">Loading the dashboard…</p></section>}>
@@ -488,7 +491,9 @@ function Repository({ user, onUser }) {
       <ContextMenu menu={menu} onClose={() => setMenu(null)} />
       {newFolder !== null && <NewFolderDialog folders={folders} parent={newFolder} onCreate={saveNewFolder} onClose={() => setNewFolder(null)} title="New folder on the server" />}
       {deleting && <FolderDeleteDialog path={deleting.path} contents={deleting.contents} folders={folders} onConfirm={confirmDelete} onClose={() => setDeleting(null)} />}
-      {permFolder !== null && <PermissionsDialog folder={permFolder} onClose={() => setPermFolder(null)} onSaved={() => { markPermissionsSet(); load(); }} />}
+      {permFolder !== null && <PermissionsDialog folder={permFolder} folders={folders} onClose={() => setPermFolder(null)} onSaved={() => { markPermissionsSet(); load(); }} />}
+      {exporting !== null && <ExportDialog folder={exporting} folders={folders} reports={reports.filter((r) => r.access === 'manage')} dashboards={dashboards.filter((d) => d.access === 'manage')} onClose={() => setExporting(null)}
+        onDone={(text) => { setExporting(null); setMessage({ text, kind: 'ok' }); }} />}
       {uploading && (
         <UploadDialog folders={folders} folder={folder} onClose={() => setUploading(false)}
           onDone={async (result) => {
@@ -508,11 +513,11 @@ function Repository({ user, onUser }) {
 }
 
 /* ---------------------------------------------------------------- app */
-/** After signing in: back to the page that sent the user here (?next=), else /server, or their first app without the Report Server right. */
+/** After signing in: back to the page that sent the user here (?next=), else /home (a signed-in /server stays on /server). */
 function leaveLogin(user) {
   const next = safeNext(new URLSearchParams(window.location.search).get('next'));
   if (next) { window.location.assign(next); return true; }
-  if (window.location.pathname === '/login' || !user.rights?.includes('server')) { window.location.assign('/'); return true; }
+  if (window.location.pathname === '/login' || !user.rights?.includes('server')) { window.location.assign('/home'); return true; }
   return false;
 }
 

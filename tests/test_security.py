@@ -19,11 +19,11 @@ from backend.app.queries.mongo_query import _validate_read_only_pipeline  # noqa
 from backend.app.security import secrets as secret_store  # noqa: E402
 from backend.app.security.users import _hash_password, load_users, save_users  # noqa: E402
 from backend.app.storage.store import get_store  # noqa: E402
-from test_workspace_and_server import ADMIN, client, login  # noqa: E402,F401
+from test_workspace_and_server import ADMIN, client, login, setup_login  # noqa: E402,F401
 
 # pages are public HTML shells (their data comes from protected APIs); login/logout and probes are public by design
 # (signed out, the pages only redirect to /login; see test_access_rights.py)
-PUBLIC = {("GET", "/"), ("GET", "/ui"), ("GET", "/designer"), ("GET", "/server"), ("GET", "/admin"), ("GET", "/ready"),
+PUBLIC = {("GET", "/"), ("GET", "/ui"), ("GET", "/designer"), ("GET", "/server"), ("GET", "/home"), ("GET", "/admin"), ("GET", "/ready"),
           ("GET", "/analytics"), ("GET", "/query"), ("GET", "/login"),
           ("GET", "/api/v1/openapi.json"),                       # describes the public API; no data
           ("GET", "/api/branding"),                              # product name and tagline for the sign-in page; no data
@@ -54,7 +54,7 @@ def test_no_data_endpoint_answers_without_credentials(client):
     '<?xml version="1.0"?><!DOCTYPE x [<!ENTITY e SYSTEM "file:///etc/passwd">]><jasperReport>&e;</jasperReport>',
 ])
 def test_uploads_with_dtd_or_entities_are_refused(client, payload):
-    assert login(client, "admin", ADMIN).status_code == 200
+    assert setup_login(client).status_code == 200
     response = client.post("/api/server/upload", json={"fileName": "x.mrd", "content": payload, "folder": "General"})
     assert response.status_code == 422 and re.search(r"DTD|Entit|DOCTYPE", response.json()["detail"]), response.text
 

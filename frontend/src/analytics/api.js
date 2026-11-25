@@ -44,12 +44,17 @@ export function tileQuery(tile) {
       sort: [{ by: 'group:0', dir: 'asc' }], limit: 500, filters: tile.filters || [] };
   }
   return { tileId: tile.id, dataset: tile.dataset, groupBy: tile.groupBy || [], values: tile.values || [], filters: tile.filters || [],
-    sort: tile.sort || [], limit: tile.limit || null, detail: Boolean(tile.detail), columns: tile.columns || [] };
+    sort: tile.sort || [], limit: tile.limit || null, detail: Boolean(tile.detail), columns: tile.columns || [], ...(tile.type === 'ml' && tile.ml ? { ml: tile.ml } : {}) };
 }
 
 /** Can this tile be asked yet (has a dataset and the fields its type needs)? */
 export function tileReady(tile) {
   if (!tile.dataset) return false;
+  if (tile.type === 'ml') {
+    if (!tile.ml?.model) return false;
+    return tile.ml.model === 'forecast' ? tile.groupBy.length > 0 && tile.values.length > 0 : tile.ml.features.length > 0 && tile.columns.length > 0;
+  }
+  if (tile.type === 'map') return tile.groupBy.length >= (tile.options?.mapBy === 'points' ? 2 : 1) && tile.values.length > 0;
   if (tile.type === 'table') return tile.detail ? (tile.columns || []).length > 0 : (tile.groupBy.length + tile.values.length) > 0;
   if (tile.type === 'kpi') return tile.values.length > 0;
   if (tile.type === 'slicer') return tile.groupBy.length > 0;

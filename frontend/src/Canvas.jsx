@@ -3,10 +3,11 @@ import { Highlighted } from './ExprHighlight.jsx';
 import { isJavaExpression, toEditorHtml } from './richText.js';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
-  CSS_FONT, PAGE_LIMITS, ZOOM_LIMITS, bandKeys, bandLabel, bandWidth, clampZoom, contentBottom, contentRight, defaultElement,
+  cssFont, PAGE_LIMITS, ZOOM_LIMITS, bandKeys, bandKind, bandLabel, bandWidth, clampZoom, contentBottom, contentRight, defaultElement,
   BACKDROP_TYPES, CONTAINER_TYPES, bandPresent, describeElement, getBand, resizeElement, resizeRule, setBand,
   safeMarkupHtml,
 } from './designModel.js';
+import { isRightToLeft, useFonts } from './fonts.jsx';
 import {
   guideTargets, nearestSnap, patchElements, selectedIds, selectionOf, settleBands, snapToGrid, toggleInSelection,
 } from './arrange.js';
@@ -120,7 +121,7 @@ function paragraphCss(element, zoom) {
   const lineHeight = {
     '1_1_2': `${size * 1.8}px`, Double: `${size * 2.4}px`, Proportional: `${size * 1.2 * amount}px`,
     Fixed: `${Math.max(amount, 1) * zoom}px`, AtLeast: `${Math.max(size * 1.2, amount * zoom)}px`,
-  }[element.lineSpacing] || undefined;
+  }[element.lineSpacing] || (isRightToLeft(element.fontName) ? 'normal' : undefined);
   return {
     lineHeight,
     ...(element.leftIndent ? { paddingLeft: element.leftIndent * zoom } : {}),
@@ -129,6 +130,7 @@ function paragraphCss(element, zoom) {
   };
 }
 
+const BAND_ADD = { detail: 'Detail band', summary: 'Summary band', title: 'Title band', groupHeader: 'Group Header band', groupFooter: 'Group Footer band' };
 const ROTATION_CSS = {
   Left: { writingMode: 'vertical-rl', transform: 'rotate(180deg)', height: '100%' },
   Right: { writingMode: 'vertical-rl', height: '100%' },
@@ -149,7 +151,8 @@ function ElementView({ element, selected, primary, zoom, onPointerDown, onResize
     fontSize: element.fontSize * zoom,
     fontWeight: element.bold ? 700 : 400,
     fontStyle: element.italic ? 'italic' : 'normal',
-    fontFamily: CSS_FONT[element.fontName] || undefined,
+    fontFamily: cssFont(element.fontName),
+    unicodeBidi: 'plaintext',                      // Urdu / Arabic lines read right to left, as in the PDF
     textDecoration: element.underline ? 'underline' : undefined,
     textAlign: element.align === 'justified' ? 'justify' : element.align,
     ...(['staticText', 'textField'].includes(element.type) ? { display: 'flex', flexDirection: 'column', justifyContent: { top: 'flex-start', middle: 'center', bottom: 'flex-end' }[element.vAlign || 'top'] } : {}),
@@ -181,7 +184,7 @@ function ElementView({ element, selected, primary, zoom, onPointerDown, onResize
   } else if (element.type === 'note') {
     body = <span className="el-text el-note-text">{element.text}</span>;
   } else if (element.type === 'image') {
-    body = element.src ? <img src={element.src} alt="" draggable={false} /> : <span className="el-hint">Image</span>;
+    body = element.src ? <img src={element.src} alt="" draggable={false} /> : <span className="el-hint">{element.expression ? 'Image from data' : 'Image'}</span>;
   } else if (element.type === 'chart') {
     body = <span className="el-hint">▦ {element.chartType} chart{element.title ? ` · ${element.title}` : ''}</span>;
   } else if (element.type === 'staticText' && element.markup && element.markup !== 'none') {
@@ -742,6 +745,7 @@ export default function Canvas({ knownFields: knownList, design, selection, tool
   const selectedEls = ids.map((id) => bandKeys(design).map((k) => getBand(design, k).elements.find((el) => el.id === id)).find(Boolean)).filter(Boolean);
   const lockedAll = selectedEls.length > 0 && selectedEls.every((el) => el.locked);
   const grid = prefs.showGrid ? Math.max(2, prefs.gridSize) * zoom : 0;
+  useFonts();                                       // own fonts load for the canvas
   const gridStyle = grid >= 4
     ? { backgroundImage: 'linear-gradient(to right, var(--grid-line) 1px, transparent 1px), linear-gradient(to bottom, var(--grid-line) 1px, transparent 1px)', backgroundSize: `${grid}px ${grid}px` }
     : {};
@@ -786,7 +790,12 @@ export default function Canvas({ knownFields: knownList, design, selection, tool
                   onDrop={(event) => onDrop(key, event)}
                   onContextMenu={contextMenu(() => actions.bandMenu(key), { kind: 'band', key })}
                 >
-                  <span className="band-name">{bandLabel(key)}{band.height === 0 ? ' · 0px' : ''}</span>
+                  <span className="band-name">{bandLabel(key)}{band.height === 0 ? ' · 0px' : ''}{band.printWhenExpression ? <i title={`Prints when ${band.printWhenExpression}`}> · when…</i> : null}</span>
+                  {bandSelected && (
+                    <span className="band-tools">
+                      <button type="button" title={`Add another band after ${bandLabel(key)}`} onClick={(e) => { e.stopPropagation(); actions.addBandAt(key); }}>＋ Add {BAND_ADD[bandKind(key)] || 'band'}</button>
+                    </span>
+                  )}
                   {band.elements.map((element) => (
                     <ElementView
                       key={element.id}

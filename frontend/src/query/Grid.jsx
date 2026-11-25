@@ -3,7 +3,8 @@
 // columns, or onto the query helper to filter / show / sort by them. "Columns" hides columns or resets the order.
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { downloadText } from '../mrd.js';
-import { FIELD_MIME } from './queryHelper.js';
+import { asField, fieldTypes, onlyType, startDrag, valueType } from './queryHelper.js';
+import { JsonView, TreeView } from './DocViews.jsx';
 
 /** One Extended JSON value as short text: {"$oid": …} → ObjectId("…"), {"$date": …} → the date. */
 export function cellText(value) {
@@ -17,13 +18,9 @@ export function cellText(value) {
   return JSON.stringify(value).slice(0, 120);
 }
 
-function cellKind(value) {
-  if (value === null || value === undefined) return 'null';
-  if (typeof value === 'number') return 'num';
-  if (typeof value === 'boolean') return 'bool';
-  if (typeof value === 'object') return '$oid' in value ? 'oid' : '$date' in value ? 'date' : Array.isArray(value) ? 'arr' : 'obj';
-  return 'str';
-}
+const VIEWS = [['tree', 'Tree', '🌳'], ['table', 'Columns', '▦'], ['json', 'JSON', '{ }']];
+const VIEW_KEY = 'q-result-view';
+const readView = () => { try { const v = localStorage.getItem(VIEW_KEY); return VIEWS.some(([key]) => key === v) ? v : 'table'; } catch { return 'table'; } };
 
 /** Mongo shell look for a document (ObjectId("…"), ISODate("…")), pretty-printed. */
 export function shellJson(value) {
@@ -49,7 +46,7 @@ function ColumnsMenu({ columns, hidden, onToggle, onShowAll, onReset }) {
   }, [open]);
   return (
     <div className="qg-cols" ref={box}>
-      <button type="button" className={`btn sm ${hidden.size ? 'has' : ''}`} aria-expanded={open} onClick={() => setOpen(!open)}>▥ Columns{hidden.size ? ` · ${hidden.size} hidden` : ''}</button>
+      <button type="button" className={`btn sm ${hidden.size ? 'has' : ''}`} aria-expanded={open} onClick={() => setOpen(!open)}>▥ Show / hide{hidden.size ? ` · ${hidden.size} hidden` : ''}</button>
       {open && (
         <div className="qg-cols-menu" role="menu">
           <div className="qg-cols-actions">
@@ -66,8 +63,9 @@ function ColumnsMenu({ columns, hidden, onToggle, onShowAll, onReset }) {
 }
 
 /** columns + rows (SQL) or documents (Mongo: the top-level fields become columns). */
-export default function Grid({ columns, rows, documents, name = 'result', busy, empty = 'No rows', extra }) {
-  const [view, setView] = useState('table');
+export default function Grid({ columns, rows, documents, name = 'result', busy, empty = 'No rows', extra, onFilter }) {
+  const [view, setView] = useState(readView);
+  const choose = (next) => { setView(next); try { localStorage.setItem(VIEW_KEY, next); } catch { /* private mode */ } };
   const [order, setOrder] = useState([]);           // the user's column order (names)
   const [hidden, setHidden] = useState(() => new Set());
   const [dropAt, setDropAt] = useState(null);       // header the dragged column will land before
@@ -98,6 +96,8 @@ export default function Grid({ columns, rows, documents, name = 'result', busy, 
   };
   const toggle = (c) => setHidden((h) => { const n = new Set(h); if (n.has(c)) n.delete(c); else n.add(c); return n; });
 
+  const types = useMemo(() => fieldTypes(documents || table.rows.map((row) => Object.fromEntries(table.columns.map((c, i) => [c, row[i]])))), [documents, table]);
+  const docs = documents || table.rows.map((row) => Object.fromEntries(table.columns.map((c, i) => [c, row[i]])));
   const shownRows = table.rows.map((row) => arranged.map((c) => row[c.at]));
   const exportCsv = () => downloadText([arranged.map((c) => csvCell(c.name)).join(','), ...shownRows.map((row) => row.map(csvCell).join(','))].join('\r\n'), `${name}.csv`, 'text/csv');
   const exportJson = () => downloadText(JSON.stringify(shownRows.map((row) => Object.fromEntries(arranged.map((c, i) => [c.name, row[i]]))), null, 2), `${name}.json`, 'application/json');
@@ -107,22 +107,19 @@ export default function Grid({ columns, rows, documents, name = 'result', busy, 
     <div className={`qg ${busy ? 'busy' : ''}`}>
       <div className="qg-bar">
         <span className="qg-count">{count} {count === 1 ? 'row' : 'rows'}</span>
-        {documents && (
-          <div className="seg-toggle" role="group" aria-label="View">
-            <button type="button" className={view === 'table' ? 'on' : ''} onClick={() => setView('table')}>Table</button>
-            <button type="button" className={view === 'json' ? 'on' : ''} onClick={() => setView('json')}>JSON</button>
-          </div>
-        )}
+        <div className="seg-toggle qg-views" role="group" aria-label="View">
+          {VIEWS.map(([key, label, icon]) => <button key={key} type="button" aria-pressed={view === key} className={view === key ? 'on' : ''} onClick={() => choose(key)}><i aria-hidden="true">{icon}</i> {label}</button>)}
+        </div>
         <span className="grow" />
-        {table.columns.length > 0 && <ColumnsMenu columns={table.columns} hidden={hidden} onToggle={toggle} onShowAll={() => setHidden(new Set())} onReset={() => setOrder([])} />}
+        {view === 'table' && table.columns.length > 0 && <ColumnsMenu columns={table.columns} hidden={hidden} onToggle={toggle} onShowAll={() => setHidden(new Set())} onReset={() => setOrder([])} />}
         {extra}
         <button type="button" className="btn sm" disabled={!count} onClick={exportCsv}>⬇ CSV</button>
         <button type="button" className="btn sm" disabled={!count} onClick={exportJson}>⬇ JSON</button>
       </div>
       {!count ? <div className="qg-empty">{busy ? 'Running…' : empty}</div>
-        : view === 'json' && documents ? (
-          <div className="qg-json">{documents.map((doc, i) => <pre key={i}><span className="qg-n">{i + 1}</span>{shellJson(doc)}</pre>)}</div>
-        ) : (
+        : view === 'tree' ? <TreeView documents={docs} onFilter={onFilter} />
+        : view === 'json' ? <JsonView documents={docs} onFilter={onFilter} />
+        : (
           <div className="qg-scroll">
             <table>
               <thead>
@@ -131,7 +128,7 @@ export default function Grid({ columns, rows, documents, name = 'result', busy, 
                   {arranged.map((c) => (
                     <th key={c.name} draggable title="Drag: onto another column to move it, or onto the query helper"
                       className={`${dropAt === c.name ? 'drop-before' : ''} ${dragging.current === c.name ? 'dragging' : ''}`}
-                      onDragStart={(e) => { dragging.current = c.name; e.dataTransfer.setData(FIELD_MIME, c.name); e.dataTransfer.setData('text/plain', c.name); e.dataTransfer.effectAllowed = 'copyMove'; }}
+                      onDragStart={(e) => { dragging.current = c.name; startDrag(e, { field: c.name, type: onlyType(types[c.name]) }); }}
                       onDragEnd={() => { dragging.current = null; setDropAt(null); }}
                       onDragOver={(e) => { if (dragging.current && dragging.current !== c.name) { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; setDropAt(c.name); } }}
                       onDragLeave={() => setDropAt((d) => (d === c.name ? null : d))}
@@ -149,8 +146,9 @@ export default function Grid({ columns, rows, documents, name = 'result', busy, 
                   <tr key={r}>
                     <td className="qg-n">{r + 1}</td>
                     {row.map((value, i) => {
-                      const kind = cellKind(value);
-                      return <td key={arranged[i].name} className={`k-${kind}`} title={kind === 'obj' || kind === 'arr' ? JSON.stringify(value, null, 2).slice(0, 2000) : undefined}>{kind === 'null' ? 'null' : cellText(value)}</td>;
+                      const kind = valueType(value);
+                      const what = asField(arranged[i].name, value);
+                      return <td key={arranged[i].name} className={`k-${kind}`} draggable onDragStart={(e) => startDrag(e, what)} onDoubleClick={onFilter ? () => onFilter(what) : undefined} title={kind === 'obj' || kind === 'arr' ? JSON.stringify(value, null, 2).slice(0, 2000) : onFilter ? 'Drag onto the query helper, or double-click, to filter by this value' : undefined}>{kind === 'null' ? 'null' : cellText(value)}</td>;
                     })}
                     <td className="qg-end" />
                   </tr>

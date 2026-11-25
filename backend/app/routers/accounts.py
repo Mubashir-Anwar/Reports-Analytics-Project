@@ -281,7 +281,7 @@ def register(app: FastAPI, ctx: SimpleNamespace) -> None:
     # ---------------------------------------------------------------- My account
     def me(request: Request) -> dict[str, Any]:
         session = current_session(request)
-        if session is None or session.get("bootstrap"):
+        if session is None:
             raise HTTPException(status_code=401, detail="Sign in with your own account first")
         user = next((item for item in load_users() if str(item["username"]).casefold() == str(session["username"]).casefold()), None)
         if user is None:

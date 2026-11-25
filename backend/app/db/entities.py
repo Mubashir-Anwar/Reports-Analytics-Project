@@ -398,6 +398,8 @@ def _write_private(path: Path, payload: Any) -> None:
 
 class FileEntities(EntityBackend):
     def __init__(self, root: Path):
+        from backend.app.storage.files import long_path
+        root = long_path(root)
         self.folder = root / "records" / "entities"
         self.tables = root / "records" / "tables"            # schema v2
 
@@ -475,11 +477,11 @@ class FileEntities(EntityBackend):
                 target = self._row_path(entity, stored)
                 here = self._read_row(target) if target.is_file() else None
                 moved = len(entity.key) == 1 and not (here and key_of(entity, here) == key)   # an update in place needs no search
+                _write_private(target, stored)           # first: when it fails, the row that moves is still there
                 for old in self._row_candidates(entity, {}) if moved else []:
                     row = self._read_row(old)        # the same row stored under another folder / code: it moved
-                    if row and key_of(entity, row) == key and old != self._row_path(entity, stored):
+                    if row and key_of(entity, row) == key and old != target:
                         old.unlink(missing_ok=True)
-                _write_private(self._row_path(entity, stored), stored)
                 return
             items = self._load(entity)
             items[self._id(key_of(entity, stored))] = stored
