@@ -1,4 +1,4 @@
-"""SQL report queries (Jaspersoft Studio style) for the SQL connectors.
+"""SQL report queries (classic designer style) for the SQL connectors.
 
 * `$P{Name}`               → a bound parameter (never pasted into the SQL text)
 * `$X{IN, column, Name}`    → `column = ANY(<list>)` (PostgreSQL) or `column IN (…)`; an empty list = no filter
@@ -37,10 +37,10 @@ class PreparedSql:
 
     def bind(self, values: dict[str, Any], style: str = "pyformat", lists: str = "any") -> tuple[str, dict[str, Any]]:
         """SQL text for the driver and the values to bind.
-        style: "pyformat" (%(name)s: psycopg, PyMySQL, pymssql) or "named" (:name: Oracle).
+        style: "pyformat" (%(name)s: psycopg, PyMySQL, pymssql), "named" (:name: Oracle, SQLite) or "dollar" ($name: DuckDB).
         lists: "any" (column = ANY(array): PostgreSQL) or "expand" (column IN (:a, :b, …): the others)."""
         pyformat = style == "pyformat"
-        placeholder = (lambda name: f"%({name})s") if pyformat else (lambda name: f":{name}")
+        placeholder = (lambda name: f"%({name})s") if pyformat else (lambda name: f"${name}") if style == "dollar" else (lambda name: f":{name}")
         sql, params = [], {}
         for index, part in enumerate(self.parts):
             if isinstance(part, str):
@@ -53,7 +53,7 @@ class PreparedSql:
                 _, negate, column, name = part
                 items = _as_list(values.get(name))
                 if not items:
-                    sql.append("(1 = 1)")  # Jasper: an empty $X{IN} list does not filter
+                    sql.append("(1 = 1)")  # Classic reports: an empty $X{IN} list does not filter
                     continue
                 key = f"x{index}_{name}"
                 if lists == "any":

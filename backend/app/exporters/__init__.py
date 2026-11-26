@@ -1,1 +1,1 @@
-"""Report definition -> other report formats (Jaspersoft Studio .jrxml)."""
+"""Report definition -> other report formats (a classic report designer .jrxml)."""

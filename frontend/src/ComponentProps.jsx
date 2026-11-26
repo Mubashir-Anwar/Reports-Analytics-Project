@@ -1,4 +1,4 @@
-// Properties of the data components (Jaspersoft Studio's Table, Crosstab, List, Subreport) and the designer Note.
+// Properties of the data components (a classic report designer's Table, Crosstab, List, Subreport) and the designer Note.
 import { useEffect, useState } from 'react';
 import { api } from './api.js';
 import { groupOfBand } from './designModel.js';
@@ -93,7 +93,7 @@ export function TableProps({ element, patch, fields, onOpenEditor }) {
         <Row label="Grid color"><Color value={element.gridColor} fallback="#94a3b8" onChange={(gridColor) => patch({ gridColor })} /></Row>
       </div>
       <label className="check-row"><input type="checkbox" checked={element.repeatHeader !== false} onChange={(e) => patch({ repeatHeader: e.target.checked })} /> Repeat the header on every page</label>
-      <p className="hint">Like Jasper's Table: one row per record. Long values wrap and the row grows (nothing is cut). Totals use the column's own pattern. In Excel the totals are real numbers.</p>
+      <p className="hint">A table: one row per record. Long values wrap and the row grows (nothing is cut). Totals use the column's own pattern. In Excel the totals are real numbers.</p>
     </>
   );
 }
@@ -130,13 +130,13 @@ export function CrosstabProps({ element, patch, fields }) {
         <Row label="Grid line"><Num value={element.gridWidth} min={0} max={5} step={0.25} onChange={(gridWidth) => patch({ gridWidth })} /></Row>
         <Row label="Grid color"><Color value={element.gridColor} fallback="#94a3b8" onChange={(gridColor) => patch({ gridColor })} /></Row>
       </div>
-      <p className="hint">One row per value of the row group, one column per value of the column group, and the measure in each cell. Columns that do not fit in the box width continue in a second block below (like Jasper's crosstab column breaks).</p>
+      <p className="hint">One row per value of the row group, one column per value of the column group, and the measure in each cell. Columns that do not fit in the box width continue in a second block below (like the classic crosstab column breaks).</p>
     </>
   );
 }
 
 export function ListProps() {
-  return <p className="hint pad-top">Like Jasper's List: <b>the elements you put inside the List box are printed once for every record</b> (e.g. a card per customer). Draw Text Fields inside it; they move with the List. Choose which records in the <b>Dataset</b> tab. Background / border: Appearance and Borders tabs.</p>;
+  return <p className="hint pad-top">A list: <b>the elements you put inside the List box are printed once for every record</b> (e.g. a card per customer). Draw Text Fields inside it; they move with the List. Choose which records in the <b>Dataset</b> tab. Background / border: Appearance and Borders tabs.</p>;
 }
 
 export function NoteProps({ element, patch }) {
@@ -149,7 +149,7 @@ export function NoteProps({ element, patch }) {
   );
 }
 
-/** Which records a Table / Crosstab / List shows (Jasper: the component's dataset run). */
+/** Which records a Table / Crosstab / List shows (classic reports: the component's dataset run). */
 export function DatasetProps({ element, patch, fields, bandKey, report, design, onOpenDatasets }) {
   const inGroup = Boolean(groupOfBand(bandKey)) || bandKey === 'detail';
   const canHaveDataset = ['table', 'crosstab'].includes(element.type);
@@ -260,7 +260,7 @@ export function SubreportProps({ element, patch, report, design }) {
           <input className="mono" value={mapping.find((m) => m.name === name)?.expression || ''} placeholder="$F{Identifier}" onChange={(e) => setExpression(name, e.target.value)} />
         </Row>
       ))}
-      <p className="hint">Like Jasper's Subreport: when this report runs, the subreport runs <b>its own query</b> with these parameter values and prints its bands here (Title, Column Header, Detail, groups, Summary). In the Detail band it runs once per record, e.g. the orders of each customer.</p>
+      <p className="hint">A subreport: when this report runs, the subreport runs <b>its own query</b> with these parameter values and prints its bands here (Title, Column Header, Detail, groups, Summary). In the Detail band it runs once per record, e.g. the orders of each customer.</p>
     </>
   );
 }

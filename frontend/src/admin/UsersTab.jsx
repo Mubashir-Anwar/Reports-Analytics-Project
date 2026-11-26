@@ -9,11 +9,12 @@ const RIGHT_HELP = {
   query: 'Query workspace: browse data sources and try MongoDB / SQL queries (read-only)',
   server: 'Report Server: folders, run, schedules (folder permissions apply)',
   analytics: 'Dashboards and models',
+  pipelines: 'Pipelines (ETL / ELT) in Analytics: steps that clean, join and group datasets into a new one (needs Analytics too; Python steps need Python)',
   python: 'Python scripts in Analytics: clean and model data with pandas, scikit-learn, scipy (needs Analytics too)',
   runner: 'Running reports by URL (/generate, /reports, collections)',
 };
 const DEFAULT_RIGHTS = [{ id: 'admin', label: 'Admin' }, { id: 'designer', label: 'Designer' }, { id: 'query', label: 'Query' }, { id: 'server', label: 'Report Server' },
-  { id: 'analytics', label: 'Analytics' }, { id: 'python', label: 'Python scripts' }, { id: 'runner', label: 'Run reports by URL' }];
+  { id: 'analytics', label: 'Analytics' }, { id: 'python', label: 'Python scripts' }, { id: 'pipelines', label: 'Pipelines (ETL)' }, { id: 'runner', label: 'Run reports by URL' }];
 const LEVEL_LABEL = { none: 'None', run: 'Run', manage: 'Manage' };
 const EMPTY_FORM = { username: '', fullName: '', email: '', phone: '', password: '', rights: ['runner'], superAdmin: false };
 

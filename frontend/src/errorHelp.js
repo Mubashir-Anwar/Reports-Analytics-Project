@@ -269,7 +269,7 @@ export function explainError(message) {
         return {
           ...info, text, stage, importing: true, focus: undefined, actions: [],
           place: `the .jrxml file → Dataset and Query${line}`,
-          steps: [`Open the .jrxml in Jaspersoft Studio (or a text editor) → Dataset and Query${line}.`, ...info.steps.filter((s) => !/button below|Read fields/.test(s)), 'Save the file and import it again.'],
+          steps: [`Open the .jrxml in your report designer (or a text editor) → Dataset and Query${line}.`, ...info.steps.filter((s) => !/button below|Read fields/.test(s)), 'Save the file and import it again.'],
         };
       }
       return { ...info, text, stage, place: placeOf(info.focus) };

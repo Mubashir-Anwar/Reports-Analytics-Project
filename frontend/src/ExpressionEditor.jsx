@@ -24,7 +24,7 @@ const FUNCTIONS = [
 ];
 
 /**
- * Like Jaspersoft Studio's Expression Editor: the expression on top, and Fields, Parameters, Variables and
+ * Like a classic report designer's Expression Editor: the expression on top, and Fields, Parameters, Variables and
  * functions below; double-click (or Insert) puts the item at the cursor.
  * For a Static Text, inserting a field turns it into a Text Field (a static text cannot show data).
  */

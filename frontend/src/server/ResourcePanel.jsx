@@ -1,4 +1,4 @@
-// One report resource on the server, with tabs like JasperReports Server's resource page:
+// One report resource on the server, with tabs like a report server's resource page:
 // Run · Overview · Parameters · Data Source · Query · History. Designers and admins can edit.
 import { useCallback, useEffect, useState } from 'react';
 import { Notice, formatWhen } from '../portal/Shell.jsx';
@@ -55,7 +55,7 @@ function OverviewTab({ info, onSave }) {
                   <td>{img.format ? img.format.toUpperCase() : '—'}</td>
                   <td>{img.bytes ? `${(img.bytes / 1024).toFixed(1)} KB` : '—'}</td>
                   <td>{img.band} · {img.size} px</td>
-                  <td className="res-from">{img.url ? <a href={img.url} target="_blank" rel="noopener noreferrer">{img.url}</a> : img.reference ? <code title="The Jaspersoft image expression it was imported from">{img.reference}</code> : 'uploaded file'}</td>
+                  <td className="res-from">{img.url ? <a href={img.url} target="_blank" rel="noopener noreferrer">{img.url}</a> : img.reference ? <code title="The image expression it was imported from">{img.reference}</code> : 'uploaded file'}</td>
                 </tr>
               ))}
             </tbody>

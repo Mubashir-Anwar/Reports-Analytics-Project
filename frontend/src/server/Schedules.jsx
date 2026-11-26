@@ -1,4 +1,4 @@
-// Report schedules and background runs (JasperReports Server: Schedule → Recurrence, Parameters, Output, Notifications;
+// Report schedules and background runs (a report server: Schedule → Recurrence, Parameters, Output, Notifications;
 // and the list of report outputs).
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';

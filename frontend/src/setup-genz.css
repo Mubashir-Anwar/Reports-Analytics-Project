@@ -32,8 +32,8 @@
 .setup.is-guided[data-step] .sg-layout.guide-target { border-radius: 24px; }
 .setup.is-guided[data-step] .sg-layout.guide-target:not(:hover, :focus-visible) { box-shadow: none; }
 .setup.is-guided[data-step] .guide-target .code-jump input { box-shadow: none; border-color: var(--line); }
-.setup.is-guided[data-step] .guide-target .code-area textarea, .setup.is-guided[data-step] .guide-target .fd-pick-panel input { box-shadow: none; }
-.setup.is-guided[data-step] .guide-target .code-area, .setup.is-guided[data-step] label.guide-target > input { border-color: var(--step, var(--accent)); box-shadow: 0 0 0 4px var(--step-soft, var(--accent-soft)); }
+.setup.is-guided[data-step] .guide-target .ce textarea, .setup.is-guided[data-step] .guide-target .fd-pick-panel input { box-shadow: none; }
+.setup.is-guided[data-step] .guide-target .ce, .setup.is-guided[data-step] label.guide-target > input { border-color: var(--step, var(--accent)); box-shadow: 0 0 0 4px var(--step-soft, var(--accent-soft)); }
 
 /* boxes */
 .setup.is-guided[data-step] .form-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 20px 18px; margin: 0; }
@@ -84,9 +84,8 @@
 .sg-code-head { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 14px; margin-bottom: 8px; color: var(--muted); font-size: 12.5px; }
 .sg-code-head b { color: var(--text); font-size: 13.5px; }
 .sg-code-head code { padding: 2px 8px; border-radius: 99px; background: var(--tint-b); color: var(--tint-b-tx); font-size: 11.5px; }
-.setup.is-guided[data-step] .code-area { margin: 0; border: 1.5px solid var(--line); border-radius: 20px; }
-.setup.is-guided[data-step] .code-area:focus-within { border-color: var(--step, var(--accent)); }
-.setup.is-guided[data-step] .code-area textarea.code, .setup.is-guided[data-step] .code-gutter { padding-top: 14px; font-size: 13px; }
+.setup.is-guided[data-step] .ce { margin: 0; border-radius: 14px; }
+.setup.is-guided[data-step] .ce:focus-within { border-color: var(--step, var(--accent)); }
 .setup.is-guided[data-step] .code-status { padding: 8px 16px; }
 .setup.is-guided[data-step] .code-jump input { height: 30px; border-radius: 99px; }
 .setup.is-guided[data-step] .code-jump .btn { min-height: 30px; padding: 0 14px; border-radius: 99px; }
@@ -146,3 +145,52 @@
 .sg-layout:hover em > span, .sg-layout:focus-visible em > span { transform: translateX(6px); }
 @media (max-width: 620px) { .sg-layout { flex-direction: column; align-items: center; gap: 18px; padding: 22px 18px; text-align: center; } .sg-layout-text { justify-items: center; } }
 @media (prefers-reduced-motion: reduce) { .sg-layout, .sg-layout * { transition: none; } }
+
+/* guided steps follow the app's own accent (no blue / amber per step), so the card matches the rest of the theme */
+.setup.is-guided[data-step] { --step: var(--accent); --step-soft: color-mix(in srgb, var(--accent) 8%, var(--panel)); }
+.setup.is-guided[data-step] .coach-count { display: inline-flex; align-items: center; gap: 8px; font-weight: 800; }
+.setup.is-guided[data-step] .coach-count::before { content: ""; width: 8px; height: 8px; border-radius: 50%; background: var(--accent);
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--accent) 20%, transparent); }
+.setup.is-guided[data-step] details.coach-example > summary { background: var(--panel); color: var(--accent);
+  border: 1px solid color-mix(in srgb, var(--accent) 30%, var(--line)); }
+.setup.is-guided[data-step] .coach-top { border-top: 3px solid var(--accent); }
+
+/* Back / Skip / Next stay on screen at the bottom on every step, however long the field below is */
+.setup.is-guided .coach-buttons { position: sticky; bottom: 0; z-index: 6; margin-top: 16px; padding: 12px 16px;
+  border: 1px solid var(--line); border-radius: var(--radius-lg, 18px);
+  background: color-mix(in srgb, var(--panel) 88%, transparent); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);
+  box-shadow: 0 -10px 30px -12px rgb(0 0 0 / .18); }
+.setup.is-guided[data-step] .coach-buttons { margin-top: 16px; }
+.setup.is-guided[data-step] .coach-buttons .btn { min-height: 44px; }
+@media (max-width: 640px) { .setup.is-guided .coach-buttons { padding: 10px; } .setup.is-guided[data-step] .coach-buttons .btn { padding: 0 16px; } }
+
+/* Setup · guided in the PixelFX look of the sign-in page: one hard-edged card on a fine pixel grid, a mono step label,
+   inputs that get the hard accent shadow on focus, and a square button bar (no blur, no glow) */
+.setup.is-guided[data-step] .coach-top { border: 2px solid var(--text); border-bottom: 0; border-radius: 4px 4px 0 0;
+  background-color: var(--panel); background-image: linear-gradient(color-mix(in srgb, var(--line) 70%, transparent) 1px, transparent 1px),
+    linear-gradient(90deg, color-mix(in srgb, var(--line) 70%, transparent) 1px, transparent 1px); background-size: 16px 16px; }
+.setup.is-guided[data-step] .coach-card { border: 2px solid var(--text); border-top: 0; border-bottom: 0; border-radius: 0 !important;
+  background-color: var(--panel); background-image: linear-gradient(color-mix(in srgb, var(--line) 70%, transparent) 1px, transparent 1px),
+    linear-gradient(90deg, color-mix(in srgb, var(--line) 70%, transparent) 1px, transparent 1px); background-size: 16px 16px; background-position: 0 -10px; }
+.setup.is-guided[data-step] .seg.bare { border: 2px solid var(--text); border-top: 1px dashed var(--line-strong, var(--line)); border-radius: 0 0 4px 4px;
+  box-shadow: 6px 6px 0 0 var(--accent); }
+.setup.is-guided[data-step] .coach-count { font-family: var(--mono); font-size: 11.5px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
+.setup.is-guided[data-step] .coach-count::before { width: 8px; height: 8px; border-radius: 0; box-shadow: none; animation: px-blink 1.2s steps(1, end) infinite; }
+.setup.is-guided[data-step] .coach h3 { font-family: var(--font-head); letter-spacing: -.035em; }
+.setup.is-guided[data-step] details.coach-example > summary { border: 1.5px solid var(--text); border-radius: 4px; color: var(--text); font-family: var(--mono);
+  font-size: 11.5px; letter-spacing: .06em; text-transform: uppercase; }
+.setup.is-guided[data-step] details.coach-example > summary::before { content: "▸"; color: var(--accent); }
+.setup.is-guided[data-step] details.coach-example[open] > summary::before { content: "▾"; }
+.setup.is-guided[data-step] details.coach-example > summary:hover { transform: translate(-2px, -2px); box-shadow: 3px 3px 0 0 var(--accent); }
+.setup.is-guided[data-step] details.coach-example[open] { border: 1.5px dashed var(--line-strong, var(--line)); border-radius: 4px; }
+.setup.is-guided[data-step] .coach-dots button { border-radius: 2px; font-family: var(--mono); }
+.setup.is-guided[data-step] .form-grid input, .setup.is-guided[data-step] .form-grid select, .setup.is-guided[data-step] .form-grid textarea { border-radius: 4px; }
+.setup.is-guided[data-step] .form-grid input:focus, .setup.is-guided[data-step] .form-grid select:focus, .setup.is-guided[data-step] .form-grid textarea:focus,
+.setup.is-guided[data-step] .guide-target .ce, .setup.is-guided[data-step] label.guide-target > input { border-color: var(--text); box-shadow: 4px 4px 0 0 var(--accent); }
+.setup.is-guided .coach-buttons { border: 2px solid var(--text); border-radius: 4px; background: var(--panel); backdrop-filter: none; -webkit-backdrop-filter: none;
+  box-shadow: 0 -6px 0 0 var(--bg), 4px 4px 0 0 var(--text); }
+.setup.is-guided[data-step] .coach-buttons .btn { border-radius: 4px; border: 2px solid var(--text); }
+.setup.is-guided[data-step] .coach-buttons .btn.primary { box-shadow: none; }
+.setup.is-guided[data-step] .coach-buttons .btn:hover:not(:disabled) { transform: translate(-2px, -2px); box-shadow: 4px 4px 0 0 var(--accent); }
+.setup.is-guided[data-step] .coach-buttons .btn:disabled { border-style: dashed; border-color: var(--line-strong, var(--line)); }
+@media (prefers-reduced-motion: reduce) { .setup.is-guided[data-step] .coach-count::before { animation: none; } }

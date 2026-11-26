@@ -11,15 +11,15 @@ export default defineConfig({
   build: {
     outDir: '../ui/app',
     emptyOutDir: true,
-    rollupOptions: {
+    rolldownOptions: {
       input: {
-        designer: resolve(__dirname, 'index.html'),
-        server: resolve(__dirname, 'server.html'),
-        admin: resolve(__dirname, 'admin.html'),
-        analytics: resolve(__dirname, 'analytics.html'),
-        home: resolve(__dirname, 'home.html'),
-        embed: resolve(__dirname, 'embed.html'),
-        query: resolve(__dirname, 'query.html'),
+        designer: resolve(import.meta.dirname, 'index.html'),
+        server: resolve(import.meta.dirname, 'server.html'),
+        admin: resolve(import.meta.dirname, 'admin.html'),
+        analytics: resolve(import.meta.dirname, 'analytics.html'),
+        home: resolve(import.meta.dirname, 'home.html'),
+        embed: resolve(import.meta.dirname, 'embed.html'),
+        query: resolve(import.meta.dirname, 'query.html'),
       },
     },
   },

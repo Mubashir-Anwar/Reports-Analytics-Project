@@ -15,11 +15,16 @@ import { AdapterWizard } from '../shared/adapters.jsx';
 import { quoteName } from './queryHelper.js';
 import { SaveQueryDialog, SavedQueryList, deleteSavedQuery, useSavedQueries } from '../shared/SavedQueries.jsx';
 import { newStage } from './MongoView.jsx';
+import ObjectIcon, { ObjectLegend } from './ObjectIcon.jsx';
+import SqlBuilder from './SqlBuilder.jsx';
+import { limitRows } from './snippets.js';
 
 const TABS_KEY = 'query-tabs';
 const SQL_PAGE = 60;            // tables shown per schema before "Show more"
 const isSql = (a) => a && a.type && a.type !== 'mongodb';
-const TYPE_LOOK = { mongodb: ['g', 'Mongo'], postgresql: ['b', 'Postgres'], mysql: ['a', 'MySQL'], sqlserver: ['v', 'SQL Server'], oracle: ['c', 'Oracle'] };
+const TYPE_LOOK = { mongodb: ['g', 'Mongo'], postgresql: ['b', 'Postgres'], mysql: ['a', 'MySQL'], mariadb: ['a', 'MariaDB'], sqlserver: ['v', 'SQL Server'], oracle: ['c', 'Oracle'],
+  snowflake: ['b', 'Snowflake'], clickhouse: ['a', 'ClickHouse'], elasticsearch: ['g', 'Elastic'], redis: ['c', 'Redis'], sqlite: ['b', 'SQLite'], duckdb: ['a', 'DuckDB'],
+  files: ['g', 'Files'], gsheets: ['g', 'Sheets'] };
 let seq = 0;
 const tabId = () => `t${Date.now().toString(36)}${seq++}`;
 
@@ -54,10 +59,10 @@ function AdapterNode({ adapter, open, onToggle, data, filter, onOpen, onMenu, on
           {data.loadingMore ? <><span className="q-spin" /> Loading…</> : <>＋ Show {Math.min(50, data.total - data.collections.length)} more <em>{data.collections.length} of {data.total.toLocaleString()}</em></>}
         </button>
       ) : null;
-      body = items.length ? [...items.map((c) => (
+      body = items.length ? [<div key="legend" className="qt-legend"><ObjectLegend /></div>, ...items.map((c) => (
         <button key={c.name} type="button" className="qt-leaf" onClick={() => onOpen({ kind: 'mongo', connectionId: adapter.id, collection: c.name })} title={`Open ${c.name} (right-click for more)`}
           onContextMenu={(e) => { e.preventDefault(); onMenu(e, { type: 'collection', adapter, collection: c }); }}>
-          <span className="qt-ico">{c.type === 'view' ? '◇' : '▤'}</span><span className="qt-name">{c.name}</span>
+          <span className="qt-ico"><ObjectIcon kind={c.type === 'view' ? 'mongoView' : 'collection'} /></span><span className="qt-name">{c.name}</span>
           {c.count != null && <span className="qt-count">{c.count.toLocaleString()}</span>}
         </button>
       )), more] : <div className="qt-note">No collections{q ? ` match “${filter.trim()}”` : ''}</div>;
@@ -65,6 +70,8 @@ function AdapterNode({ adapter, open, onToggle, data, filter, onOpen, onMenu, on
       body = (
         <>
           <div className="qt-actions">
+            <ObjectLegend sql />
+            <button type="button" className="btn sm" onClick={() => onOpen({ kind: 'builder', connectionId: adapter.id })} title="Drag tables, join them and pick the columns: the SQL is written for you">⊞ Builder</button>
             <button type="button" className="btn sm" onClick={() => onOpen({ kind: 'sql', connectionId: adapter.id })}>＋ SQL</button>
             <button type="button" className="btn sm" onClick={() => onOpen({ kind: 'diagram', connectionId: adapter.id })}>⧉ Diagram</button>
           </div>
@@ -75,7 +82,7 @@ function AdapterNode({ adapter, open, onToggle, data, filter, onOpen, onMenu, on
             const tables = all.slice(0, limit);
             return (
               <div key={s.name} className="qt-schema">
-                {data.schemas.length > 1 && <div className="qt-schema-name">{s.name || '(default)'}</div>}
+                {data.schemas.length > 1 && <div className="qt-schema-name"><ObjectIcon kind="schema" size={14} />{s.name || '(default)'}</div>}
                 {tables.map((t) => {
                   const key = `${s.name}.${t.name}`;
                   return (
@@ -84,7 +91,7 @@ function AdapterNode({ adapter, open, onToggle, data, filter, onOpen, onMenu, on
                         <button type="button" className="qt-caret" aria-label={openTables[key] ? 'Hide columns' : 'Show columns'} onClick={() => toggleColumns(key)}>{openTables[key] ? '▾' : '▸'}</button>
                         <button type="button" className="qt-leaf" title="Open the first rows (right-click for more)" onClick={() => onOpen({ kind: 'sql', connectionId: adapter.id, table: t, schemaName: s.name, dialect: adapter.type })}
                           onContextMenu={(e) => { e.preventDefault(); onMenu(e, { type: 'table', adapter, table: t, schemaName: s.name, showColumns: () => toggleColumns(key), columnsOpen: !!openTables[key] }); }}>
-                          <span className="qt-ico">{t.kind === 'view' ? '◇' : '▦'}</span><span className="qt-name">{t.name}</span><span className="qt-count">{t.columns.length}</span>
+                          <span className="qt-ico"><ObjectIcon kind={t.kind === 'view' ? 'view' : 'table'} /></span><span className="qt-name">{t.name}</span><span className="qt-count">{t.columns.length}</span>
                         </button>
                       </div>
                       {openTables[key] && (
@@ -111,6 +118,7 @@ function AdapterNode({ adapter, open, onToggle, data, filter, onOpen, onMenu, on
     <div className={`qt-adapter ${open ? 'open' : ''}`}>
       <button type="button" className="qt-head" aria-expanded={open} onClick={onToggle} onContextMenu={(e) => { e.preventDefault(); onMenu(e, { type: 'adapter', adapter, open }); }}>
         <span className="qt-caret-s">{open ? '▾' : '▸'}</span>
+        <ObjectIcon kind="database" size={17} title={sql ? 'SQL database' : 'MongoDB database'} />
         <span className="qt-adapter-name">{adapter.name || adapter.id}</span>
         <TypeChip type={adapter.type} />
       </button>
@@ -128,9 +136,9 @@ function highlight(name, filter) {
 }
 
 function firstRowsSql(table, schemaName, dialect) {
-  const name = `${schemaName && !['public', 'dbo'].includes(schemaName) ? `${quoteName(schemaName, dialect)}.` : ''}${quoteName(table.name, dialect)}`;
+  const name = `${schemaName && !['public', 'dbo', 'main'].includes(schemaName) ? `${quoteName(schemaName, dialect)}.` : ''}${quoteName(table.name, dialect)}`;
   const cols = table.columns.slice(0, 30).map((c) => quoteName(c.name, dialect)).join(', ') || '*';
-  return `SELECT ${cols}\nFROM ${name}`;
+  return limitRows(`SELECT ${cols}\nFROM ${name}`, 200, dialect);
 }
 
 function Home({ adapters, onOpen, onPick, onConnect }) {
@@ -212,6 +220,7 @@ export default function QueryApp() {
         { label: target.open ? 'Collapse' : 'Expand', icon: target.open ? '▾' : '▸', onClick: () => toggle(adapter) },
         { label: 'Refresh', icon: '↻', onClick: () => { load(adapter, true); if (!open[adapter.id]) setOpen((o) => ({ ...o, [adapter.id]: true })); } },
         isSql(adapter) && '-',
+        isSql(adapter) && { label: 'Query builder (drag & drop)', icon: '⊞', onClick: () => openTab({ kind: 'builder', connectionId: adapter.id }) },
         isSql(adapter) && { label: 'New SQL editor', icon: '⌘', onClick: () => openTab({ kind: 'sql', connectionId: adapter.id }) },
         isSql(adapter) && { label: 'Schema diagram', icon: '⧉', onClick: () => openTab({ kind: 'diagram', connectionId: adapter.id }) },
         '-',
@@ -282,12 +291,13 @@ export default function QueryApp() {
   const openTab = ({ kind, connectionId, collection, table, schemaName, dialect, mode, run = true, fresh = false }) => {
     setManaging(false);
     const adapter = adapterOf(connectionId);
-    if (kind === 'diagram') load(adapter);
+    if ((kind === 'diagram' || kind === 'builder') && adapter && !data[adapter.id]) load(adapter);
     const same = !fresh && tabs.find((t) => !t.saved && t.kind === kind && t.connectionId === connectionId && (kind === 'mongo' ? t.collection === collection : kind === 'diagram'));
     if (same) { setState({ tabs: mode ? tabs.map((t) => (t.id === same.id ? { ...t, mode } : t)) : tabs, active: same.id }); return; }
     const tab = { id: tabId(), kind, connectionId };
     if (kind === 'mongo') Object.assign(tab, { collection, title: collection, mode: mode || 'docs' });
     if (kind === 'diagram') tab.title = `${adapter?.name || connectionId} diagram`;
+    if (kind === 'builder') { tab.title = `Builder ${tabs.filter((t) => t.kind === 'builder').length + 1}`; tab.dialect = adapter?.type; }
     if (kind === 'sql') {
       const n = tabs.filter((t) => t.kind === 'sql').length + 1;
       tab.dialect = adapter?.type;
@@ -306,7 +316,7 @@ export default function QueryApp() {
   const currentAdapter = current && adapterOf(current.connectionId);
 
   // a diagram tab needs the schema of its adapter
-  useEffect(() => { if (current?.kind === 'diagram' && currentAdapter && !data[currentAdapter.id]) load(currentAdapter); }, [current?.id, currentAdapter?.id]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { if ((current?.kind === 'diagram' || current?.kind === 'builder') && currentAdapter && !data[currentAdapter.id]) load(currentAdapter); }, [current?.id, currentAdapter?.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // the search box suggests names while typing: collections, tables and saved queries that contain the text
   const hints = useMemo(() => {
@@ -317,14 +327,14 @@ export default function QueryApp() {
       adapters.forEach((a) => {
         const d = data[a.id];
         if (!d || d.loading || d.error) return;
-        if (!isSql(a)) d.collections.filter((c) => c.name.toLowerCase().includes(q)).forEach((c) => out.push({ key: `${a.id}/${c.name}`, icon: '▤', name: c.name, where: a.name || a.id,
+        if (!isSql(a)) d.collections.filter((c) => c.name.toLowerCase().includes(q)).forEach((c) => out.push({ key: `${a.id}/${c.name}`, icon: <ObjectIcon kind={c.type === 'view' ? 'mongoView' : 'collection'} size={14} />, name: c.name, where: a.name || a.id,
           open: () => openTab({ kind: 'mongo', connectionId: a.id, collection: c.name }) }));
-        else d.schemas.forEach((s) => s.tables.filter((t) => t.name.toLowerCase().includes(q)).forEach((t) => out.push({ key: `${a.id}/${s.name}.${t.name}`, icon: '▦', name: t.name,
+        else d.schemas.forEach((s) => s.tables.filter((t) => t.name.toLowerCase().includes(q)).forEach((t) => out.push({ key: `${a.id}/${s.name}.${t.name}`, icon: <ObjectIcon kind={t.kind === 'view' ? 'view' : 'table'} size={14} />, name: t.name,
           where: `${a.name || a.id}${s.name ? ` · ${s.name}` : ''}`, open: () => openTab({ kind: 'sql', connectionId: a.id, table: t, schemaName: s.name, dialect: a.type }) })));
       });
     }
     [...saved.mine, ...saved.shared].filter((item) => item.name.toLowerCase().includes(q))
-      .forEach((item) => out.push({ key: item.id, icon: '★', name: item.name, where: item.mine ? 'my query' : `shared by ${item.owner}`, open: () => openSaved(item) }));
+      .forEach((item) => out.push({ key: item.id, icon: <ObjectIcon kind={item.kind === 'sql' ? 'sql' : 'mongo'} size={14} />, name: item.name, where: item.mine ? 'my query' : `shared by ${item.owner}`, open: () => openSaved(item) }));
     return out.sort((a, b) => (a.name.toLowerCase().indexOf(q) - b.name.toLowerCase().indexOf(q)) || a.name.length - b.name.length).slice(0, 8);
   }, [filter, data, adapters, saved, sideView]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -346,12 +356,12 @@ export default function QueryApp() {
           <div className="q-side-seg" role="tablist" aria-label="Show">
             <button type="button" role="tab" aria-selected={sideView === 'sources'} className={sideView === 'sources' ? 'on' : ''} onClick={() => setSideView('sources')}>▤ Sources</button>
             <button type="button" role="tab" aria-selected={sideView === 'mine'} className={sideView === 'mine' ? 'on' : ''} onClick={() => setSideView('mine')}>
-              ★ My queries <em>{saved.mine.length + saved.shared.length}</em>
+              ★ Saved queries <em>{saved.mine.length + saved.shared.length}</em>
             </button>
           </div>
           <div className="q-filter-wrap">
             <input className="q-filter" type="search" value={filter} aria-label="Search" autoComplete="off"
-              placeholder={sideView === 'mine' ? 'Search my queries…' : 'Search collections, tables…'}
+              placeholder={sideView === 'mine' ? 'Search saved queries…' : 'Search tables, views, collections…'}
               onChange={(e) => { setFilter(e.target.value); setHintsOpen(true); }} onFocus={() => setHintsOpen(true)} onBlur={() => setTimeout(() => setHintsOpen(false), 150)}
               onKeyDown={(e) => { if (e.key === 'Escape') setHintsOpen(false); if (e.key === 'Enter' && hints[0]) { e.preventDefault(); hints[0].open(); setHintsOpen(false); } }} />
             {hintsOpen && filter.trim() && hints.length > 0 && (
@@ -368,7 +378,16 @@ export default function QueryApp() {
             <div className="q-tree q-mine">
               <SavedQueryList saved={saved} filter={filter} onOpen={openSaved} onEdit={setEditing}
                 onDelete={async (item) => { try { if (await deleteSavedQuery(item)) { setToast(`Deleted “${item.name}”`); setState((s) => ({ ...s, tabs: s.tabs.map((t) => (t.saved?.id === item.id ? { ...t, saved: undefined } : t)) })); } } catch (e) { setToast(e.message); } }}
-                empty={<>Nothing saved yet. Open a collection → <b>Aggregate</b>, or a SQL editor, and press <b>💾 Save query</b>.</>} />
+                empty={(
+                  <div className="sq-empty">
+                    <b>No saved queries yet</b>
+                    <span>Write a query, then press <kbd>💾 Save query</kbd> to keep it here.</span>
+                    <ol>
+                      <li><ObjectIcon kind="collection" size={14} /> MongoDB: open a collection → <b>Aggregate</b></li>
+                      <li><ObjectIcon kind="table" size={14} /> SQL: open a table or <b>＋ SQL</b></li>
+                    </ol>
+                  </div>
+                )} />
             </div>
           )}
           <div className="q-tree" hidden={sideView !== 'sources'}>
@@ -385,7 +404,7 @@ export default function QueryApp() {
             <button type="button" role="tab" aria-selected={!current} className={`q-tab home ${!current ? 'on' : ''}`} onClick={() => { setManaging(false); setState({ tabs, active: null }); }} title="Start">⌂</button>
             {tabs.map((t) => (
               <div key={t.id} role="tab" aria-selected={t.id === active} className={`q-tab ${t.id === active ? 'on' : ''} k-${t.kind}`} onClick={() => { setManaging(false); setState({ tabs, active: t.id }); }} onAuxClick={(e) => { if (e.button === 1) closeTab(t.id); }}>
-                <span className="q-tab-ico">{t.kind === 'mongo' ? '▤' : t.kind === 'diagram' ? '⧉' : '⌘'}</span>
+                <span className="q-tab-ico">{t.kind === 'mongo' ? '▤' : t.kind === 'diagram' ? '⧉' : t.kind === 'builder' ? '⊞' : '⌘'}</span>
                 <span className="q-tab-name">{t.title}</span>
                 <button type="button" className="q-tab-x" aria-label={`Close ${t.title}`} onClick={(e) => { e.stopPropagation(); closeTab(t.id); }}>×</button>
               </div>
@@ -403,7 +422,14 @@ export default function QueryApp() {
               </div>
             )}
             {current?.kind === 'mongo' && <MongoView tab={current} onChange={(p) => patchTab(current.id, p)} notify={setToast} />}
-            {current?.kind === 'sql' && <SqlView key={current.id} tab={current} onChange={(p) => patchTab(current.id, p)} notify={setToast} />}
+            {current?.kind === 'sql' && <SqlView key={current.id} tab={current} onChange={(p) => patchTab(current.id, p)} notify={setToast} schema={data[current.connectionId]} dialect={currentAdapter?.type} />}
+            {current?.kind === 'builder' && (
+              <SqlBuilder key={current.id} tab={current} onChange={(p) => patchTab(current.id, p)} schema={data[current.connectionId]} dialect={currentAdapter?.type} notify={setToast}
+                onOpenSql={(text) => {
+                  const tab = { id: tabId(), kind: 'sql', connectionId: current.connectionId, dialect: currentAdapter?.type, title: `${current.title} SQL`, sql: text, autoRun: true };
+                  setState((s) => ({ tabs: [...s.tabs, tab], active: tab.id }));
+                }} />
+            )}
             {current?.kind === 'diagram' && (() => {
               const schema = data[current.connectionId];
               if (!schema || schema.loading) return <div className="q-loading"><span className="q-spin" /> Reading the schema…</div>;

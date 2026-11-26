@@ -92,7 +92,7 @@ def clean_source(payload: dict[str, Any], find: Callable[[str], dict[str, Any] |
 
 def depends_on(item: dict[str, Any], find: Callable[[str], dict[str, Any] | None], depth: int = 0) -> set[str]:
     """Every dataset a Python dataset is made from (its inputs, theirs, …)."""
-    if item.get("sourceKind") != "python" or depth > 10:
+    if item.get("sourceKind") not in ("python", "pipeline") or depth > 10:
         return set()
     found: set[str] = set()
     for dataset_id in item.get("inputs") or []:
@@ -112,7 +112,7 @@ def _environment() -> dict[str, str]:
             "OPENBLAS_NUM_THREADS": threads, "MKL_NUM_THREADS": threads, "LOKY_MAX_CPU_COUNT": threads, "PYTHONHASHSEED": "0"}
 
 
-def _write_input(dataset: dict[str, Any], target: Path, limit: int) -> None:
+def _load_frame(dataset: dict[str, Any], limit: int) -> Any:
     from backend.app.analytics import importer  # noqa: PLC0415
     path = importer.file_path(dataset.get("file") or "")
     if path is None or not path.exists():
@@ -125,7 +125,53 @@ def _write_input(dataset: dict[str, Any], target: Path, limit: int) -> None:
     if len(frame) > limit:
         raise ValueError(f"“{dataset.get('name')}” has more than {limit:,} rows (ANALYTICS_PYTHON_MAX_ROWS); "
                          "make a smaller dataset for the script")
-    frame.to_pickle(target)
+    return frame
+
+
+def execute(script: str, frames: list[dict[str, Any]], work: Path) -> dict[str, Any]:
+    """Run a script in `work` (an empty folder) on pandas DataFrames ({"name", "id", "frame"}).
+
+    Returns {"ok", "error", "output", "notes", "produced" (the NDJSON result or None), "dates" (its date columns),
+    "durationMs"}. Raises ValueError when it ran out of time. Pipelines (pipeline.py) use this for their Python steps."""
+    missing = available()
+    if missing:
+        raise ValueError(missing)
+    started = time.monotonic()
+    limit = max_rows()
+    files = []
+    for index, item in enumerate(frames):
+        if len(item["frame"]) > limit:
+            raise ValueError(f"“{item['name']}” has more than {limit:,} rows (ANALYTICS_PYTHON_MAX_ROWS)")
+        name = f"in{index}.pkl"
+        item["frame"].to_pickle(work / name)
+        files.append({"file": name, "name": str(item["name"]), "id": str(item["id"])})
+    (work / "script.py").write_text(script, encoding="utf-8")
+    (work / "job.json").write_text(json.dumps({"inputs": files, "maxRows": limit, "memoryMb": memory_mb(),
+                                               "preload": list(PRELOAD)}), encoding="utf-8")
+    flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+    try:
+        process = subprocess.run([sys.executable, "-I", "-X", "utf8", str(SANDBOX), str(work)], cwd=work, env=_environment(),
+                                 stdin=subprocess.DEVNULL, capture_output=True, timeout=timeout_seconds(), creationflags=flags)
+    except subprocess.TimeoutExpired:
+        raise ValueError(f"The script ran longer than {timeout_seconds()} s (ANALYTICS_PYTHON_TIMEOUT_SECONDS) and was stopped") from None
+    report_file = work / "result.json"
+    if not report_file.exists() or report_file.stat().st_size > 2_000_000:
+        detail = process.stderr.decode("utf-8", "replace").strip().splitlines()[-1:] if process.stderr else []
+        if process.returncode and not detail:
+            detail = [f"exit code {process.returncode}; it may have used more than {memory_mb()} MB of memory"]
+        LOG.warning("Analytics script ended without a report: %s", " ".join(detail)[:300])
+        return {"ok": False, "error": f"The script stopped without a result ({' '.join(detail)[:300] or 'no report'})",
+                "output": "", "notes": [], "produced": None, "dates": [], "durationMs": _ms(started)}
+    report = json.loads(report_file.read_text(encoding="utf-8"))
+    produced = work / "out.ndjson"
+    result = {"ok": bool(report.get("ok")), "error": str(report.get("error") or "")[:4000],
+              "output": str(report.get("output") or "")[:70_000], "notes": [str(n)[:200] for n in report.get("notes") or []][:5],
+              "produced": produced if produced.exists() else None,
+              "dates": [name for name, kind in (report.get("dtypes") or {}).items() if str(kind).startswith("datetime64")],
+              "durationMs": _ms(started)}
+    if result["ok"] and result["produced"] is None:
+        result.update({"ok": False, "error": "The script did not leave a result"})
+    return result
 
 
 def run(script: str, inputs: list[dict[str, Any]], *, output: Path | None = None, preview_rows: int = 50) -> dict[str, Any]:
@@ -138,41 +184,14 @@ def run(script: str, inputs: list[dict[str, Any]], *, output: Path | None = None
     if missing:
         raise ValueError(missing)
     started = time.monotonic()
-    limit = max_rows()
     work = Path(tempfile.mkdtemp(prefix="rs-py-"))
     try:
-        files = []
-        for index, dataset in enumerate(inputs):
-            name = f"in{index}.pkl"
-            _write_input(dataset, work / name, limit)
-            files.append({"file": name, "name": str(dataset.get("name") or dataset["id"]), "id": dataset["id"]})
-        (work / "script.py").write_text(script, encoding="utf-8")
-        (work / "job.json").write_text(json.dumps({"inputs": files, "maxRows": limit, "memoryMb": memory_mb(),
-                                                   "preload": list(PRELOAD)}), encoding="utf-8")
-        flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
-        try:
-            process = subprocess.run([sys.executable, "-I", "-X", "utf8", str(SANDBOX), str(work)], cwd=work, env=_environment(),
-                                     stdin=subprocess.DEVNULL, capture_output=True, timeout=timeout_seconds(), creationflags=flags)
-        except subprocess.TimeoutExpired:
-            raise ValueError(f"The script ran longer than {timeout_seconds()} s (ANALYTICS_PYTHON_TIMEOUT_SECONDS) and was stopped") from None
-        report_file = work / "result.json"
-        if not report_file.exists() or report_file.stat().st_size > 2_000_000:
-            detail = process.stderr.decode("utf-8", "replace").strip().splitlines()[-1:] if process.stderr else []
-            if process.returncode and not detail:
-                detail = [f"exit code {process.returncode}; it may have used more than {memory_mb()} MB of memory"]
-            LOG.warning("Analytics script ended without a report: %s", " ".join(detail)[:300])
-            return {"ok": False, "error": f"The script stopped without a result ({' '.join(detail)[:300] or 'no report'})",
-                    "output": "", "notes": [], "columns": [], "rowCount": 0, "rows": [], "durationMs": _ms(started)}
-        report = json.loads(report_file.read_text(encoding="utf-8"))
-        result = {"ok": bool(report.get("ok")), "error": str(report.get("error") or "")[:4000],
-                  "output": str(report.get("output") or "")[:70_000], "notes": [str(n)[:200] for n in report.get("notes") or []][:5],
-                  "columns": [], "rowCount": 0, "rows": [], "durationMs": _ms(started)}
-        produced = work / "out.ndjson"
-        if result["ok"] and produced.exists():
-            dates = [name for name, kind in (report.get("dtypes") or {}).items() if str(kind).startswith("datetime64")]
-            result.update(_read_result(produced, output, preview_rows, dates))
-        elif result["ok"]:
-            result.update({"ok": False, "error": "The script did not leave a result"})
+        frames = [{"name": str(item.get("name") or item["id"]), "id": item["id"], "frame": _load_frame(item, max_rows())}
+                  for item in inputs]
+        report = execute(script, frames, work)
+        result = {**{k: report[k] for k in ("ok", "error", "output", "notes")}, "columns": [], "rowCount": 0, "rows": []}
+        if report["ok"]:
+            result.update(_read_result(report["produced"], output, preview_rows, report["dates"]))
         result["durationMs"] = _ms(started)
         return result
     finally:
@@ -183,21 +202,29 @@ def _ms(started: float) -> int:
     return int((time.monotonic() - started) * 1000)
 
 
+def ndjson_source(con: Any, produced: Path, dates: list[str] | None = None) -> str:
+    """A FROM part that reads a script's NDJSON output with DuckDB (types detected again; pandas dates are ISO text,
+    so they are made dates again)."""
+    from backend.app.analytics import importer  # noqa: PLC0415
+    source = (f"read_json({importer.quote_path(produced)}, format='newline_delimited', union_by_name=true, sample_size=-1, "
+              "maximum_object_size=67108864)")
+    known = {row[0] for row in con.execute(f"DESCRIBE SELECT * FROM {source}").fetchall()}
+    stamps = [name for name in dates or [] if name in known]
+    if stamps:
+        quoted = lambda name: '"' + name.replace('"', '""') + '"'  # noqa: E731
+        source = f"(SELECT * REPLACE ({', '.join(f'TRY_CAST({quoted(n)} AS TIMESTAMP) AS {quoted(n)}' for n in stamps)}) FROM {source})"
+    return source
+
+
 def _read_result(produced: Path, output: Path | None, preview_rows: int, dates: list[str] | None = None) -> dict[str, Any]:
     """The script's NDJSON output read by DuckDB (types detected again: numbers, dates, text): the first rows and,
     when saving, a Parquet file."""
     from backend.app.analytics import importer  # noqa: PLC0415
     if produced.stat().st_size == 0:
         return {"columns": [], "rowCount": 0, "rows": []}
-    source = (f"read_json({importer.quote_path(produced)}, format='newline_delimited', union_by_name=true, sample_size=-1, "
-              "maximum_object_size=67108864)")
     con = importer.connect()
-    known = {row[0] for row in con.execute(f"DESCRIBE SELECT * FROM {source}").fetchall()}
-    stamps = [name for name in dates or [] if name in known]
-    if stamps:                                     # pandas dates arrive as ISO text: dates again
-        quoted = lambda name: '"' + name.replace('"', '""') + '"'  # noqa: E731
-        source = f"(SELECT * REPLACE ({', '.join(f'TRY_CAST({quoted(n)} AS TIMESTAMP) AS {quoted(n)}' for n in stamps)}) FROM {source})"
     try:
+        source = ndjson_source(con, produced, dates)
         count = int(con.execute(f"SELECT count(*) FROM {source}").fetchone()[0])
         cursor = con.execute(f"SELECT * FROM {source} LIMIT {int(preview_rows)}")
         columns = [item[0] for item in cursor.description]

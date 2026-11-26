@@ -5,6 +5,11 @@ const id = (value) => encodeURIComponent(value);
 
 export const bi = {
   info: () => request('/api/analytics/info'),
+  /** folders (shared with the Analytics Server): list, new, rename (what is inside goes with it), delete (moves it) */
+  folders: () => request('/api/analytics/folders'),
+  createFolder: (path) => request('/api/analytics/folders', { method: 'POST', body: { path } }),
+  renameFolder: (path, newPath) => request('/api/analytics/folders/rename', { method: 'POST', body: { path, newPath } }),
+  deleteFolder: (path, moveTo) => request('/api/analytics/folders', { method: 'DELETE', body: { path, moveTo } }),
   datasets: () => request('/api/analytics/datasets'),
   dataset: (datasetId) => request(`/api/analytics/datasets/${id(datasetId)}`),
   testSource: (source) => request('/api/analytics/datasets/test', { method: 'POST', body: source }),
@@ -33,6 +38,8 @@ export const bi = {
   query: (visual) => request('/api/analytics/query', { method: 'POST', body: visual }),
   /** try a Python script on datasets: {script, inputs, datasetId?} → first rows, printed output or the error */
   runPython: (body) => request('/api/analytics/python/run', { method: 'POST', body }),
+  /** try pipeline steps: {steps, until?, datasetId?} → each step's rows and time, the first rows of the last one */
+  runPipeline: (body) => request('/api/analytics/pipelines/run', { method: 'POST', body }),
   queryBatch: (queries, filters) => request('/api/analytics/query-batch', { method: 'POST', body: { queries, filters } }),
 };
 

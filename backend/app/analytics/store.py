@@ -113,7 +113,12 @@ def clean_dataset(payload: dict[str, Any], adapters: dict[str, str], current: di
         raise ValueError(f"A scheduled refresh runs at most every {settings.min_refresh_minutes()} minutes (or 0 = only by hand)")
     if every > 7 * 24 * 60:
         raise ValueError("Refresh at least once a week, or set 0 (only by hand)")
-    if merged.get("sourceKind") == "python":            # made by a Python script from other datasets (pyscript.py)
+    if merged.get("sourceKind") == "pipeline":          # ETL / ELT steps over other datasets (pipeline.py)
+        from backend.app.analytics import pipeline  # noqa: PLC0415
+        clean = pipeline.clean_steps(merged.get("steps", merged.get("querySource")), dataset, (current or {}).get("id", ""))
+        source = {"sourceKind": "pipeline", "inputs": clean["inputs"], "connectionId": pipeline.CONNECTION,
+                  "queryLanguage": pipeline.LANGUAGE, "querySource": clean["steps"], "collection": ""}
+    elif merged.get("sourceKind") == "python":            # made by a Python script from other datasets (pyscript.py)
         from backend.app.analytics import pyscript  # noqa: PLC0415
         clean = pyscript.clean_source({**merged, "script": merged.get("script", merged.get("querySource"))}, dataset,
                                       (current or {}).get("id", ""))

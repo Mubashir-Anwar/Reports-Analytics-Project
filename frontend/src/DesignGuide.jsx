@@ -1,8 +1,9 @@
 // Design tab made easy (like Setup): start cards for an empty page, and a small "steps" strip with an example and a
 // one-click button for each step. A step is ticked by itself when the design has it; the strip can be hidden.
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { addElementToBand, bandKeys, bandPresent, bandWidth, defaultElement, getBand, placeField } from './designModel.js';
 import { applyTemplate } from './templates.js';
+import PixelField from './shared/PixelField.jsx';
 
 const HIDE_KEY = 'design-guide-hidden';
 const readHidden = () => { try { return localStorage.getItem(HIDE_KEY) === '1'; } catch { return false; } };
@@ -14,9 +15,29 @@ const usesField = (design) => allElements(design).some((el) => /\$F\{/.test(`${e
 const noDataReport = (report) => !report.columns.length && !String(report.collection || '').trim() && !String(report.query || '').trim();
 
 /* ---------- empty page: how do you want to start? ---------- */
+/** A tiny drawing of the page each start makes (CSS only). */
+function Thumb({ kind }) {
+  const rows = (n) => Array.from({ length: n }, (_, i) => <i key={i} />);
+  return (
+    <span className={`st-thumb st-${kind}`} aria-hidden="true">
+      {kind === 'table' && <><em className="st-h" /><span className="st-rows">{rows(5)}</span></>}
+      {kind === 'letter' && <><em className="st-logo" /><span className="st-lines">{rows(6)}</span><em className="st-sign" /></>}
+      {kind === 'own' && <><em className="st-up">⇪</em><span className="st-lines">{rows(3)}</span></>}
+      {kind === 'invoice' && <><em className="st-h" /><span className="st-grid">{rows(6)}</span><em className="st-total" /></>}
+      {kind === 'blank' && <span className="st-bands">{rows(3)}</span>}
+    </span>
+  );
+}
+
+const QUICK = [
+  ['invoice', 'Invoice', '🧾'], ['challan', 'Fee challan', '🏦'], ['statement', 'Statement', '📒'],
+  ['form', 'Form', '🗂️'], ['certificate', 'Certificate', '🏅'], ['blank-landscape', 'Landscape', '↔️'],
+];
+
 export function DesignStart({ report, dispatch, onTemplates, onImportDesign, onSetup, notify }) {
   const fields = report.columns;
   const title = report.title && report.title !== 'New report' ? report.title : 'My report';
+  const noData = noDataReport(report);
   const apply = (id, name) => {
     dispatch({ type: 'DESIGN', update: (d) => applyTemplate(id, fields, title, d) });
     dispatch({ type: 'SELECT', selection: { kind: 'report' } });
@@ -24,23 +45,51 @@ export function DesignStart({ report, dispatch, onTemplates, onImportDesign, onS
   };
   const cards = [
     fields.length
-      ? { icon: '▤', title: 'A list of records', text: `Headings and one row per record, from your ${fields.length} field${fields.length === 1 ? '' : 's'}.`, example: `e.g. ${fields.slice(0, 3).join(' · ')}${fields.length > 3 ? ' …' : ''}`, run: () => apply('table', 'Table report'), primary: true }
-      : { icon: '▤', title: 'A list of records', text: 'First choose the data in Setup; then this makes the columns for you.', example: 'Opens Setup → choose a data adapter and a query', run: onSetup },
-    { icon: '✉', title: 'A letter or form', text: 'Letterhead, date, address, body and signature — one per record.', example: 'e.g. offer letter, fee challan, profile sheet', run: () => apply('letter', 'Letter') },
-    { icon: '⤓', title: 'Use my own design', text: 'Upload a PDF, Word or image of your page; it is rebuilt here and you mark the fields.', example: 'e.g. the bank’s statement format', run: onImportDesign },
-    { icon: '▦', title: 'Invoice, challan, statement…', text: 'Invoice, fee challan (3 copies), account statement, form, certificate and more.', example: 'All layouts with a picture of each', run: onTemplates },
-    { icon: '▭', title: 'Blank page', text: 'Title, Detail and Page Footer only. Design everything yourself.', example: 'Drag elements from the Palette', run: () => apply('blank', 'Blank A4') },
+      ? { kind: 'table', tint: 'b', tag: 'Most used', title: 'A list of records', text: `Headings and one row per record, from your ${fields.length} field${fields.length === 1 ? '' : 's'}.`, example: `${fields.slice(0, 3).join(' · ')}${fields.length > 3 ? ' …' : ''}`, run: () => apply('table', 'Table report'), primary: true }
+      : { kind: 'table', tint: 'b', tag: 'Needs data', title: 'A list of records', text: 'First choose the data in Setup; then this makes the columns for you.', example: 'a data adapter and a query in Setup first', run: onSetup },
+    { kind: 'letter', tint: 'v', title: 'A letter or form', text: 'Letterhead, date, address, body and signature — one per record.', example: 'offer letter · fee challan · profile sheet', run: () => apply('letter', 'Letter') },
+    { kind: 'own', tint: 'c', tag: 'Magic', title: 'Use my own design', text: 'Upload a PDF, Word or image of your page; it is rebuilt here and you mark the fields.', example: 'the bank’s statement format', run: onImportDesign },
+    { kind: 'invoice', tint: 'a', title: 'Invoice, challan, statement…', text: 'Invoice, fee challan (3 copies), account statement, form, certificate and more.', example: 'every layout with a picture', run: onTemplates },
+    { kind: 'blank', tint: 'g', title: 'Blank page', text: 'Title, Detail and Page Footer only. Design everything yourself.', example: 'drag elements from the Palette', run: () => apply('blank', 'Blank A4') },
   ];
+  useEffect(() => {          // 1-5 pick a card (not while typing)
+    const onKey = (event) => {
+      if (event.ctrlKey || event.metaKey || event.altKey || /INPUT|TEXTAREA|SELECT/.test(event.target?.tagName || '') || event.target?.isContentEditable) return;
+      const card = cards[Number(event.key) - 1];
+      if (card?.run) { event.preventDefault(); card.run(); }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  });
   return (
     <div className="design-start">
       <div className="design-start-inner">
-        <p className="eyebrow">Design · step 1</p>
-        <h2>How should the page look?</h2>
-        <p className="muted">Pick a start. Everything can be changed afterwards on the page — nothing is fixed.</p>
-        <div className="start-cards">
-          {cards.map((c) => (
-            <button key={c.title} type="button" className={`start-card ${c.primary ? 'primary' : ''}`} disabled={!c.run} onClick={() => c.run?.()}>
-              <span className="start-icon" aria-hidden="true">{c.icon}</span>
+        <header className="ds2-hero px-grid px-in">
+          <span className="ds2-art" aria-hidden="true"><PixelField cell={9} gap={3} bars={9} /></span>
+          <p className="px-kicker"><b>02</b> — Design · step 1</p>
+          <h2>How should the page look?<span className="px-caret" aria-hidden="true" /></h2>
+          <p className="muted">Pick a start. Everything can be changed afterwards on the page — nothing is fixed.</p>
+          <div className="ds2-status">
+            {noData
+              ? <button type="button" className="ds2-pill warn" onClick={onSetup}>🔌 No data yet · choose it in Setup →</button>
+              : <span className="ds2-pill ok">⚡ {fields.length} field{fields.length === 1 ? '' : 's'} ready{report.connectionId ? ` · ${report.connectionId}` : ''}</span>}
+            <span className="ds2-pill">⌨️ press 1–5</span>
+            <span className="ds2-pill">↩️ Ctrl+Z undoes</span>
+          </div>
+        </header>
+        <section className="ds2-quick" aria-label="Popular layouts in one click">
+          <h3>Or jump straight in <span className="muted">· one click, ready on the page</span></h3>
+          <div className="ds2-chips">
+            {QUICK.map(([id, name, icon]) => <button key={id} type="button" onClick={() => apply(id, name)}><span aria-hidden="true">{icon}</span>{name}</button>)}
+            <button type="button" className="all" onClick={onTemplates}>All layouts →</button>
+          </div>
+        </section>
+        <div className="start-cards ds2-cards">
+          {cards.map((c, i) => (
+            <button key={c.title} type="button" className={`start-card ds2-card tint-${c.tint} ${c.primary ? 'primary' : ''}`} disabled={!c.run} onClick={() => c.run?.()} style={{ '--i': i }}>
+              <Thumb kind={c.kind} />
+              <span className="ds2-key" aria-hidden="true">{i + 1}</span>
+              {c.tag && <em className="ds2-tag">{c.tag}</em>}
               <b>{c.title}</b>
               <span>{c.text}</span>
               <small>{c.example}</small>

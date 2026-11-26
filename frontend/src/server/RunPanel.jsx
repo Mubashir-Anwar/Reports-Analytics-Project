@@ -27,7 +27,7 @@ function ParameterInput({ parameter, value, onChange }) {
     placeholder={parameter.patternMessage ? parameter.patternMessage.replace(/^Type (the |a )?/i, '') : undefined} />;
 }
 
-/** Input controls + format + Run (JasperReports Server's "Run" view). */
+/** Input controls + format + Run (a report server's "Run" view). */
 export default function RunPanel({ report, onBackground }) {
   const [values, setValues] = useState({});
   const [format, setFormat] = useState('pdf');

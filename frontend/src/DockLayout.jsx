@@ -1,4 +1,4 @@
-// Movable designer panels (Repository explorer, Outline, Palette, Properties), like Eclipse / Jaspersoft Studio views:
+// Movable designer panels (Repository explorer, Outline, Palette, Properties), like Eclipse / a classic report designer views:
 //   * drag a panel's title bar to the other side, to another place in a side, or onto the report to float it;
 //   * each title bar: minimise, maximise (in its side), move up / down, move to the other side, float, hide;
 //   * drag the inner edge of a side to make it wider or narrower;

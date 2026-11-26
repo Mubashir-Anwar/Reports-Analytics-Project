@@ -7,7 +7,7 @@ import { reportPayload } from './store.js';
 import { FolderDeleteDialog, FolderPicker } from './shared/folders.jsx';
 import { SavedQueryBar } from './shared/SavedQueries.jsx';
 import './setup-genz.css';
-import CodeArea, { selectLine } from './CodeArea.jsx';
+import CodeArea, { languageOf, selectLine } from './CodeArea.jsx';
 import FieldsEditor from './FieldsEditor.jsx';
 import { PATTERN_PRESETS, RELATIVE_DATES, isRelativeDate, resolveRelative, startValue, valueProblem } from './relativeDates.js';
 
@@ -35,7 +35,7 @@ const useAdapters = (notify, refreshKey) => {
   return [adapters, load];
 };
 
-/** Data adapter, collection, query and fields (Jasper: Dataset and Query → Query). */
+/** Data adapter, collection, query and fields (classic reports: Dataset and Query → Query). */
 /**
  * tests: show the Test connection / Check query / Try with data tools (Setup only).
  * wrap(key, content, { summary, issues, tested }): puts the adapter, query and fields parts in their own segments.
@@ -221,7 +221,7 @@ export function QueryEditor({ state, dispatch, notify, refreshKey, markLine, mar
           {!wrap && kindMismatch && <small className="err">{isSql ? 'This is a SQL query: choose a SQL data adapter above (PostgreSQL, MySQL, SQL Server or Oracle).' : 'This adapter is a SQL database: choose a MongoDB adapter, or Query language SQL.'}</small>}
         </label>}
         {!isSql && (
-          <label className={tests ? 'wide' : undefined} data-focus="collection" data-guide="collection">Collection name <small>Only the name, e.g. Orders. A Jasper query fills it in by itself.</small>
+          <label className={tests ? 'wide' : undefined} data-focus="collection" data-guide="collection">Collection name <small>Only the name, e.g. Orders. An imported query fills it in by itself.</small>
             <input value={report.collection} onChange={(e) => set({ collection: e.target.value })} onBlur={(e) => { const clean = cleanCollection(e.target.value); if (clean !== e.target.value) set({ collection: clean }); }} placeholder="Collection name" />
           </label>
         )}
@@ -247,11 +247,11 @@ export function QueryEditor({ state, dispatch, notify, refreshKey, markLine, mar
       {savedBar}
       {isSql ? (
         <div className="block query-block" data-guide="query"><div className="sg-code-head"><b>SQL query</b><span><code>$P&#123;StartDate&#125;</code> a value</span><span><code>$X&#123;IN, branch, Branches&#125;</code> a list, empty = all</span></div>
-          <CodeArea focusName="query" markLine={markLine} markNote={markNote} rows={14} value={report.querySource} onChange={(e) => set({ querySource: e.target.value })} placeholder={'SELECT o.id, o.branch, o.amount, o.placed_on\nFROM orders o\nWHERE o.placed_on BETWEEN $P{StartDate} AND $P{EndDate}\n  AND $X{IN, o.branch, Branches}\nORDER BY o.placed_on'} />
+          <CodeArea focusName="query" language={languageOf(report.queryLanguage)} markLine={markLine} markNote={markNote} rows={14} value={report.querySource} onChange={(e) => set({ querySource: e.target.value })} placeholder={'SELECT o.id, o.branch, o.amount, o.placed_on\nFROM orders o\nWHERE o.placed_on BETWEEN $P{StartDate} AND $P{EndDate}\n  AND $X{IN, o.branch, Branches}\nORDER BY o.placed_on'} />
         </div>
       ) : (
-        <div className="block query-block" data-guide="query"><div className="sg-code-head"><b>Query</b><span><code>$P&#123;StartDate&#125;</code> a value</span><span><code>db.collection.aggregate([…])</code> or a Jaspersoft Studio query</span></div>
-          <CodeArea focusName="query" markLine={markLine} markNote={markNote} rows={14} value={report.querySource} onChange={(e) => set({ querySource: e.target.value })} placeholder={'db.getCollection("Orders").aggregate([\n  {"$match": {"Date": {"$gte": $P{StartDate}, "$lte": $P{EndDate}}}},\n  {"$project": {"Identifier": 1, "Branch": 1, "Amount": 1}}\n])'} />
+        <div className="block query-block" data-guide="query"><div className="sg-code-head"><b>Query</b><span><code>$P&#123;StartDate&#125;</code> a value</span><span><code>db.collection.aggregate([…])</code> or an imported query</span></div>
+          <CodeArea focusName="query" language={languageOf(report.queryLanguage)} markLine={markLine} markNote={markNote} rows={14} value={report.querySource} onChange={(e) => set({ querySource: e.target.value })} placeholder={'db.getCollection("Orders").aggregate([\n  {"$match": {"Date": {"$gte": $P{StartDate}, "$lte": $P{EndDate}}}},\n  {"$project": {"Identifier": 1, "Branch": 1, "Amount": 1}}\n])'} />
         </div>
       )}
       {!tests && readFieldsRow}

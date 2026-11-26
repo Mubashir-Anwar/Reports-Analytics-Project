@@ -72,7 +72,7 @@ def register(app: FastAPI, ctx: SimpleNamespace) -> None:
             if not match:
                 raise HTTPException(status_code=400, detail="The path must be /generate/<REPORT_ID>.<pdf|xlsx|csv>")
             report_id, output_format = match.group(1), match.group(2).lower()
-            # Folder= picks the report when the same ID is published in several folders (like a JasperReports
+            # Folder= picks the report when the same ID is published in several folders (like a JRXML reports
             # Server path); without it the only report with this ID that the caller may run
             folder = clean_folder(query_map.get("Folder"))
             definition = reports_by_id.find(report_id, folder, lambda item: report_in_scope(request, item))

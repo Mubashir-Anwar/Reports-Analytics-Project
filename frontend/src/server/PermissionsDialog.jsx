@@ -1,4 +1,4 @@
-// Folder permissions (JasperReports Server: right-click a folder → Permissions). Administrators only.
+// Folder permissions (a report server: right-click a folder → Permissions). Administrators only.
 import { useEffect, useState } from 'react';
 import { FolderPicker } from '../shared/folders.jsx';
 import PopDialog from './PopDialog.jsx';

@@ -9,8 +9,10 @@ from types import SimpleNamespace
 from typing import Any
 
 from fastapi import FastAPI, HTTPException, Request
+from starlette.concurrency import run_in_threadpool
 
-from backend.app.connectors import sql as sql_connector
+from backend.app.connectors import sources, sql as sql_connector
+from backend.app.connectors.errors import ConnectorQueryError
 from backend.app.connectors.mongodb import _mongo_database_from_uri
 from backend.app.connectors.profiles import AREA_NAMES, AREAS, DEFAULT_REMOVED, _profile_credentials, load_connection_profiles, usable
 from backend.app.constants import ADAPTER_TYPES, CONNECTION_ID_PATTERN, ENV_KEY_PATTERN
@@ -110,7 +112,7 @@ def register(app: FastAPI, ctx: SimpleNamespace) -> None:
                     raise HTTPException(status_code=409, detail=f"“{current['name']}” is used by every part; an administrator can give it one part")
                 raise HTTPException(status_code=409, detail=f"The ID {connection_id} is a data source of {AREA_NAMES[current['area']]}; choose another name")
             area = current.get("area", "")
-        # Optional repository folder (like a JasperReports Server "Data Source" folder); empty = top level.
+        # Optional repository folder (like a a report server "Data Source" folder); empty = top level.
         if "folder" in payload:
             raw_folder = str(payload.get("folder") or "").strip()
         else:  # an older client that does not know folders: keep the adapter where it is
@@ -135,9 +137,11 @@ def register(app: FastAPI, ctx: SimpleNamespace) -> None:
         elif kind in sql_connector.SQL_TYPES:
             if not sql_connector.valid_url(kind, uri):
                 raise HTTPException(status_code=422, detail=sql_connector.url_hint(kind))
-            database = sql_connector.database_from_url(uri)
+            database = sql_connector.database_from_url(uri) or (kind if kind in sql_connector.NO_DATABASE else "")
             if not database:
                 raise HTTPException(status_code=422, detail=f"The URL has no database name. {sql_connector.url_hint(kind)}")
+            if kind in sources.UPLOAD_KINDS and database != connection_id:
+                raise HTTPException(status_code=422, detail="The uploaded files belong to another data source")
             profile = {"id": connection_id, "name": name, "type": kind, "storage": "file", "database": database}
         else:
             if not uri.startswith(("mongodb://", "mongodb+srv://")):
@@ -207,7 +211,11 @@ def register(app: FastAPI, ctx: SimpleNamespace) -> None:
             raise HTTPException(status_code=409, detail=f"This data source is still used ({'; '.join(others)}); choose another one there first")
         if used_by:
             raise HTTPException(status_code=409, detail=f"Switch these reports (or their datasets) to another data adapter first: {', '.join(used_by)}")
+        gone = next((item for item in load_connection_profiles() if item["id"] == connection_id), {})
         profiles = [item for item in load_connection_profiles() if item["id"] != connection_id]
+        if gone.get("type") in sources.UPLOAD_KINDS and not any(
+                _profile_credentials(item)[0] == _profile_credentials(gone)[0] for item in profiles if item.get("type") == gone.get("type")):
+            sources.remove_source(connection_id)       # its uploaded files (unless a split copy still reads them)
         if connection_id == "default":             # MONGODB_URI in the environment must not bring it back
             get_store().write_json(DEFAULT_REMOVED, {"removed": True})
         get_store().write_json("connections.json", {"connections": profiles})
@@ -246,6 +254,63 @@ def register(app: FastAPI, ctx: SimpleNamespace) -> None:
             target.pop("folder", None)
         get_store().write_json("connections.json", {"connections": profiles})
         return {"connectionId": connection_id, "folder": folder}
+
+    # ------------------------------------------------------------- Files & Sheets, SQLite and DuckDB files
+    def file_source(request: Request, connection_id: str) -> None:
+        """Files of a data source: its own part's right (or Admin); a new one (not saved yet) needs only the right."""
+        require_admin(request, "sources")
+        if any(item["id"] == connection_id for item in load_connection_profiles()):
+            managed(request, connection_id)
+
+    @app.get("/api/data-sources/{connection_id}/files")
+    def list_files(connection_id: str, request: Request) -> dict[str, Any]:
+        file_source(request, connection_id)
+        try:
+            info = sources.manifest(connection_id)
+        except ConnectorQueryError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from None
+        return {"connectionId": connection_id, "files": info.get("files", []), "tables": info.get("tables", []), "updatedAt": info.get("updatedAt")}
+
+    @app.post("/api/data-sources/{connection_id}/files")
+    async def upload_file(connection_id: str, request: Request) -> dict[str, Any]:
+        """Add a CSV / Excel / JSON / Parquet file (kind files) or the database file (kind sqlite / duckdb):
+        {kind, name, file: base64}. Each file or Excel sheet becomes a table."""
+        file_source(request, connection_id)
+        payload = await ctx.json_body(request)
+        kind = str(payload.get("kind") or "files")
+        if kind not in sources.UPLOAD_KINDS:
+            raise HTTPException(status_code=422, detail="kind must be files, sqlite or duckdb")
+        try:
+            if kind == "files":
+                info = await run_in_threadpool(sources.add_file, connection_id, str(payload.get("name") or ""), str(payload.get("file") or ""))
+            else:
+                info = await run_in_threadpool(sources.put_database_file, connection_id, kind, str(payload.get("name") or ""), str(payload.get("file") or ""))
+        except (ConnectorQueryError, ValueError) as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from None
+        ctx.audit_event(request, "data_source.file", connection_id, {"file": str(payload.get("name") or "")[:160]})
+        return {"connectionId": connection_id, "files": info.get("files", []), "tables": info.get("tables", [])}
+
+    @app.delete("/api/data-sources/{connection_id}/files/{name}")
+    async def delete_file(connection_id: str, name: str, request: Request) -> dict[str, Any]:
+        file_source(request, connection_id)
+        try:
+            info = await run_in_threadpool(sources.remove_file, connection_id, name)
+        except ConnectorQueryError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from None
+        return {"connectionId": connection_id, "files": info.get("files", []), "tables": info.get("tables", [])}
+
+    @app.post("/api/data-sources/sheet")
+    async def read_sheet(request: Request) -> dict[str, Any]:
+        """Read a Google Sheet now (its link): the tabs become tables. Returns the Sheet ID and the tables."""
+        require_admin(request, "sources")
+        sheet = sources.sheet_id_of(str((await ctx.json_body(request)).get("link") or "").strip())
+        if not sheet:
+            raise HTTPException(status_code=422, detail="Paste the link of the Google Sheet (https://docs.google.com/spreadsheets/d/...)")
+        try:
+            info = await run_in_threadpool(sources.refresh_sheet, sheet, force=True)
+        except ConnectorQueryError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from None
+        return {"sheetId": sheet, "tables": info.get("tables", [])}
 
     @app.post("/api/data-sources/{connection_id}/test")
     @app.post("/api/admin/connections/{connection_id}/test")

@@ -1,4 +1,4 @@
-// Wizards that open when a Table, Crosstab or Subreport is dropped on a band (like Jaspersoft Studio's).
+// Wizards that open when a Table, Crosstab or Subreport is dropped on a band (like classic report designers's).
 import { useState } from 'react';
 import { columnFor, defaultMapping, FOOTERS, tableHeight, useServerReports } from './ComponentProps.jsx';
 

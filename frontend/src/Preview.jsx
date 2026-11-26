@@ -11,7 +11,7 @@ const EXPORTS = [['pdf', 'PDF', '📄'], ['xlsx', 'Excel', '📊'], ['csv', 'CSV
 const LIMITS = [['20', 'First 20 records'], ['all', 'All records']];
 
 /**
- * Like Jaspersoft Studio's Preview: a toolbar with the Data Adapter and the green Run button, the
+ * Like a classic report designer's Preview: a toolbar with the Data Adapter and the green Run button, the
  * Input Parameters panel on the left, the filled report in the viewer, and export buttons (PDF / Excel / CSV).
  * The draft on screen is used as it is — nothing has to be saved or published to preview it.
  */

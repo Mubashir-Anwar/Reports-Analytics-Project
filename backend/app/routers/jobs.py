@@ -1,4 +1,4 @@
-"""/server portal: report schedules (JasperReports Server "Schedule"), background runs and their output files.
+"""/server portal: report schedules (a report server "Schedule"), background runs and their output files.
 
 Everyone signed in can run a report in the background. Creating schedules needs a designer or admin account.
 Users see their own schedules and runs; administrators see everybody's."""

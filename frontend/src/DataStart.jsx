@@ -4,11 +4,13 @@
 // next step opens (the layout gallery, then Setup's Query and Fields).
 import { useEffect, useMemo, useState } from 'react';
 import { api } from './api.js';
-import { ADAPTER_TYPES, DbLogo, SQL_KINDS, adapterId, adapterTypeLabel, sqlUrl } from './shared/adapters.jsx';
+import { ADAPTER_TYPES, AdapterWizard, DbLogo, SQL_KINDS, adapterId, adapterTypeLabel, sqlUrl } from './shared/adapters.jsx';
 import PasswordInput from './shared/PasswordInput.jsx';
 
 const STEPS = ['Data', 'Fields', 'Layout', 'Design', 'Preview & publish'];
-const SHORT = { mongodb: 'MongoDB', postgresql: 'PostgreSQL', mysql: 'MySQL / MariaDB', sqlserver: 'SQL Server', oracle: 'Oracle' };
+const SHORT = { mongodb: 'MongoDB', postgresql: 'PostgreSQL', mysql: 'MySQL', mariadb: 'MariaDB', sqlserver: 'SQL Server', oracle: 'Oracle', clickhouse: 'ClickHouse' };
+// the quick cards here; every other source (Snowflake, Redis, Excel, Google Sheets, CockroachDB …) is in the wizard
+const QUICK = ADAPTER_TYPES.filter((t) => SHORT[t.id]);
 
 /** A short burst of coloured bits from the Test button when the connection works. */
 function Confetti() {
@@ -41,6 +43,7 @@ export default function DataStart({ report, dispatch, notify, onNext, onClose })
   const [busy, setBusy] = useState('');
   const [picked, setPicked] = useState(report.connectionId || '');
   const [pickTest, setPickTest] = useState({}); // id → { state: busy|ok|err, text }
+  const [more, setMore] = useState(false);       // the full Data Adapter Wizard
 
   const load = async () => {
     try {
@@ -131,13 +134,18 @@ export default function DataStart({ report, dispatch, notify, onNext, onClose })
           <section className="ds-new" aria-label="Connect a new database">
             <h3><span className="ds-num tint-b">+</span>Connect a new database</h3>
             <ul className="ds-types" role="radiogroup" aria-label="Database type">
-              {ADAPTER_TYPES.map((t, i) => (
+              {QUICK.map((t, i) => (
                 <li key={t.id} style={{ '--i': i }}>
                   <button type="button" role="radio" aria-checked={type === t.id} className={type === t.id ? 'on' : ''} onClick={() => chooseType(t.id)} title={t.text}>
                     <DbLogo type={t.id} size={30} /><b>{SHORT[t.id]}</b>
                   </button>
                 </li>
               ))}
+              <li style={{ '--i': QUICK.length }}>
+                <button type="button" className="ds-more" onClick={() => setMore(true)} title="Snowflake, Redis, Elasticsearch, Excel / CSV / JSON files, Google Sheets, SQLite, DuckDB, CockroachDB, Redshift, Supabase, TiDB, Azure SQL, Atlas …">
+                  <span className="ds-more-dots" aria-hidden="true"><i /><i /><i /></span><b>More sources</b><small>Excel · Sheets · Redis · Snowflake …</small>
+                </button>
+              </li>
             </ul>
 
             <div className="ds-form" key={isSql ? 'sql' : 'mongo'}>
@@ -226,6 +234,8 @@ export default function DataStart({ report, dispatch, notify, onNext, onClose })
           </aside>
         </div>
 
+        {more && <AdapterWizard area="designer" folders={folders} existingIds={(adapters || []).map((a) => a.id)} notify={notify}
+          onClose={() => setMore(false)} onSaved={(saved) => { setMore(false); load(); use({ id: saved.id, name: saved.name, type: saved.type }); }} />}
         <footer className="ds-foot">
           <button type="button" className="btn" onClick={onNext} disabled={Boolean(busy)} title="Go on without an adapter: choose it later in Setup → Data adapter">Skip for now</button>
           {pickedAdapter && <button type="button" className="btn" disabled={Boolean(busy) || pickedAdapter.configured === false} onClick={() => use(pickedAdapter)}>Use “{pickedAdapter.name}” →</button>}

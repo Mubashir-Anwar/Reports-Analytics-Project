@@ -72,3 +72,18 @@
 .sq-pop-list { max-height: 280px; overflow: auto; overscroll-behavior: contain; }
 .sq-pop-reload { justify-self: start; border: 0; background: transparent; color: var(--muted); font: inherit; font-size: 12px; cursor: pointer; }
 .sq-pop-reload:hover { color: var(--accent); }
+
+/* the list, calmer: an icon per kind, the name with what it reads under it, plain group titles */
+.sq-group { display: flex; align-items: center; gap: 6px; margin: 10px 4px 4px; font-family: inherit; font-size: 12px; font-weight: 700; text-transform: none; letter-spacing: 0; color: var(--text); }
+.sq-group em { padding: 0 6px; border-radius: 99px; background: var(--soft); color: var(--muted); font-size: 11px; font-weight: 600; }
+.sq-open { min-height: 42px; padding: 5px 8px; }
+.sq-kind { display: grid; place-items: center; width: 28px; height: 28px; padding: 0; border: 0; border-radius: 8px; }
+.sq-kind.k-mongo { color: #15803d; background: color-mix(in srgb, #16a34a 13%, transparent); }
+.sq-kind.k-sql { color: #1d4ed8; background: color-mix(in srgb, #2563eb 13%, transparent); }
+.sq-text { flex: 1; min-width: 0; display: grid; gap: 1px; }
+.sq-sub { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); font-size: 11.5px; font-weight: 400; }
+.sq-empty { display: grid; gap: 6px; width: 100%; padding: 14px; border: 2px dashed var(--line); color: var(--muted); font-size: 13px; line-height: 1.45; }
+.sq-empty b { color: var(--text); }
+.sq-empty kbd { padding: 0 5px; border: 1px solid var(--line); border-radius: 4px; font: inherit; font-size: 12px; }
+.sq-empty ol { display: grid; gap: 6px; margin: 4px 0 0; padding: 0; list-style: none; }
+.sq-empty li { display: flex; align-items: center; gap: 6px; }

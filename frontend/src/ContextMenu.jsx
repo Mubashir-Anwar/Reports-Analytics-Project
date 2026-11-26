@@ -1,7 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 
 /**
- * Right-click menu like Jaspersoft Studio's. `items`: { label, icon, onClick, disabled, danger, hint, items } or '-'.
+ * Right-click menu like classic report designers's. `items`: { label, icon, onClick, disabled, danger, hint, items } or '-'.
  * An item with `items` opens a submenu on hover.
  */
 function MenuList({ items, onClose, style, className = '' }) {

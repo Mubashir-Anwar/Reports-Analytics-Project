@@ -18,7 +18,7 @@ const COMMON_KEYS = new Set(['x', 'y', 'height', 'color', 'backColor', 'borderCo
   'printWhenDetailOverflows', 'printWhenGroupChanges', 'textAdjust', 'rotation', 'lineSpacing', 'lineSpacingSize',
   'firstLineIndent', 'leftIndent', 'rightIndent', 'spacingBefore', 'spacingAfter', 'tabStopWidth']);
 
-/** Jaspersoft Studio → Appearance: Position Type and Stretch Type ("" = how this designer always worked). */
+/** Appearance: Position Type and Stretch Type ("" = how this designer always worked). */
 const POSITION_TYPES = [['', 'Automatic (moves down below a growing text)'], ['Float', 'Float'], ['FixRelativeToTop', 'Fix Relative To Top'], ['FixRelativeToBottom', 'Fix Relative To Bottom']];
 const STRETCH_TYPES = [['', 'Automatic (grows with a text on its line)'], ['NoStretch', 'No Stretch'], ['RelativeToTallestObject', 'Relative To Tallest Object'],
   ['RelativeToBandHeight', 'Relative To Band Height'], ['ContainerHeight', 'Container Height'], ['ContainerBottom', 'Container Bottom']];
@@ -35,7 +35,7 @@ function Toggles({ value, options, onChange }) {
   );
 }
 
-/** Text Field / Static Text: Text Adjust, alignment, rotation, font, markup and paragraph (like Jaspersoft Studio). */
+/** Text Field / Static Text: Text Adjust, alignment, rotation, font, markup and paragraph (like classic report designers). */
 function TextFormat({ element, patch }) {
   const adjust = element.textAdjust || (element.stretch ? 'StretchHeight' : 'CutText');
   const spacing = element.lineSpacing || 'Single';
@@ -70,7 +70,7 @@ function TextFormat({ element, patch }) {
         </select>
       </Row>
       {element.markup && element.markup !== 'none' && (
-        <p className="hint">Formatted text: <code>&lt;b&gt;</code> <code>&lt;i&gt;</code> <code>&lt;u&gt;</code> <code>&lt;br&gt;</code> <code>&lt;font color size face&gt;</code> <code>&lt;span style&gt;</code> <code>&lt;p&gt;</code> <code>&lt;ul&gt;&lt;li&gt;</code>{element.markup === 'styled' ? <> and Jasper <code>&lt;style forecolor isBold size&gt;</code></> : null}. Excel and CSV get the plain text.</p>
+        <p className="hint">Formatted text: <code>&lt;b&gt;</code> <code>&lt;i&gt;</code> <code>&lt;u&gt;</code> <code>&lt;br&gt;</code> <code>&lt;font color size face&gt;</code> <code>&lt;span style&gt;</code> <code>&lt;p&gt;</code> <code>&lt;ul&gt;&lt;li&gt;</code>{element.markup === 'styled' ? <> and classic <code>&lt;style forecolor isBold size&gt;</code></> : null}. Excel and CSV get the plain text.</p>
       )}
       <div className="prop-section">Paragraph</div>
       <div className="prop-grid">
@@ -141,7 +141,7 @@ function LineStyle({ value, onChange }) {
   );
 }
 
-/** Common Jasper patterns (Text Field → Pattern). */
+/** Common classic patterns (Text Field → Pattern). */
 const PATTERNS = [
   ['#,##0', 'Number 1,234'], ['#,##0.00', 'Number 1,234.56'], ['0.00%', 'Percent 12.34%'], ['Rs. #,##0.00', 'Currency Rs. 1,234.56'],
   ['dd/MM/yyyy', 'Date 31/12/2026'], ['dd-MM-yyyy', 'Date 31-12-2026'], ['dd MMM yyyy', 'Date 31 Dec 2026'],
@@ -178,13 +178,13 @@ export default function Properties({ state, dispatch, notify, actions, onEditExp
   const [patternOpen, setPatternOpen] = useState(false);
   const design$ = (update, key) => dispatch({ type: 'DESIGN', update, key });
 
-  /* ---------- element (tabs like Jaspersoft Studio's Properties view) ---------- */
+  /* ---------- element (tabs like a classic report designer's Properties view) ---------- */
   if (selection.kind === 'element') {
     const found = findElement(design, selection.id);
     if (!found) return <div className="panel-body muted pad">Element not found.</div>;
     const { element, bandKey } = found;
     const multi = selectedIds(selection);
-    // Like Jaspersoft Studio: with several elements selected a change goes to all of them
+    // Like classic report designers: with several elements selected a change goes to all of them
     // (type-specific properties only to the elements of the same type).
     const patch = (values, key) => design$((d) => {
       const common = Object.keys(values).every((k) => COMMON_KEYS.has(k));
@@ -293,7 +293,7 @@ export default function Properties({ state, dispatch, notify, actions, onEditExp
               )}
             </div>
             {boxed && element.type !== 'image' && (
-              <label className="check-row" title="Like Jasper's Mode = Transparent: the background colour is not painted">
+              <label className="check-row" title="Mode = Transparent: the background colour is not painted">
                 <input type="checkbox" checked={!element.backColor || Boolean(element.transparent)} onChange={(e) => patch(e.target.checked ? { transparent: true } : { transparent: false, backColor: element.backColor || '#ffffff' })} /> Transparent
               </label>
             )}
@@ -301,7 +301,7 @@ export default function Properties({ state, dispatch, notify, actions, onEditExp
               <>
                 <div className="prop-section">Style and Print Details</div>
                 <Row label="Label"><input value={element.label || ''} placeholder="A name for this element in the designer" onChange={(e) => patch({ label: e.target.value })} /></Row>
-                <Row label="Key"><input value={element.key || ''} placeholder="Jasper key (kept in the .jrxml / .mrd)" onChange={(e) => patch({ key: e.target.value })} /></Row>
+                <Row label="Key"><input value={element.key || ''} placeholder="Element key (kept in the .jrxml / .mrd)" onChange={(e) => patch({ key: e.target.value })} /></Row>
                 <label className="check-row" title="Off: a value equal to the one printed just before is left out (e.g. a branch name only on its first row)">
                   <input type="checkbox" checked={element.printRepeatedValues !== false} onChange={(e) => patch({ printRepeatedValues: e.target.checked })} /> Print Repeated Values
                 </label>
@@ -312,7 +312,7 @@ export default function Properties({ state, dispatch, notify, actions, onEditExp
                   <input type="checkbox" checked={Boolean(element.printInFirstWholeBand)} onChange={(e) => patch({ printInFirstWholeBand: e.target.checked })} /> Print In First Whole Band
                 </label>
                 <div className="prop-section">Print When</div>
-                <label className="check-row" title="Jasper prints it again when a band continues on the next page. Bands here are never split over two pages, so this has no effect yet; it is kept for Jasper files.">
+                <label className="check-row" title="Classic reports print it again when a band continues on the next page. Bands here are never split over two pages, so this has no effect yet; it is kept for imported files.">
                   <input type="checkbox" checked={Boolean(element.printWhenDetailOverflows)} onChange={(e) => patch({ printWhenDetailOverflows: e.target.checked })} /> Detail Overflows
                 </label>
                 <Row label="Group Changes">
@@ -368,9 +368,9 @@ export default function Properties({ state, dispatch, notify, actions, onEditExp
                   </select>
                 </Row>
                 {element.markup && element.markup !== 'none' && (
-                  <p className="hint">Formatted text: <code>&lt;b&gt;</code> <code>&lt;i&gt;</code> <code>&lt;u&gt;</code> <code>&lt;br&gt;</code> <code>&lt;font color size face&gt;</code> <code>&lt;span style&gt;</code> <code>&lt;p&gt;</code> <code>&lt;ul&gt;&lt;li&gt;</code>{element.markup === 'styled' ? <> and Jasper <code>&lt;style forecolor isBold size&gt;</code></> : null}. Excel and CSV get the plain text.</p>
+                  <p className="hint">Formatted text: <code>&lt;b&gt;</code> <code>&lt;i&gt;</code> <code>&lt;u&gt;</code> <code>&lt;br&gt;</code> <code>&lt;font color size face&gt;</code> <code>&lt;span style&gt;</code> <code>&lt;p&gt;</code> <code>&lt;ul&gt;&lt;li&gt;</code>{element.markup === 'styled' ? <> and classic <code>&lt;style forecolor isBold size&gt;</code></> : null}. Excel and CSV get the plain text.</p>
                 )}
-                <label className="check-row" title="Like Jasper's Stretch With Overflow: when the value is longer than the box, the box and its band grow so nothing is cut off. Boxes on the same line grow with it; boxes below move down.">
+                <label className="check-row" title="Stretch With Overflow: when the value is longer than the box, the box and its band grow so nothing is cut off. Boxes on the same line grow with it; boxes below move down.">
                   <input type="checkbox" checked={Boolean(element.stretch)} onChange={(e) => patch({ stretch: e.target.checked })} /> Stretch with overflow (long data is never cut)
                 </label>
               </>
@@ -465,7 +465,7 @@ export default function Properties({ state, dispatch, notify, actions, onEditExp
               <p className="hint img-origin">
                 {element.src ? <>Stored in the report: <b>{element.srcName || 'picture'}</b> ({Math.round((element.src.length * 3) / 4 / 1024)} KB)</> : <b className="danger-text">Missing picture{element.srcName ? `: ${element.srcName}` : ''} — choose the file above</b>}
                 {element.srcUrl && <> · from <a href={element.srcUrl} target="_blank" rel="noopener noreferrer">{new URL(element.srcUrl).host}</a></>}
-                {element.reference && <> · Jaspersoft expression <code>{element.reference}</code></>}
+                {element.reference && <> · original expression <code>{element.reference}</code></>}
               </p>
             )}
             {element.src && <button className="btn sm" onClick={() => patch({ src: '', srcUrl: '' })}>Remove picture</button>}
@@ -539,7 +539,7 @@ export default function Properties({ state, dispatch, notify, actions, onEditExp
           <div className="prop-title">{bandLabel(selection.key)} <small>band · not in the report</small></div>
           <p className="hint band-purpose">{bandPurpose(selection.key)}</p>
           <button className="btn primary" onClick={() => actions.createBandAt(selection.key)}>＋ Create Band</button>
-          <p className="hint">Like Jaspersoft Studio: a deleted band is still listed in grey in the Outline. Create it again to put elements in it.</p>
+          <p className="hint">Like classic report designers: a deleted band is still listed in grey in the Outline. Create it again to put elements in it.</p>
         </div>
       );
     }
@@ -650,7 +650,7 @@ export default function Properties({ state, dispatch, notify, actions, onEditExp
                 onChange={(e) => patch({ expression: e.target.value })}
               />
             </Row>
-            <p className="hint">Like Jasper's <code>isForPrompting="false"</code>: the user is not asked; the value is calculated from the parameters above it. Use <code>$P&#123;{param.name}&#125;</code> in the query. <code>getYear()</code>, <code>getMonth()</code>, <code>getDate()</code> and <code>GregorianCalendar</code> work. Times are in UTC.</p>
+            <p className="hint">Not asked (<code>isForPrompting="false"</code>): the user is not asked; the value is calculated from the parameters above it. Use <code>$P&#123;{param.name}&#125;</code> in the query. <code>getYear()</code>, <code>getMonth()</code>, <code>getDate()</code> and <code>GregorianCalendar</code> work. Times are in UTC.</p>
           </>
         )}
         <p className="hint">This name is the URL key. Use <code>$P&#123;{param.name}&#125;</code> in the query. For an optional multi-value filter (comma-separated values, empty = all) write <code>&#123;"$paramIn": "{param.name}"&#125;</code> in the query, for example <code>&#123;"BranchCode": &#123;"$paramIn": "{param.name}"&#125;&#125;</code>.</p>
@@ -748,7 +748,7 @@ export default function Properties({ state, dispatch, notify, actions, onEditExp
       <Row label="Excel / CSV layout">
         <select value={page.sheetLayout || 'table'} onChange={(e) => setPage({ sheetLayout: e.target.value })}>
           <option value="mixed">Headings pixel-perfect, data as a table (recommended)</option>
-          <option value="grid">Everything pixel-perfect like the PDF (Jasper style)</option>
+          <option value="grid">Everything pixel-perfect like the PDF (classic report style)</option>
           <option value="table">Data table only (headings as plain rows)</option>
         </select>
       </Row>

@@ -1,4 +1,4 @@
-"""Folder permissions for the /server repository (like JasperReports Server's Permissions dialog).
+"""Folder permissions for the /server repository (like a report server's Permissions dialog).
 
 Every folder can give a user, a team (user group) or a role one of three levels:
   none    the folder and its reports are hidden

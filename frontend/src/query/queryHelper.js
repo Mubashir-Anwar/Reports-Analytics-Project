@@ -161,7 +161,7 @@ export function buildMongo(helper, types = {}) {
 
 export function quoteName(name, dialect) {
   if (/^[A-Za-z_][A-Za-z0-9_]*$/.test(name)) return name;
-  if (dialect === 'mysql') return `\`${name.replace(/`/g, '``')}\``;
+  if (dialect === 'mysql' || dialect === 'mariadb') return `\`${name.replace(/`/g, '``')}\``;
   if (dialect === 'sqlserver') return `[${name.replace(/]/g, ']]')}]`;
   return `"${name.replace(/"/g, '""')}"`;
 }

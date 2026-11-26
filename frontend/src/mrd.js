@@ -6,7 +6,7 @@ export const MRD_ACCEPT = '.mrd,.jrxml,.xml,application/xml,text/xml';
 /** Open file / Upload also take the pictures a .jrxml uses (choose them together with it). */
 export const MRD_WITH_IMAGES_ACCEPT = `${MRD_ACCEPT},.png,.jpg,.jpeg,.data,image/png,image/jpeg`;
 
-const IS_IMAGE = /\.(png|jpe?g)(\.data)?$/i;       // JasperReports Server exports keep logo.png as logo.png.data
+const IS_IMAGE = /\.(png|jpe?g)(\.data)?$/i;       // a report server exports keep logo.png as logo.png.data
 
 /**
  * Split chosen files into the report file and its pictures: { report: File|null, images: { 'logo.png': dataURL }, skipped: [names] }.

@@ -2,7 +2,7 @@
 // columns (the model: label, role, summary, format, hidden), a look at the imported data and the refresh history.
 import { useCallback, useEffect, useState } from 'react';
 import { AdapterWizard, DbLogo } from '../shared/adapters.jsx';
-import { FolderPicker } from '../shared/folders.jsx';
+import AnalyticsFolder from './AnalyticsFolder.jsx';
 import { takeHandoff } from '../query/handoff.js';
 import { AGG_LABELS, bi, describeBytes, KIND_ICON } from './api.js';
 
@@ -24,7 +24,7 @@ const when = (iso) => (iso ? new Date(iso).toLocaleString() : '—');
 
 const EMPTY = { name: '', folder: 'Analytics', description: '', connectionId: '', queryLanguage: 'aggregation-json', collection: '', querySource: '[\n  { "$match": {} }\n]', refreshEveryMinutes: 0 };
 
-export default function DatasetEditor({ datasetId, info, folders = [], notify, onConnected, onSaved, onDeleted }) {
+export default function DatasetEditor({ datasetId, info, folders = [], notify, onConnected, onSaved, onDeleted, onFolders }) {
   const isNew = datasetId === 'new';
   const [item, setItem] = useState(isNew ? null : undefined);
   const [form, setForm] = useState(EMPTY);
@@ -172,7 +172,7 @@ export default function DatasetEditor({ datasetId, info, folders = [], notify, o
           <div className="grid-2 tight">
             <label className="field"><span>Name</span><input value={form.name} maxLength={120} disabled={!mayModel} onChange={(e) => set({ name: e.target.value })} placeholder="Sales orders" /></label>
             <div className="field"><span>Folder</span>
-              <FolderPicker folders={folders} value={form.folder} disabled={!mayModel} allowNew rootLabel="Analytics" rootHint="the usual folder" onChange={(folder) => set({ folder })} />
+              <AnalyticsFolder folders={folders} value={form.folder} disabled={!mayModel} mayManage={mayModel} notify={notify} onFoldersChanged={onFolders} onChange={(folder) => set({ folder })} />
               <small className="hint">Where the dataset is filed, like a report on the server: choose a folder or type a new one. Nothing to enter here about API keys; an API key limited to some folders sees only the datasets in them.</small>
             </div>
           </div>

@@ -22,7 +22,7 @@ function readCollapsed() {
 
 /* ---------------------------------------------------------------- Server (repository) */
 const NO_ADAPTERS = [];
-/** Like Jaspersoft Studio's Repository Explorer: Data Adapters on top, then folders inside folders,
+/** Like a classic report designer's Repository Explorer: Data Adapters on top, then folders inside folders,
     each holding its data adapters and reports (▤). */
 export function ServerPanel({ report, onOpenFromServer, notify, refreshKey, onChanged, openMenu }) {
   const [folders, setFolders] = useState([]);
@@ -469,7 +469,7 @@ function readOutline() {
   try { return JSON.parse(localStorage.getItem(OUTLINE_KEY) || '{}'); } catch { return {}; }
 }
 
-/** Inline rename box (Enter = save, Esc = cancel), like renaming a node in Jaspersoft Studio's Outline. */
+/** Inline rename box (Enter = save, Esc = cancel), like renaming a node in a classic report designer's Outline. */
 function RenameBox({ value, onDone }) {
   const [text, setText] = useState(value);
   const [error, setError] = useState('');
@@ -531,7 +531,7 @@ function OutlineLeaf({ icon, children, active, onSelect, onMenu, draggable: drag
 }
 
 /**
- * Like Jaspersoft Studio's Outline: the report with its Parameters, Fields, Variables and then every band in print
+ * Like a classic report designer's Outline: the report with its Parameters, Fields, Variables and then every band in print
  * order (Title … Background). Deleted (absent) bands stay listed in grey; right-click → Create Band brings them back.
  * Every node has a right-click menu (create / delete / rename / properties); Del deletes, F2 renames.
  */
@@ -679,7 +679,7 @@ const PALETTE_HELP = {
 };
 const PALETTE_KEY = 'reporting-designer-palette';
 
-/** Like Jaspersoft Studio's Palette: Basic and Composite Elements, collapsible, with a search box. */
+/** Like a classic report designer's Palette: Basic and Composite Elements, collapsible, with a search box. */
 export function Palette({ tool, dispatch }) {
   const [closed, setClosed] = useState(() => { try { return JSON.parse(localStorage.getItem(PALETTE_KEY) || '{}'); } catch { return {}; } });
   const [filter, setFilter] = useState('');

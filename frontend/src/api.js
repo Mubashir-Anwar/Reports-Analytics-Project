@@ -90,6 +90,11 @@ export const api = {
   saveConnection: (payload) => request('/api/data-sources', { method: 'POST', body: payload }),
   testConnectionValues: (payload) => request('/api/data-sources/test', { method: 'POST', body: payload }),
   testConnection: (id) => request(`/api/data-sources/${encodeURIComponent(id)}/test`, { method: 'POST' }),
+  /** Files & Sheets / SQLite / DuckDB: the uploaded files and the tables made from them. */
+  sourceFiles: (id) => request(`/api/data-sources/${encodeURIComponent(id)}/files`),
+  uploadSourceFile: (id, payload) => request(`/api/data-sources/${encodeURIComponent(id)}/files`, { method: 'POST', body: payload }),
+  deleteSourceFile: (id, name) => request(`/api/data-sources/${encodeURIComponent(id)}/files/${encodeURIComponent(name)}`, { method: 'DELETE' }),
+  readSheet: (link) => request('/api/data-sources/sheet', { method: 'POST', body: { link } }),
   deleteConnection: (id) => request(`/api/data-sources/${encodeURIComponent(id)}`, { method: 'DELETE' }),
   /** A .jrxml and the pictures it uses ({ 'logo.png': dataURL }): image elements get the matching file. */
   importJrxml: (xml, resources = {}) => request('/api/admin/jrxml/import', { method: 'POST', body: { xml, resources } }),
@@ -116,7 +121,7 @@ export const api = {
   mongoFields: (connectionId, collection) => request('/api/query/mongo/fields', { method: 'POST', body: { connectionId, collection } }),
   sqlSchema: (connectionId) => request('/api/query/sql/schema', { method: 'POST', body: { connectionId } }),
   sqlRun: (body) => request('/api/query/sql/run', { method: 'POST', body }),
-  /** The report (+ design) as a Jaspersoft Studio .jrxml → { xml, fileName, warnings }. */
+  /** The report (+ design) as a .jrxml → { xml, fileName, warnings }. */
   exportJrxml: (definition) => request('/api/admin/jrxml/export', { method: 'POST', body: definition }),
   /** An existing design (PDF, .ai, Word, PNG/JPEG as a data URL) → { page, background, elements, fields, notes, pageCount }. */
   importDesign: (file, name, mode, page, textOnTop) => request('/api/admin/designer/import-design', { method: 'POST', body: { file, name, mode, page, textOnTop } }),

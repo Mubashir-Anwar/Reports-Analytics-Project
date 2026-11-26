@@ -144,7 +144,7 @@ def subreport_loader(ctx: SimpleNamespace, allowed: Any = None, folder: str | No
 
 
 def dataset_loader(ctx: SimpleNamespace, connection_id: str, report_id: str = "dataset") -> Any:
-    """Loader for Tables / Crosstabs with their own dataset (Jasper datasetRun) during one render. A dataset reads
+    """Loader for Tables / Crosstabs with their own dataset (classic datasetRun) during one render. A dataset reads
     from its own data adapter, else the report's. Results are cached per (dataset, parameters); at most 200 runs."""
     cache: dict[tuple[str, tuple[tuple[str, str], ...]], list[dict[str, Any]]] = {}
 

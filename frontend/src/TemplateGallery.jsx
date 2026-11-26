@@ -1,4 +1,4 @@
-// "Choose a layout template" (like Jaspersoft Studio's report templates). Nothing changes until one is chosen.
+// "Choose a layout template" (like a classic report designer's report templates). Nothing changes until one is chosen.
 // The Table report asks how it should look first (title place, headings, borders, column widths, Excel), with a
 // small live preview; the answers are remembered for the next table.
 import { useState } from 'react';

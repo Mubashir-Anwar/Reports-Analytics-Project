@@ -285,7 +285,7 @@ def register(app: FastAPI, ctx: SimpleNamespace) -> None:
 
     @app.post("/api/admin/workspace/{report_id}/publish")
     async def workspace_publish(report_id: str, request: Request) -> dict[str, Any]:
-        """Publish a workspace report to the server repository (like Jaspersoft Studio → JasperReports Server)."""
+        """Publish a workspace report to the server repository (like a report server)."""
         role = require_admin(request, "designer")
         options = await json_body(request, optional=True)
         entry = find_workspace_entry(report_id, asked_folder(request))

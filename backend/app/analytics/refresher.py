@@ -96,7 +96,8 @@ class Refresher:
                     record["status"] = "gone"
                     return
                 store.save_dataset({**current, "status": "failed" if not current.get("file") else "ready",
-                                    "lastError": message, "nextRefreshAt": next_refresh(current)})
+                                    "lastError": message, "nextRefreshAt": next_refresh(current),
+                                    **({"lastSteps": exc.steps} if hasattr(exc, "steps") else {})})
                 record.update({"status": "failed", "error": message})
                 self._log_run(dataset, "failed", started, error=message)
                 return
@@ -107,7 +108,8 @@ class Refresher:
                 return
             store.save_dataset({**current, "status": "ready", "file": result["file"], "rowCount": result["rowCount"],
                                 "sizeBytes": result["sizeBytes"], "columns": result["columns"], "refreshedAt": _iso(_now()),
-                                "lastError": "", "nextRefreshAt": next_refresh(current)})
+                                "lastError": "", "nextRefreshAt": next_refresh(current),
+                                **({"lastSteps": result["steps"]} if "steps" in result else {})})
             importer.remove_old_files(dataset_id, result["file"])
             record.update({"status": "success", "rowCount": result["rowCount"], "sizeBytes": result["sizeBytes"],
                            "durationMs": result["durationMs"]})

@@ -197,7 +197,7 @@ class _Dax:
         extra = [f"{alias[t]}.{q(c)} AS {self.hidden(t, c)}" for t, c in dict.fromkeys(self.refs) if t != base]
         source = f"(SELECT t0.*, {', '.join(extra)} FROM {q(base)} AS t0 {' '.join(joins)}) AS {q(base)}"
         # the helper columns of the related tables are not part of the answer
-        return f"SELECT COLUMNS(c -> NOT contains(c, '{self.HIDDEN}')) FROM ({sql.replace(self.SRC, source)}) AS m"
+        return f"SELECT COLUMNS(lambda c: NOT contains(c, '{self.HIDDEN}')) FROM ({sql.replace(self.SRC, source)}) AS m"
 
     def alias_of(self, column: str, others: list[str]) -> str:
         """The output name of a grouped column: its own name ("Region"), or "Branches Region" when two have it."""

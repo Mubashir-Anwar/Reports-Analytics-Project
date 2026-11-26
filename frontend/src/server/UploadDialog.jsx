@@ -1,4 +1,4 @@
-// Add Resource → Upload: put a .mrd report file (or a Jaspersoft Studio .jrxml), or a .mdash dashboard file, into a server folder.
+// Add Resource → Upload: put a .mrd report file (or a .jrxml), or a .mdash dashboard file, into a server folder.
 import { useEffect, useRef, useState } from 'react';
 import { notADashboardFile } from '../analytics/api.js';
 import { FolderPicker } from '../shared/folders.jsx';
@@ -7,7 +7,7 @@ import { serverApi } from './serverApi.js';
 import { splitReportFiles } from '../mrd.js';
 
 const KIND = {
-  mrd: ['.mrd', 'Report'], jrxml: ['.jrxml', 'Jaspersoft report, converted on upload'], dashboard: ['.mdash', 'Dashboard'],
+  mrd: ['.mrd', 'Report'], jrxml: ['.jrxml', 'JRXML report, converted on upload'], dashboard: ['.mdash', 'Dashboard'],
 };
 const ACCEPT = '.mrd,.jrxml,.xml,.mdash,.png,.jpg,.jpeg';
 
@@ -38,7 +38,7 @@ export default function UploadDialog({ folders, folder, onClose, onDone }) {
   const [message, setMessage] = useState(null);
   useEffect(() => { serverApi.connections().then((d) => { setConnections(d.connections); setLoaded(true); }).catch(() => {}); }, []);
 
-  // the adapters this file can read from; a Jaspersoft file names none of this server, and a .mrd may name one that is not here
+  // the adapters this file can read from; a .jrxml file names none of this server, and a .mrd may name one that is not here
   const isSql = (c) => (c.type || 'mongodb') !== 'mongodb';
   const usable = connections.filter((c) => (file?.kind === 'jrxml' ? !isSql(c) : file?.kind === 'mrd' && file.sql !== undefined ? isSql(c) === file.sql : true));
   const inFile = file?.kind === 'mrd' && connections.find((c) => c.id === file.adapter);
@@ -118,7 +118,7 @@ export default function UploadDialog({ folders, folder, onClose, onDone }) {
           <i aria-hidden="true">📂</i>
           <b>{over ? 'Let go!' : 'Drop your file here'}</b>
           <p>or click to choose it from this computer</p>
-          <div className="up-kinds"><span className="mrd">.mrd report</span><span className="jrxml">.jrxml Jaspersoft</span><span className="dashboard">.mdash dashboard</span><span className="img">＋ PNG / JPEG of a .jrxml</span></div>
+          <div className="up-kinds"><span className="mrd">.mrd report</span><span className="jrxml">.jrxml report</span><span className="dashboard">.mdash dashboard</span><span className="img">＋ PNG / JPEG of a .jrxml</span></div>
           <input type="file" aria-label="Report or dashboard file" accept={ACCEPT} multiple onChange={onFiles} />
         </label>
       )}

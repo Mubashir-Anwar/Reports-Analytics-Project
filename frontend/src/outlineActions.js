@@ -1,4 +1,4 @@
-// Actions behind the right-click menus of the Outline and the canvas (like Jaspersoft Studio's).
+// Actions behind the right-click menus of the Outline and the canvas (like classic report designers's).
 import {
   BUILTIN_VARIABLES, NAME_PATTERN, PALETTE_GROUPS, addBandAfter, addElementToBand, bandKeys, bandNumber, moveBand, sectionBands, sectionOf, bandLabel, bandPresent, contentBottom, createBand, deleteBand,
   findElement, getBand, groupOfBand, mapElements, moveElementToBand, nextName, placeField, removeElement, removeGroup,
@@ -450,7 +450,7 @@ export function makeActions({ get, dispatch, notify, ui = { current: {} } }) {
     { label: 'Show Source', icon: '</>', onClick: callUi('showSource') },
     { label: 'Preview', icon: '▶', onClick: callUi('preview') },
     { label: 'Save as file (.mrd)', icon: '💾', onClick: callUi('saveFile') },
-    { label: 'Save as JRXML (Jaspersoft)', icon: '⬇', onClick: callUi('saveJrxml') },
+    { label: 'Save as JRXML', icon: '⬇', onClick: callUi('saveJrxml') },
   ];
 
   const bandMenu = (key) => {

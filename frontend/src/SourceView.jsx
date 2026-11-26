@@ -1,4 +1,4 @@
-// Source tab (like Jaspersoft Studio's Design | Source | Preview): the whole report definition as text.
+// Source tab (like a classic report designer's Design | Source | Preview): the whole report definition as text.
 // It is the JSON inside the .mrd file. Edit it and Apply: the server checks it exactly like it will when
 // the report is saved or run. Pictures are shown as "@image:<element id>" so the text stays readable.
 import { useEffect, useMemo, useState } from 'react';

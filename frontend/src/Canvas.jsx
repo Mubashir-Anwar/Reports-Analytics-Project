@@ -273,7 +273,7 @@ const ICON_BTN = (label, title, onClick, disabled, on) => (
   <button type="button" className={`tb-btn ${on ? 'on' : ''}`} title={title} disabled={disabled} onClick={onClick}>{label}</button>
 );
 
-/** Arrange / view toolbar above the canvas (Jaspersoft Studio's alignment toolbar + Photoshop-like view toggles). */
+/** Arrange / view toolbar above the canvas (a classic report designer's alignment toolbar + Photoshop-like view toggles). */
 function CanvasToolbar({ count, lockedAll, actions, prefs, setPrefs, hasClipboard, onQuery, onTemplates }) {
   const set = (patch) => setPrefs((p) => ({ ...p, ...patch }));
   const none = count === 0;
@@ -281,7 +281,7 @@ function CanvasToolbar({ count, lockedAll, actions, prefs, setPrefs, hasClipboar
   return (
     <div className="canvas-toolbar" role="toolbar" aria-label="Arrange">
       <span className="tb-group">
-        {ICON_BTN(<span className="tb-text">🛢 Dataset &amp; Query</span>, 'Dataset and Query: data adapter, query, fields, parameters, filter and sort (like Jaspersoft Studio’s toolbar button)', onQuery, !onQuery)}
+        {ICON_BTN(<span className="tb-text">🛢 Dataset &amp; Query</span>, 'Dataset and Query: data adapter, query, fields, parameters, filter and sort ', onQuery, !onQuery)}
         {ICON_BTN(<span className="tb-text">▦ Layouts</span>, 'Apply a layout template (blank page, letter, table, form, certificate)', onTemplates, !onTemplates)}
       </span>
       <span className="tb-group" title={count > 1 ? 'Align the selected elements to each other' : 'Align the selected element inside its band'}>
@@ -697,7 +697,7 @@ export default function Canvas({ knownFields: knownList, design, selection, tool
     const startY = event.clientY;
     const band = getBand(design, bandKey);
     const startHeight = band.height;
-    const floor = contentBottom(band); // like Jasper: a band cannot be smaller than its elements
+    const floor = contentBottom(band); // like Classic reports: a band cannot be smaller than its elements
     const move = (e) => {
       let height = startHeight + (e.clientY - startY) / zoom;
       if (prefs.snapGrid && !e.altKey) height = snapToGrid(height, prefs.gridSize);

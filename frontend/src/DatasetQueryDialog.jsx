@@ -1,4 +1,4 @@
-// "Dataset and Query" (Jaspersoft Studio's toolbar button / Outline → Dataset and Query):
+// "Dataset and Query" (a classic report designer's toolbar button / Outline → Dataset and Query):
 // the data adapter, query and fields, the parameters, the dataset filter expression and the sort fields.
 import { useState } from 'react';
 import DatasetsEditor from './DatasetsEditor.jsx';
@@ -36,7 +36,7 @@ function FilterEditor({ state, dispatch }) {
   const { design, report } = state;
   return (
     <>
-      <p className="muted">Like Jasper's dataset <b>Filter Expression</b>: only records for which it is <code>true</code> are printed. Use <code>$F&#123;…&#125;</code> fields and <code>$P&#123;…&#125;</code> parameters. Empty = all records. (Filtering in the query itself is faster for big data.)</p>
+      <p className="muted">A dataset <b>Filter Expression</b>: only records for which it is <code>true</code> are printed. Use <code>$F&#123;…&#125;</code> fields and <code>$P&#123;…&#125;</code> parameters. Empty = all records. (Filtering in the query itself is faster for big data.)</p>
       <textarea className="code" rows={5} spellCheck={false} value={design.filterExpression || ''} placeholder={`$F{${report.columns[0] || 'Status'}} != null && $F{${report.columns[0] || 'Status'}}.equals("Active")`} onChange={(e) => dispatch({ type: 'DESIGN', key: 'filter', update: (d) => ({ ...d, filterExpression: e.target.value }) })} />
       <p className="hint">Examples: <code>$F&#123;Amount&#125; &gt; 0</code> · <code>$F&#123;Branch&#125;.startsWith("KHI")</code> · <code>$P&#123;OnlyOpen&#125; == false || $F&#123;Status&#125;.equals("Open")</code></p>
     </>

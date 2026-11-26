@@ -107,7 +107,40 @@ def register(app: FastAPI, ctx: SimpleNamespace) -> None:
             {"id": "email", "ok": mailer.configured(), "label": "E-mail for schedules",
              "value": "configured" if mailer.configured() else "not configured", "hint": "SMTP_HOST and SMTP_FROM"},
         ]
-        return {"version": SERVICE_VERSION, "storage": store.backend, "checks": checks}
+        # what each check protects (the page groups them) and the .env lines that fix it
+        groups = {"storage": "operations", "secrets": "security", "session": "security", "admin-user": "security", "https": "security",
+                  "docs": "security", "scheduler": "operations", "email": "operations"}
+        fixes = {"storage": "REPORTING_STORAGE=sql", "secrets": "REPORTING_SECRETS_KEY=<a long random text>",
+                 "session": "REPORTING_SESSION_SECRET=<a long random text>", "https": "REPORTING_SECURE_COOKIES=true\nREPORTING_HSTS=true",
+                 "docs": "REPORTING_ENABLED_AREAS=designer,server,admin,analytics,query", "email": "SMTP_HOST=smtp.example.com\nSMTP_FROM=reports@example.com"}
+        for check in checks:
+            check["group"] = groups.get(check["id"], "operations")
+            if check["id"] in fixes:
+                check["fix"] = fixes[check["id"]]
+        return {"version": SERVICE_VERSION, "storage": store.backend, "checks": checks, "drivers": driver_versions()}
+
+    def driver_versions() -> list[dict[str, Any]]:
+        """Each data source type: is its driver installed, and which version (for Admin → Overview)."""
+        from importlib import metadata
+        from importlib.util import find_spec
+
+        from backend.app.connectors.sql import DIALECTS
+        out = [{"type": "mongodb", "label": "MongoDB", "package": "pymongo"}]
+        out += [{"type": kind, "label": spec.label, "package": "duckdb" if spec.module == "duckdb" else spec.pip if spec.pip != "-" else ""}
+                for kind, spec in DIALECTS.items()]
+        modules = {"pymongo": "pymongo", "psycopg[binary]": "psycopg", "PyMySQL": "pymysql", "pymssql": "pymssql", "oracledb": "oracledb",
+                   "snowflake-connector-python": "snowflake.connector", "redis": "redis", "duckdb": "duckdb"}
+        for item in out:
+            package = item["package"].split("[")[0]
+            if not package:
+                item.update(installed=True, version="built in")
+                continue
+            try:          # found without importing it (Snowflake's driver takes seconds to import)
+                found = find_spec(modules.get(item["package"], package)) is not None
+                item.update(installed=found, version=metadata.version(package) if found else "")
+            except (ImportError, ValueError, metadata.PackageNotFoundError):
+                item.update(installed=False, version="")
+        return out
 
     @app.get("/reports/connections/{connection_id}/status")
     def report_connection_status(connection_id: str, request: Request) -> dict[str, Any]:
