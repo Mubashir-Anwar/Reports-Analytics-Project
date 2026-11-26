@@ -1,4 +1,4 @@
-"""Report schedules (JasperReports Server: Schedule → Recurrence / Parameters / Output / Notifications).
+"""Report schedules (a report server: Schedule → Recurrence / Parameters / Output / Notifications).
 
 Pure functions only: checking a schedule sent by the UI, the next run time, and relative date values such as
 {today-1} or {prevMonthStart} that are resolved on the day the job runs."""

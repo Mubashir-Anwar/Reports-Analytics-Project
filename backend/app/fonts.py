@@ -189,7 +189,7 @@ def right_to_left_family() -> str | None:
 # No own font has Urdu / Arabic letters: a font of the machine itself, so the text never prints as black boxes.
 SYSTEM_RTL = "system right-to-left"
 _SYSTEM_FILES = (
-    # (regular, bold); Windows: the Arial that Jaspersoft Studio and the browser use; then the fonts of the Docker image
+    # (regular, bold); Windows: the Arial that a classic report designer and the browser use; then the fonts of the Docker image
     ("{windows}/arial.ttf", "{windows}/arialbd.ttf"),
     ("{windows}/tahoma.ttf", "{windows}/tahomabd.ttf"),
     ("/usr/share/fonts/truetype/noto/NotoNaskhArabic-Regular.ttf", "/usr/share/fonts/truetype/noto/NotoNaskhArabic-Bold.ttf"),

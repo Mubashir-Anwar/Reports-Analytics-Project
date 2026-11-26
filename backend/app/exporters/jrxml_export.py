@@ -1,9 +1,9 @@
-"""Report definition (+ design) -> a Jaspersoft Studio .jrxml (JasperReports 6.x), the reverse of importers/jrxml.py.
+"""Report definition (+ design) -> a .jrxml (JRXML reports 6.x), the reverse of importers/jrxml.py.
 
 What maps one to one: page and margins, every band (groups included), Static Text, Text Field (pattern, stretch,
 markup, paragraph, rotation), Line, Rectangle, Ellipse, Frame, Break, Image (small pictures embedded), parameters
 (computed ones as isForPrompting="false"), fields, sort, groups, variables, calculated fields and the query (SQL, or a
-MongoDB aggregation as a MongoDbQuery). What Jasper has no match for (charts, barcodes, tables, crosstabs, lists,
+MongoDB aggregation as a MongoDbQuery). What JRXML has no match for (charts, barcodes, tables, crosstabs, lists,
 subreports, notes, the {"$paramIn": …} filter) is left out and listed in `warnings`, so nothing is lost silently.
 """
 from __future__ import annotations
@@ -91,7 +91,7 @@ class _Out:
             self.warnings.append(text)
 
     def refs(self, expression: str, where: str) -> str:
-        """Our names -> Jasper's: calculated fields are variables; CURRENT_DATE and PAGE_COUNT have no Jasper variable."""
+        """Our names -> Jasper's: calculated fields are variables; CURRENT_DATE and PAGE_COUNT have no classic variable."""
         def one(match: re.Match) -> str:
             kind, name = match.group(1), match.group(2)
             if kind == "F" and name in self.calculated:
@@ -99,7 +99,7 @@ class _Out:
             if kind == "V" and name == "CURRENT_DATE":
                 return "new java.util.Date()"
             if kind == "V" and name == "PAGE_COUNT":
-                self.warn(f"{where}: the page total (PAGE_COUNT) inside a longer expression shows the current page in Jasper; "
+                self.warn(f"{where}: the page total (PAGE_COUNT) inside a longer expression shows the current page in JRXML; "
                           "use a separate Text Field with Evaluation Time = Report for “of Y”")
                 return "$V{PAGE_NUMBER}"
             return match.group(0)
@@ -166,16 +166,16 @@ def _report_element(parent: ET.Element, el: dict[str, Any], out: _Out, where: st
         _sub(node, "printWhenExpression", text=out.refs(str(el["printWhenExpression"]), where))
 
 
-TEXT_PADDING = 2                  # the designer and our PDF keep text 2 px inside its box; Jasper's default is 0
+TEXT_PADDING = 2                  # the designer and our PDF keep text 2 px inside its box; the classic default is 0
 STUDIO_ADAPTER = "One Empty Record"  # Studio's built-in adapter: Preview shows the layout until a real one is chosen
 OUR_ADAPTER = "com.mongoreporting.data.adapter"
 
 
 def _text_padding(el: dict[str, Any]) -> dict[str, str]:
     """Left/right as in the designer (so letters start where they did); top only while one line still fits, and no
-    bottom padding: Jasper prints nothing at all when the first line is taller than the room left inside the box."""
+    bottom padding: classic prints nothing at all when the first line is taller than the room left inside the box."""
     pad = max(0.0, _num(el.get("padding"), TEXT_PADDING))
-    line = _num(el.get("fontSize"), 10) * 1.3                 # one line of Arial / DejaVu Sans in Jasper
+    line = _num(el.get("fontSize"), 10) * 1.3                 # one line of Arial / DejaVu Sans in classic reports
     room = max(_num(el.get("height"), 16) - line, 0.0)
     top = int(min(pad, room))
     return {"leftPadding": _int(pad), "rightPadding": _int(pad), "topPadding": str(top), "bottomPadding": "0"}
@@ -216,9 +216,9 @@ def _text_element(parent: ET.Element, el: dict[str, Any]) -> None:
 
 
 def jasper_font(name: Any) -> str:
-    """The font our PDF really uses, as a Jasper logical font: Arial, Calibri, Verdana … are drawn as Helvetica, Georgia
-    as Times. Jasper has those three built in for PDF; a font it does not bundle (Arial, Calibri) loses bold and italic
-    in Jasper's PDF and has other letter widths, so the text would not line up with the design."""
+    """The font our PDF really uses, as a classic logical font: Arial, Calibri, Verdana … are drawn as Helvetica, Georgia
+    as Times. classic has those three built in for PDF; a font it does not bundle (Arial, Calibri) loses bold and italic
+    in the classic PDF and has other letter widths, so the text would not line up with the design."""
     from backend.app.rendering.engine import FONT_FAMILY  # noqa: PLC0415
     if name and str(name) not in FONT_FAMILY:
         return str(name)                                        # an own font: Studio needs it installed too
@@ -235,10 +235,10 @@ def _graphic(parent: ET.Element, el: dict[str, Any], default_width: float = 1) -
 def _element(parent: ET.Element, el: dict[str, Any], out: _Out, where: str, width_limit: float) -> None:
     kind = el.get("type")
     if kind in SKIPPED_TYPES:
-        out.warn(f"{where}: the {SKIPPED_TYPES[kind]} has no Jaspersoft Studio match here and was left out; add it again in Studio")
+        out.warn(f"{where}: the {SKIPPED_TYPES[kind]} has no JRXML match and was left out; add it again in the other designer")
         return
     if kind == "staticText" and TOKEN.search(str(el.get("text") or "")):
-        kind = "textField"                                 # text with values in it needs an expression in Jasper
+        kind = "textField"                                 # text with values in it needs an expression in classic reports
         el = {**el, "expression": el.get("text")}
     if kind == "staticText":
         node = _sub(parent, "staticText")
@@ -248,7 +248,7 @@ def _element(parent: ET.Element, el: dict[str, Any], out: _Out, where: str, widt
         _sub(node, "text", text=str(el.get("text") or ""))
     elif kind == "textField":
         expression, at_report = out.expression(str(el.get("expression") or ""), where)
-        # like the designer: an empty value prints nothing (Jasper would print "null")
+        # like the designer: an empty value prints nothing (classic would print "null")
         attrs = {"isBlankWhenNull": "false" if el.get("blankWhenNull") is False else "true", "pattern": str(el["pattern"]) if el.get("pattern") else None,
                  "evaluationTime": "Report" if at_report else (str(el["evaluationTime"]) if el.get("evaluationTime") else None)}
         if el.get("textAdjust") in ("StretchHeight", "ScaleFont") or el.get("stretch"):
@@ -302,12 +302,12 @@ def _parts(band: dict[str, Any] | None) -> list[dict[str, Any]]:
 
 
 def _stacked(band: dict[str, Any], out: _Out, where: str) -> dict[str, Any]:
-    """Jasper has one band in this section: ours are put below one another in it, each band's own Print When
+    """classic has one band in this section: ours are put below one another in it, each band's own Print When
     Expression on its elements."""
     parts = _parts(band)
     if len(parts) < 2:
         return parts[0] if parts else band
-    out.warn(f"{where}: Jaspersoft Studio has one band here; the {len(parts)} bands were joined into one")
+    out.warn(f"{where}: JRXML has one band here; the {len(parts)} bands were joined into one")
     top, elements = 0.0, []
     for part in parts:
         condition = part.get("printWhenExpression") or ""
@@ -325,7 +325,7 @@ def _band(parent: ET.Element, band: dict[str, Any] | None, out: _Out, where: str
     height = _num(band.get("height"))
     bottom = max((_num(el.get("y")) + _num(el.get("height")) for el in elements), default=0)
     if bottom > height + 0.5:
-        height = bottom                                     # Jasper refuses elements that reach outside their band
+        height = bottom                                     # classic refuses elements that reach outside their band
     node = _sub(parent, "band", {"height": _int(height), "splitType": "Stretch"})
     if band.get("printWhenExpression"):
         expression, _late = out.expression("=" + band["printWhenExpression"], f"{where} band print when")
@@ -354,7 +354,7 @@ def _mongo_query(definition: dict[str, Any], out: _Out, root: ET.Element) -> str
     else:
         literal = source
     if "$paramIn" in literal:
-        out.warn('The query uses {"$paramIn": …} (a comma-separated filter); Jaspersoft has no such operator. '
+        out.warn('The query uses {"$paramIn": …} (a comma-separated filter); JRXML has no such operator. '
                  "Change it in Studio, e.g. with $P!{…} and a computed parameter")
     collection = str(definition.get("collection") or "")
     if "$P{" in collection:
@@ -383,7 +383,7 @@ def export_jrxml(definition: dict[str, Any]) -> dict[str, Any]:
 
     ET.register_namespace("", NS)
     ET.register_namespace("xsi", XSI)
-    # an empty No Data band would make Jasper print a blank page when the query has no rows
+    # an empty No Data band would make classic print a blank page when the query has no rows
     no_data = any(part.get("elements") for part in band_parts(bands.get("noData")))
     root = ET.Element(f"{{{NS}}}jasperReport", {
         f"{{{XSI}}}schemaLocation": f"{NS} http://jasperreports.sourceforge.net/xsd/jasperreport.xsd",
@@ -431,7 +431,7 @@ def export_jrxml(definition: dict[str, Any]) -> dict[str, Any]:
             else:
                 out.warn(f"Parameter {param.get('name')}: its default date was not exported; set it in Studio if needed")
         if param.get("allowedValues"):
-            out.warn(f"Parameter {param.get('name')}: the list of allowed values was not exported (Jasper has none; JasperReports Server input controls do)")
+            out.warn(f"Parameter {param.get('name')}: the list of allowed values was not exported (JRXML has none)")
 
     language = definition.get("queryLanguage") or "mongosh"
     if language == "sql":
@@ -440,7 +440,7 @@ def export_jrxml(definition: dict[str, Any]) -> dict[str, Any]:
         query, query_language = _mongo_query(definition, out, root), "MongoDbQuery"
     else:
         query, query_language = "", ""
-        out.warn(f"The query language '{language}' has no Jaspersoft Studio match; the query was left out")
+        out.warn(f"The query language '{language}' has no JRXML match; the query was left out")
     if query:
         _sub(root, "queryString", {"language": query_language}, text=query)
 
@@ -450,7 +450,7 @@ def export_jrxml(definition: dict[str, Any]) -> dict[str, Any]:
         if column_name and column_name not in calc_names:
             _sub(root, "field", {"name": str(column_name), "class": "java.lang.Object"})
     if query_language == "MongoDbQuery":
-        out.warn("In Jaspersoft Studio choose a MongoDB data adapter (Preview → data adapter) to see real rows; "
+        out.warn("In the other designer choose a MongoDB data adapter (Preview → data adapter) to see real rows; "
                  "until then Preview uses “One Empty Record” and shows the layout with empty values")
     if definition.get("columns"):
         out.warn("Fields are exported as java.lang.Object; set each field's class in Studio (e.g. java.math.BigDecimal) "
@@ -506,8 +506,8 @@ def export_jrxml(definition: dict[str, Any]) -> dict[str, Any]:
 
     for skipped in ("functions", "datasets"):
         if design.get(skipped):
-            out.warn(f"The design's {skipped} were not exported (Jaspersoft Studio keeps them differently)")
+            out.warn(f"The design's {skipped} were not exported (JRXML keeps them differently)")
 
     ET.indent(root, space="\t")
-    xml = '<?xml version="1.0" encoding="UTF-8"?>\n<!-- Exported from the report designer for Jaspersoft Studio 6.x -->\n' + ET.tostring(root, encoding="unicode") + "\n"
+    xml = '<?xml version="1.0" encoding="UTF-8"?>\n<!-- Exported from the report designer (JRXML 6.x) -->\n' + ET.tostring(root, encoding="unicode") + "\n"
     return {"xml": xml, "fileName": f"{name}.jrxml", "warnings": out.warnings}

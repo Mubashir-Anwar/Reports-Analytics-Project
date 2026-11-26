@@ -13,7 +13,7 @@ export const BAND_LABELS = {
   background: 'Background',
 };
 
-/** Height a band gets when it is created from the Outline (like Jaspersoft Studio's "Create Band"). */
+/** Height a band gets when it is created from the Outline (like a classic report designer's "Create Band"). */
 export const DEFAULT_BAND_HEIGHT = {
   title: 50, pageHeader: 30, columnHeader: 22, detail: 20, columnFooter: 22, pageFooter: 24, lastPageFooter: 24,
   summary: 40, noData: 40, background: 120, groupHeader: 22, groupFooter: 22,
@@ -21,7 +21,7 @@ export const DEFAULT_BAND_HEIGHT = {
 
 /** Images, boxes and frames go behind the other elements, so text and fields placed on them stay clickable. */
 export const BACKDROP_TYPES = new Set(['image', 'rectangle', 'ellipse', 'frame', 'list']);
-/** Components that print many records (Jasper Table, Crosstab, List, Subreport); they make their band grow. */
+/** Components that print many records (classic Table, Crosstab, List, Subreport); they make their band grow. */
 export const DATASET_TYPES = new Set(['table', 'crosstab', 'list', 'subreport']);
 /** Container elements whose contents move with them on the canvas. */
 export const CONTAINER_TYPES = new Set(['frame', 'list']);
@@ -48,7 +48,7 @@ export const ELEMENT_LABELS = {
 };
 
 /**
- * Like Jaspersoft Studio's Palette. Basic elements are element types; composite elements are ready-made
+ * Like a classic report designer's Palette. Basic elements are element types; composite elements are ready-made
  * Text Fields (Page Number, Page X of Y, Current Date…). `percentage` asks for a field when it is placed.
  */
 export const PALETTE_GROUPS = [
@@ -225,7 +225,7 @@ export function mapElements(design, fn) {
   return { ...design, bands };
 }
 
-/** Rename a token in every element's text and expression (what Jaspersoft Studio's refactoring does). */
+/** Rename a token in every element's text and expression (what a classic report designer's refactoring does). */
 export function renameInElements(design, letter, from, to) {
   const renamed = bandKeys(design).filter((key) => getBand(design, key).printWhenExpression)
     .reduce((d, key) => setBand(d, key, { ...getBand(d, key), printWhenExpression: renameToken(getBand(d, key).printWhenExpression, letter, from, to) }), design);
@@ -318,7 +318,7 @@ export function addElementToBand(design, bandKey, type, extra = {}) {
   return { design: setBand(design, bandKey, { ...band, height, elements }), id: element.id };
 }
 
-/** Like dropping a field from the Outline in Jaspersoft Studio: a text field in Detail and its label in Column Header. */
+/** Like dropping a field from the Outline in a classic report designer: a text field in Detail and its label in Column Header. */
 export function placeField(design, field) {
   const right = (key) => getBand(design, key).elements.reduce((r, el) => Math.max(r, el.x + el.width), 0);
   const x = Math.min(Math.max(right('detail'), right('columnHeader')), Math.max(0, bandWidth(design) - 100));
@@ -351,7 +351,7 @@ export function bandWidth(design) {
   return page.width - page.margins.left - page.margins.right;
 }
 
-/** What each band does when the report fills (Jasper semantics, shown in the Properties panel). */
+/** What each band does when the report fills (classic report semantics, shown in the Properties panel). */
 export function bandPurpose(key) {
   if (key.startsWith('groupHeader:')) return 'Printed once before each new group value (whenever the group field changes).';
   if (key.startsWith('groupFooter:')) return 'Printed once at the end of each group; put group totals (group-reset $V) here.';
@@ -403,15 +403,15 @@ export const PAGE_LIMITS = { min: 100, max: 14400 };
 
 /** The CSS of a font name: a built-in one, or an own font by its name. */
 export const cssFont = (name) => (!name ? undefined : CSS_FONT[name] || `"${name}", Arial, sans-serif`);
-/** Font names offered like Jaspersoft Studio. PDF maps them to Helvetica / Times / Courier; Excel keeps the name. */
+/** Font names offered like classic report designers. PDF maps them to Helvetica / Times / Courier; Excel keeps the name. */
 export const FONT_NAMES = ['SansSerif', 'Arial', 'Helvetica', 'Verdana', 'Tahoma', 'Calibri', 'Segoe UI', 'Serif', 'Times New Roman', 'Georgia', 'Monospaced', 'Courier New'];
 export const CSS_FONT = {
   SansSerif: 'Arial, Helvetica, sans-serif', Arial: 'Arial, sans-serif', Helvetica: 'Helvetica, Arial, sans-serif', Verdana: 'Verdana, sans-serif',
   Tahoma: 'Tahoma, sans-serif', Calibri: 'Calibri, Carlito, sans-serif', 'Segoe UI': '"Segoe UI", sans-serif', Serif: '"Times New Roman", serif',
   'Times New Roman': '"Times New Roman", serif', Georgia: 'Georgia, serif', Monospaced: '"Courier New", monospace', 'Courier New': '"Courier New", monospace',
 };
-/** Jasper "Markup": none = text as-is, html = <b>, <i>, <u>, <br>, <font>, <span style>, lists…, styled = Jasper <style> tags. */
-export const MARKUPS = [['none', 'None (plain text)'], ['html', 'HTML'], ['styled', 'Styled (Jasper <style>)']];
+/** classic "Markup": none = text as-is, html = <b>, <i>, <u>, <br>, <font>, <span style>, lists…, styled = classic <style> tags. */
+export const MARKUPS = [['none', 'None (plain text)'], ['html', 'HTML'], ['styled', 'Styled (<style> tags)']];
 
 const ALLOWED_TAGS = new Set(['B', 'STRONG', 'I', 'EM', 'U', 'S', 'STRIKE', 'DEL', 'BR', 'P', 'DIV', 'SPAN', 'FONT', 'SUP', 'SUB', 'UL', 'OL', 'LI', 'H1', 'H2', 'H3', 'H4', 'H5', 'H6', 'MARK']);
 const DROPPED_TAGS = new Set(['SCRIPT', 'STYLE', 'IFRAME', 'OBJECT', 'EMBED', 'TEMPLATE', 'NOSCRIPT', 'SVG', 'MATH', 'TITLE', 'HEAD']);
@@ -555,7 +555,7 @@ export function defaultElement(type, x = 0, y = 0) {
     case 'list': return { ...base, width: 300, height: 24, backColor: null, borderColor: '#cbd5e1', borderWidth: 0, scope: 'report', filterExpression: '', sortField: '', sortOrder: 'Ascending' };
     case 'subreport': return { ...base, width: 400, height: 60, reportId: '', parameters: [], showTitle: true };
     case 'note': return { ...base, width: 160, height: 60, text: 'Note: only visible in the designer', backColor: '#fef3c7', fontSize: 9 };
-    // composite elements (Jasper): ready-made Text Fields
+    // composite elements (classic reports): ready-made Text Fields
     case 'pageNumber': return { ...base, type: 'textField', width: 60, expression: '$V{PAGE_NUMBER}', pattern: '', blankWhenNull: true, align: 'right' };
     case 'totalPages': return { ...base, type: 'textField', width: 60, expression: '$V{PAGE_COUNT}', pattern: '', blankWhenNull: true, evaluationTime: 'Report' };
     case 'pageXofY': return { ...base, type: 'textField', width: 140, expression: 'Page $V{PAGE_NUMBER} of $V{PAGE_COUNT}', pattern: '', blankWhenNull: true, align: 'right' };

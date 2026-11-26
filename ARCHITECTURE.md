@@ -416,6 +416,28 @@ Placeholders follow the driver: `%(name)s` (psycopg, PyMySQL, pymssql) or `:name
 `col = ANY(array)` on PostgreSQL and `col IN (:a, :b, …)` elsewhere (at most 1000 values). CI tests MySQL on a real
 server (`MYSQL_TEST_URL`); SQL Server and Oracle are tested with stand-in drivers.
 
+### 9.1 More data sources (`connectors/sources.py`)
+
+The same read-only SQL and `$P{…}` / `$X{IN …}` parameters work on these too, so reports, Analytics datasets, the
+Query workspace (SQL tab, builder, examples) and ETL pipelines need nothing of their own:
+
+| Kind | How it is read | Read-only |
+|---|---|---|
+| `mariadb` | PyMySQL (`mariadb://…`) | as MySQL |
+| `snowflake` | snowflake-connector-python (`snowflake://user:pw@account/DB/SCHEMA?warehouse=…&role=…`) | `STATEMENT_TIMEOUT_IN_SECONDS`, never committed; give a SELECT-only role |
+| `clickhouse` | HTTP(S) port, `{name:Type}` parameters | `readonly=2` (the server refuses writes), `max_execution_time` |
+| `elasticsearch` | the SQL API `/_sql`, `?` parameters, pages by cursor | read by nature |
+| `redis` | SCAN + HGETALL / GET (read commands only); each key prefix becomes a DuckDB table (`user:1` → `user`) | nothing is written to Redis |
+| `sqlite`, `duckdb` | an uploaded database file, opened read-only | `mode=ro` / `read_only=True` |
+| `files` | uploaded CSV, TSV, Excel (each sheet), JSON / NDJSON, Parquet → Parquet tables in `sources/<id>/` | DuckDB in-process |
+| `gsheets` | a Sheet shared as "Anyone with the link" (Excel export, every tab a table), read again after 5 minutes | DuckDB in-process |
+
+DuckDB runs with `enable_external_access = false`, only the source's own cache folder in `allowed_directories`, and
+`lock_configuration = true`: a query cannot read other files of the server (`read_csv('…')`, `read_text`, a path in
+FROM). Uploads: `POST /api/data-sources/{id}/files` `{kind, name, file: base64}` (100 MB each, 40 files), `GET` lists
+the files and tables, `DELETE …/files/{name}`; `POST /api/data-sources/sheet {link}` reads a Sheet now.
+Tests: `tests/test_more_sources.py` (Redis, ClickHouse and Elasticsearch with stand-ins).
+
 ## 10. Sub-datasets and the Table editor (Jasper's `Dataset1` and the "Table" tab)
 
 `design.datasets = [{ name, connectionId, queryLanguage, collection, querySource, fields, parameters }]`

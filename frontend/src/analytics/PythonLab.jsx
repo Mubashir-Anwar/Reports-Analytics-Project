@@ -3,6 +3,8 @@
 // refreshing that dataset runs the script again. Writing and running need the Analytics and the Python right.
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { bi, describeBytes } from './api.js';
+import CodeArea from '../CodeArea.jsx';
+import AnalyticsFolder from './AnalyticsFolder.jsx';
 
 const SNIPPETS = [
   ['🧹 Duplicates & blanks', 'Drop repeated rows and rows that are empty', `result = df.drop_duplicates().dropna(how="all")`],
@@ -40,30 +42,14 @@ result = df.groupby("Branch", as_index=False).agg(total=("Amount", "sum"), order
 right = dfs[{second}]
 result = df.merge(right, how="left", left_on="Branch", right_on="Code")`],
 ];
-const SCHEDULES = [[0, 'Only by hand'], [60, 'Every hour'], [360, 'Every 6 hours'], [1440, 'Every day'], [10080, 'Every week']];
+export const SCHEDULES = [[0, 'Only by hand'], [60, 'Every hour'], [360, 'Every 6 hours'], [1440, 'Every day'], [10080, 'Every week']];
 
-/** A plain code box with line numbers: Tab indents, Ctrl+Enter runs. */
-function CodeBox({ value, onChange, onRun, readOnly }) {
-  const area = useRef(null);
-  const gutter = useRef(null);
-  const lines = value.split('\n').length;
-  const key = (event) => {
-    if ((event.ctrlKey || event.metaKey) && event.key === 'Enter') { event.preventDefault(); onRun(); return; }
-    if (event.key !== 'Tab' || readOnly) return;
-    event.preventDefault();
-    const box = event.currentTarget;
-    const { selectionStart: from, selectionEnd: to } = box;
-    const next = `${value.slice(0, from)}    ${value.slice(to)}`;
-    onChange(next);
-    requestAnimationFrame(() => { box.selectionStart = box.selectionEnd = from + 4; });
-  };
+/** The code editor (VS Code keys and colours); Ctrl+Enter runs. */
+export function CodeBox({ value, onChange, onRun, readOnly, language = 'python', rows = 18 }) {
   return (
-    <div className="py-code">
-      <pre ref={gutter} className="py-gutter" aria-hidden="true">{Array.from({ length: lines }, (_, i) => i + 1).join('\n')}</pre>
-      <textarea ref={area} value={value} onChange={(e) => onChange(e.target.value)} onKeyDown={key} readOnly={readOnly}
-        onScroll={(e) => { if (gutter.current) gutter.current.scrollTop = e.currentTarget.scrollTop; }}
-        spellCheck={false} autoCapitalize="off" autoComplete="off" aria-label="Python script" wrap="off" />
-    </div>
+    <CodeArea className="py-code-ce" language={language} rows={rows} value={value} readOnly={readOnly} aria-label={language === 'sql' ? 'SQL' : 'Python script'}
+      onChange={(e) => onChange(e.target.value)}
+      onKeyDown={(event) => { if ((event.ctrlKey || event.metaKey) && event.key === 'Enter') { event.preventDefault(); onRun?.(); } }} />
   );
 }
 
@@ -92,7 +78,7 @@ function Preview({ result }) {
   );
 }
 
-export default function PythonLab({ datasetId, info, datasets, folders, notify, onSaved, onDeleted }) {
+export default function PythonLab({ datasetId, info, datasets, folders, notify, onSaved, onDeleted, onFolders }) {
   const isNew = !datasetId || datasetId === 'new';
   const may = Boolean(info.mayPython);
   const limits = info.python || {};
@@ -227,8 +213,8 @@ export default function PythonLab({ datasetId, info, datasets, folders, notify, 
         <form className="card py-save" onSubmit={save}>
           <b>{isNew ? 'Save as a dataset' : 'Dataset'}</b>
           <label className="field"><span>Name</span><input value={meta.name} onChange={(e) => setMeta({ ...meta, name: e.target.value })} placeholder="Clean orders" maxLength={120} required /></label>
-          <label className="field"><span>Folder</span><input value={meta.folder} onChange={(e) => setMeta({ ...meta, folder: e.target.value })} list="py-folders" />
-            <datalist id="py-folders">{folders.map((f) => <option key={f} value={f} />)}</datalist></label>
+          <div className="field"><span>Folder</span><AnalyticsFolder folders={folders} value={meta.folder} mayManage={info.mayModel} notify={notify} onFoldersChanged={onFolders}
+            onChange={(folder) => setMeta((current) => ({ ...current, folder }))} /></div>
           <label className="field"><span>Run again</span>
             <select value={meta.refreshEveryMinutes} onChange={(e) => setMeta({ ...meta, refreshEveryMinutes: Number(e.target.value) })}>
               {SCHEDULES.map(([minutes, label]) => <option key={minutes} value={minutes}>{label}</option>)}

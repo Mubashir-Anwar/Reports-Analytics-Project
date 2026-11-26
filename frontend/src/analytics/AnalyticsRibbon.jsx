@@ -1,4 +1,4 @@
-// The Analytics ribbon (like the Designer's): tabs Home, Insert, Query, Data and View with grouped buttons.
+// The Analytics ribbon (like the Designer's): tabs Home, Insert, Query, Data, ETL & Python and View with grouped buttons.
 // Buttons call the page's own actions; a dashboard and the query editor listen for window events
 // ('bi-command' and 'bi-query'), so nothing here has its own logic.
 import { useEffect, useRef, useState } from 'react';
@@ -27,7 +27,7 @@ const Group = ({ label, children }) => (
 );
 const Stack = ({ children }) => <div className="rb-stack">{children}</div>;
 
-export default function AnalyticsRibbon({ info, view, go, onNewDashboard, onImport, onRefreshAll, onReload, readyCount, dashName, onDownload }) {
+export default function AnalyticsRibbon({ info, view, go, onNewDashboard, onImport, onRefreshAll, onReload, readyCount, dashName, onDownload, datasets = [] }) {
   // the File menu on the Analytics button (like the Designer's): new, open, save, download, publish
   const [menu, setMenu] = useState(false);
   const menuBox = useRef(null);
@@ -63,13 +63,20 @@ export default function AnalyticsRibbon({ info, view, go, onNewDashboard, onImpo
     return () => window.removeEventListener('bi-dashboard-state', follow);
   }, []);
   // opening a query shows the Query tab, a dashboard being edited the Insert tab
-  useEffect(() => { if (view.kind === 'q') setUi((u) => ({ ...u, tab: 'query' })); }, [view.kind, view.id]);
+  useEffect(() => {
+    if (view.kind === 'q') setUi((u) => ({ ...u, tab: 'query' }));
+    if (view.kind === 'etl' || view.kind === 'py') setUi((u) => ({ ...u, tab: 'etl' }));
+  }, [view.kind, view.id]);
   useEffect(() => { if (dash.editing) setUi((u) => ({ ...u, tab: u.tab === 'query' ? 'insert' : u.tab })); }, [dash.editing]);
 
   const model = info.mayModel;
   const onDash = view.kind === 'dash' && dash.open;
   const onQuery = view.kind === 'q';
-  const tabs = [['home', 'Home', 'b'], ['insert', 'Insert', 'g'], ['query', 'Query', 'v'], ['data', 'Data', 'c'], ['view', 'View', 'a']];
+  const tabs = [['home', 'Home', 'b'], ['insert', 'Insert', 'g'], ['query', 'Query', 'v'], ['data', 'Data', 'c'], ['etl', 'ETL & Python', 'v'], ['view', 'View', 'a']];
+  const pipelines = datasets.filter((d) => d.sourceKind === 'pipeline').slice(0, 4);
+  const scripts = datasets.filter((d) => d.sourceKind === 'python').slice(0, 4);
+  const noPipelines = info.mayPipelines ? undefined : 'Needs the Pipelines (ETL) right (ask an administrator)';
+  const noPython = info.mayPython ? undefined : 'Needs the Python scripts right (ask an administrator)';
   const pick = (tab) => setUi((u) => ({ tab, collapsed: u.tab === tab ? !u.collapsed : false }));
 
   const body = {
@@ -79,6 +86,7 @@ export default function AnalyticsRibbon({ info, view, go, onNewDashboard, onImpo
           <Big icon="newDoc" label="Dashboard" onClick={onNewDashboard} title="A new, empty dashboard" />
           {model && <Big icon="datasets" label="Dataset" onClick={() => go('ds/new')} title="Import data from a data adapter" />}
           {model && <Big icon="code" label="Query" onClick={() => go('q/new')} title="Write a DAX or SQL query over the datasets" />}
+          {info.mayPipelines && <Big icon="datasets" label="Pipeline" onClick={() => go('etl/new')} title="ETL / ELT: clean, join and total datasets step by step into a new one" />}
           {info.mayPython && <Big icon="code" label="Python" onClick={() => go('py/new')} title="Clean or model datasets with a Python script (pandas, scikit-learn, scipy)" />}
         </Group>
         {model && (
@@ -152,17 +160,38 @@ export default function AnalyticsRibbon({ info, view, go, onNewDashboard, onImpo
             <Big icon="reset" label="Import all again" onClick={onRefreshAll} disabled={!readyCount} title="Read every dataset again from its data adapter (in the background)" />
           </Group>
         )}
-        {info.mayPython && (
-          <Group label="Python">
-            <Big icon="code" label="Python script" onClick={() => go('py/new')} title="A dataset made by a Python script from other datasets" />
-          </Group>
-        )}
         <Group label="Model">
           <Big icon="plug" label="Relationships" onClick={() => go('model')} title="Relate datasets on a shared column" />
         </Group>
         <Group label="Refresh">
           <Big icon="reset" label="Refresh lists" onClick={onReload} />
         </Group>
+      </>
+    ),
+    etl: (
+      <>
+        <Group label="Pipelines (ETL / ELT)">
+          <Big icon="datasets" label="New pipeline" onClick={() => go('etl/new')} disabled={!info.mayPipelines}
+            title={noPipelines || 'Steps that take datasets, clean, join and total them, and load a new dataset'} />
+          {pipelines.length > 0 && (
+            <Stack>
+              {pipelines.map((d) => <Small key={d.id} icon="layouts" label={d.name} onClick={() => go(`etl/${d.id}`)} disabled={!info.mayPipelines} />)}
+            </Stack>
+          )}
+        </Group>
+        <Group label="Python scripts">
+          <Big icon="code" label="New script" onClick={() => go('py/new')} disabled={!info.mayPython}
+            title={noPython || 'A dataset made by a Python script (pandas, scikit-learn, scipy) from other datasets'} />
+          {scripts.length > 0 && (
+            <Stack>
+              {scripts.map((d) => <Small key={d.id} icon="code" label={d.name} onClick={() => go(`py/${d.id}`)} disabled={!info.mayPython} />)}
+            </Stack>
+          )}
+        </Group>
+        <Group label="Run">
+          <Big icon="reset" label="Import all again" onClick={onRefreshAll} disabled={!readyCount || !model} title="Read every dataset again (pipelines and scripts run again after their sources)" />
+        </Group>
+        {!info.mayPipelines && !info.mayPython && <div className="rb-note">Pipelines and Python scripts need their own rights: ask an administrator.</div>}
       </>
     ),
     view: (
@@ -173,8 +202,7 @@ export default function AnalyticsRibbon({ info, view, go, onNewDashboard, onImpo
           {model && <Big icon="code" label="Queries" onClick={() => go('q/new')} />}
         </Group>
         <Group label="Other pages">
-          <Big icon="canvas" label="Designer" onClick={() => window.open('/designer', '_self')} />
-          <Big icon="explorer" label="Report Server" onClick={() => window.open('/server', '_self')} />
+          <Big icon="explorer" label="Analytics Server" onClick={() => window.open('/server', '_self')} title="Folders, permissions, schedules and the published dashboards" />
         </Group>
       </>
     ),
@@ -196,6 +224,7 @@ export default function AnalyticsRibbon({ info, view, go, onNewDashboard, onImpo
               <button type="button" role="menuitem" onClick={onNewDashboard} title="A new, empty dashboard"><RIcon name="newDoc" /><span>New dashboard</span></button>
               {model && <button type="button" role="menuitem" onClick={() => go('ds/new')} title="Import data from a data adapter"><RIcon name="datasets" /><span>New dataset</span></button>}
               {model && <button type="button" role="menuitem" onClick={() => go('q/new')} title="Write a DAX or SQL query over the datasets"><RIcon name="code" /><span>New query</span></button>}
+              {info.mayPipelines && <button type="button" role="menuitem" onClick={() => go('etl/new')} title="ETL / ELT steps into a new dataset"><RIcon name="datasets" /><span>New pipeline (ETL)</span></button>}
               {info.mayPython && <button type="button" role="menuitem" onClick={() => go('py/new')} title="Clean or model datasets with pandas, scikit-learn and scipy"><RIcon name="code" /><span>New Python script</span></button>}
               {model && <button type="button" role="menuitem" onClick={onImport} title="Open a dashboard file (.mdash), or a Power BI report (.pbix) or template (.pbit)"><RIcon name="open" /><span>Open file (.mdash, .pbix, .pbit)</span></button>}
               <hr />
@@ -203,7 +232,7 @@ export default function AnalyticsRibbon({ info, view, go, onNewDashboard, onImpo
               <button type="button" role="menuitem" disabled={!onDash || dash.editing || !dash.mayChange} onClick={() => send('bi-command', { cmd: 'edit' })} title="Add, move and change visuals"><RIcon name="canvas" /><span>Edit dashboard</span></button>
               <button type="button" role="menuitem" disabled={!onDash} onClick={() => onDownload?.(true)} title="One .mdash file with the dashboard, its datasets and their records: opens on any server, even without the database"><RIcon name="download" /><span>Save as file, with data (.mdash)</span></button>
               <button type="button" role="menuitem" disabled={!onDash} onClick={() => onDownload?.(false)} title="A small .mdash file: the other server imports the data from its own database"><RIcon name="download" /><span>Save as file, definitions only</span></button>
-              <button type="button" role="menuitem" disabled={!onDash} onClick={() => window.open('/server', '_blank', 'noopener')} title="Dashboards are on the Report Server already: open it to move, share or set permissions"><RIcon name="publish" /><span>Open on the Report Server ↗</span></button>
+              <button type="button" role="menuitem" disabled={!onDash} onClick={() => window.open('/server', '_blank', 'noopener')} title="Dashboards are on the Analytics Server already: open it to move, share or set permissions"><RIcon name="publish" /><span>Open on the Analytics Server ↗</span></button>
               <hr />
               <button type="button" role="menuitem" disabled={!onDash} onClick={() => send('bi-command', { cmd: 'reload' })} title="Run every visual again"><RIcon name="reset" /><span>Reload data</span></button>
               {model && <button type="button" role="menuitem" disabled={!readyCount} onClick={onRefreshAll} title="Import every dataset again from its data adapter"><RIcon name="reset" /><span>Refresh all datasets</span></button>}

@@ -3,7 +3,7 @@
 Every setting is optional. `python -m backend.app.setup` makes a `.env` with the two random secrets this installation
 needs; add a line from the list below only to change a default. **`.env` is never committed to Git.**
 
-Data sources (MongoDB, PostgreSQL, MySQL, SQL Server, Oracle) are not settings: they are added in the product
+Data sources (MongoDB, PostgreSQL, MySQL, MariaDB, SQL Server, Oracle, Snowflake, ClickHouse, Elasticsearch, Redis, files, Google Sheets, SQLite and DuckDB files) are not settings: they are added in the product
 (Server → Data sources). There is no built-in or default data source.
 
 ```ini
@@ -121,6 +121,8 @@ ANALYTICS_MIN_REFRESH_MINUTES=15
 ANALYTICS_PYTHON_TIMEOUT_SECONDS=120
 ANALYTICS_PYTHON_MEMORY_MB=2048
 ANALYTICS_PYTHON_MAX_ROWS=1000000
+# Pipelines (the "Pipelines (ETL)" right): longest time one pipeline run may take.
+ANALYTICS_PIPELINE_TIMEOUT_SECONDS=900
 
 # ------------------------------------------------------------------ where the service keeps its own data (DEPLOYMENT.md)
 # files (default) | sql | mongodb | postgresql, and the database's URL. Admin → System database can write these two.

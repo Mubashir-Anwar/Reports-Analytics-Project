@@ -1,4 +1,4 @@
-// Sub-datasets (Jaspersoft Studio: Outline → Datasets → Create Dataset): a name, an own query, its fields and
+// Sub-datasets (a classic report designer: Outline → Datasets → Create Dataset): a name, an own query, its fields and
 // parameters. A Table or Crosstab can then read this dataset instead of the report's main query.
 import { useEffect, useState } from 'react';
 import { api } from './api.js';
@@ -161,7 +161,7 @@ export default function DatasetsEditor({ state, dispatch, notify, initialName })
             <span className="grow" />
             <button className="btn sm danger-text" onClick={remove}>Delete dataset</button>
           </div>
-          <p className="hint">Like Jasper's sub-dataset: the query runs once for each different set of parameter values (e.g. once per customer when the Table is in the Detail band). A parameter without a value from the component takes the report parameter of the same name.</p>
+          <p className="hint">A sub-dataset: the query runs once for each different set of parameter values (e.g. once per customer when the Table is in the Detail band). A parameter without a value from the component takes the report parameter of the same name.</p>
         </section>
       ) : (
         <section className="datasets-form empty-state">

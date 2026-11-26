@@ -157,6 +157,9 @@ def file_path(name: str) -> Path | None:
 
 def run_import(ctx: SimpleNamespace, dataset: dict[str, Any]) -> dict[str, Any]:
     """Import now (in the calling thread). Returns {"file", "rowCount", "sizeBytes", "columns", "durationMs"}."""
+    if dataset.get("sourceKind") == "pipeline":         # ETL / ELT steps over other datasets: run them again
+        from backend.app.analytics import pipeline, store  # noqa: PLC0415
+        return pipeline.run_import(dataset, store.dataset)
     if dataset.get("sourceKind") == "python":           # a Python script over other datasets: run it again
         from backend.app.analytics import pyscript, store  # noqa: PLC0415
         return pyscript.run_import(dataset, store.dataset)

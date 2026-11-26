@@ -12,8 +12,8 @@ ROLE_TOKEN_MIN_LENGTH = 24
 # /server login: users live in <data dir>/users.json (PBKDF2 hashes), sessions are signed cookies.
 USER_ROLES = ("viewer", "designer", "admin")  # lowest to highest (derived from the rights below; used by folder permissions)
 # What a user may open. A super admin has every right and is the only one who may manage administrators.
-USER_RIGHTS = ("admin", "designer", "query", "server", "analytics", "python", "runner")
-RIGHT_LABELS = {"admin": "Admin", "designer": "Designer", "query": "Query", "server": "Report Server", "analytics": "Analytics", "python": "Python scripts", "runner": "Run reports by URL"}
+USER_RIGHTS = ("admin", "designer", "query", "server", "analytics", "python", "pipelines", "runner")
+RIGHT_LABELS = {"admin": "Admin", "designer": "Designer", "query": "Query", "server": "Report Server", "analytics": "Analytics", "python": "Python scripts", "pipelines": "Pipelines (ETL)", "runner": "Run reports by URL"}
 USERNAME_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._@-]{1,63}$")
 MIN_PASSWORD_LENGTH = 8
 PASSWORD_ITERATIONS = 600_000  # PBKDF2-SHA256, OWASP 2023
@@ -26,7 +26,8 @@ SERVICE_VERSION = "0.3.0"
 OUTPUT_FORMATS = {"csv", "xlsx", "pdf"}
 QUERY_LANGUAGES = {"aggregation-json", "mongosh", "javascript", "python", "sql", "none"}  # none = no data (static page)
 # Data adapter kinds: MongoDB, and SQL databases through backend/app/connectors/sql.py
-ADAPTER_TYPES = {"mongodb", "postgresql", "mysql", "sqlserver", "oracle"}
+ADAPTER_TYPES = {"mongodb", "postgresql", "mysql", "sqlserver", "oracle", "mariadb", "snowflake", "clickhouse", "elasticsearch",
+                 "redis", "sqlite", "duckdb", "files", "gsheets"}
 METADATA_KEYS = {"GeneratedBy", "GeneratedByCode", "Folder", "Generate"}
 # Signed /generate links carry these two query parameters; they are never report parameters.
 SIGNED_LINK_KEYS = ("Expires", "Signature", "KeyId")

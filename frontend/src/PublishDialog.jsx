@@ -1,4 +1,4 @@
-// "Publish to server": choose the repository folder in a tree (like Jaspersoft Studio's publish wizard)
+// "Publish to server": choose the repository folder in a tree (like a classic report designer's publish wizard)
 // and check a summary of what goes to the server.
 import { useMemo, useState } from 'react';
 import { TargetPicker } from './shared/TakeAdapter.jsx';

@@ -346,7 +346,7 @@ def register(app: FastAPI, ctx: SimpleNamespace) -> None:
             raise HTTPException(status_code=422, detail=str(exc)) from None
         ctx.require_folder(session, payload["folder"], permissions.MANAGE)
         target = payload["folder"]
-        # into another folder the copy keeps its ID (like JasperReports Server); in the same folder it needs a new one
+        # into another folder the copy keeps its ID (like a report server); in the same folder it needs a new one
         keep_id = target != definition.folder and f"{target}/{report_id}" not in reports_by_id
         new_id = str(body.get("newId") or "").strip() or (report_id if keep_id else free_report_id(report_id, target))
         if f"{target}/{new_id}" in reports_by_id:
@@ -421,7 +421,7 @@ def register(app: FastAPI, ctx: SimpleNamespace) -> None:
 
     @app.post("/api/server/upload")
     async def server_upload_report(request: Request) -> dict[str, Any]:
-        """Add a resource: a .mrd file (or a Jaspersoft Studio .jrxml) is published into a folder."""
+        """Add a resource: a .mrd file (or a .jrxml) is published into a folder."""
         session = require_session(request, "designer")
         body = await json_body(request)
         content = body.get("content")

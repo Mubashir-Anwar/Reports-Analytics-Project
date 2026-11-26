@@ -1,4 +1,4 @@
-// Layout templates for a new design (like Jaspersoft Studio's New Report wizard templates).
+// Layout templates for a new design (like a classic report designer's New Report wizard templates).
 // Each one returns a complete design; the user then changes everything on the canvas.
 import { autoLayout, defaultElement, emptyBand, emptyDesign } from './designModel.js';
 
@@ -57,7 +57,7 @@ function letter(columns, title) {
   return design;
 }
 
-/** Label: value rows for every field, one block per record (Jasper "Columnar" / form report). */
+/** Label: value rows for every field, one block per record (classic "Columnar" / form report). */
 function form(columns, title) {
   const design = base(A4);
   const w = usableWidth(design);

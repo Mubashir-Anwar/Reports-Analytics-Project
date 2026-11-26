@@ -1,4 +1,4 @@
-"""Safe interpreter for the Java subset used in Jasper report expressions.
+"""Safe interpreter for the Java subset used in classic reports report expressions.
 
 No eval(), no Java, no attribute access outside a fixed whitelist. Supports:
   literals, $F{} $P{} $V{} tokens, + - * / %, comparison, && || !, ternary,
@@ -703,7 +703,7 @@ _STRING_METHODS["split"] = _split
 
 
 def _index(target: Any, key: Any) -> Any:
-    """Groovy subscript (Jasper reports with language="groovy"): list[0], map["Name"], text[0].
+    """Groovy subscript (classic reports with language="groovy"): list[0], map["Name"], text[0].
 
     Like Groovy, an index past the end gives null and a negative index counts from the end.
     """
@@ -777,7 +777,7 @@ def _gregorian(args: list) -> Calendar:
 
 
 _EPOCH = datetime(1970, 1, 1)
-# java.util.Date getters (deprecated in Java but common in Jasper reports): getYear() is year - 1900,
+# java.util.Date getters (deprecated in Java but common in classic reports): getYear() is year - 1900,
 # getMonth() is 0-11, getDay() is 0 = Sunday.
 _DATE_METHODS: dict[str, Callable[[datetime], Any]] = {
     "getYear": lambda d: d.year - 1900,
@@ -1081,5 +1081,5 @@ def evaluate(text: str, resolve: Callable[[str, str], Any]) -> Any:
         raise JExprError("The expression is nested too deeply") from error
     except (ArithmeticError, ValueError, TypeError, IndexError, KeyError) as error:
         # Row data must never crash the whole report: a Python runtime error becomes a blank cell,
-        # like a Jasper expression exception would only affect that expression.
+        # like a classic expression exception would only affect that expression.
         raise JExprError(f"Expression runtime error: {type(error).__name__}") from error

@@ -177,7 +177,7 @@ def delete_repository_folder(ctx: SimpleNamespace, folder: str, recursive: bool 
                              move_to: str | None = None) -> dict[str, Any]:
     """Delete a folder. move_to (a folder, '' = top level) first moves everything inside there, subfolders included.
     recursive=True (after the user confirmed it) deletes its subfolders, published reports and dashboards, like
-    JasperReports Server; data adapters are never deleted with a folder: they go to the top level."""
+    a report server; data adapters are never deleted with a folder: they go to the top level."""
     if folder == "General":
         raise HTTPException(status_code=400, detail="The default General folder cannot be deleted")
     saved_folders = list_saved_folders()

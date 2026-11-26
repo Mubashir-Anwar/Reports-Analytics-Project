@@ -88,7 +88,9 @@ field aur value khud likhe jate hain aur data type data wala hi rehta hai (`"123
 | Adapter | Language |
 |---|---|
 | MongoDB | Aggregation pipeline (JSON), Mongo shell (`db.getCollection("x").aggregate([...])`), JavaScript pipeline, Python pipeline (`pipeline = [...]`), Jaspersoft `runCommand` |
-| PostgreSQL, MySQL/MariaDB, SQL Server, Oracle | SQL: sirf ek `SELECT` / `WITH`; `$P{x}` bound value, `$X{IN, column, Param}` list; read-only transaction |
+| PostgreSQL, MySQL, MariaDB, SQL Server, Oracle | SQL: sirf ek `SELECT` / `WITH`; `$P{x}` bound value, `$X{IN, column, Param}` list; read-only transaction |
+| Snowflake, ClickHouse, Elasticsearch, Redis | Wahi SQL. Redis mein har key prefix ek table banta hai (`user:1` → `user`) |
+| Files & Sheets: CSV, Excel, JSON, Parquet, Google Sheets, SQLite / DuckDB file | File upload karein (ya Sheet ka link dein); har file / sheet / tab ek table hai, DuckDB SQL se parhi jati hai |
 
 JavaScript/Python sirf data ke taur par parhe jate hain (literal pipeline), chalaye nahi jate. MongoDB mein `$out`,
 `$merge`, `$function`, `$where` waghera mana hain. Analytics ke datasets bhi yahi sab languages lete hain.

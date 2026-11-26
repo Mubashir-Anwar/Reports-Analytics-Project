@@ -1,4 +1,5 @@
-"""SQL data adapters: PostgreSQL (psycopg 3), MySQL / MariaDB (PyMySQL), SQL Server (pymssql) and Oracle (python-oracledb).
+"""SQL data adapters: PostgreSQL (psycopg 3), MySQL / MariaDB (PyMySQL), SQL Server (pymssql), Oracle (python-oracledb),
+and the sources in sources.py (Snowflake, ClickHouse, Elasticsearch, SQLite, DuckDB, files, Google Sheets, Redis).
 
 Safety, the same for every database:
 * queries.sql_query.prepare_sql() refuses anything that is not one read-only statement;
@@ -11,6 +12,7 @@ Give the adapter a database user that may only SELECT; that is the strongest pro
 """
 from __future__ import annotations
 
+import importlib
 import re
 import uuid
 from dataclasses import dataclass
@@ -19,6 +21,7 @@ from decimal import Decimal
 from typing import Any, Callable, Iterator
 from urllib.parse import parse_qs, unquote, urlsplit
 
+from backend.app.connectors import sources
 from backend.app.connectors.errors import ConnectorQueryError
 from backend.app.queries.sql_query import PreparedSql
 
@@ -35,7 +38,8 @@ class Dialect:
     pip: str
     paramstyle: str        # "pyformat" (%(name)s) or "named" (:name)
     list_style: str        # "any" (= ANY(array)) or "expand" (IN (a, b, c))
-    describe_sql: Callable[[str], str]
+    describe_sql: Callable[[str], str] | None
+    group: str = "sql"     # sql, warehouse, nosql, file: how the wizard groups it
 
 
 # The Read Fields wrappers below put the report's own SQL (already checked by prepare_sql: one read-only statement,
@@ -49,7 +53,28 @@ DIALECTS: dict[str, Dialect] = {
                          "pyformat", "expand", lambda sql: f"SELECT TOP 0 * FROM ({sql}) AS report_query"),  # nosec B608
     "oracle": Dialect("oracle", "Oracle", ("oracle://",), 1521, "oracledb", "oracledb",
                       "named", "expand", lambda sql: f"SELECT * FROM ({sql}) report_query WHERE 1 = 0"),  # nosec B608
+    "mariadb": Dialect("mariadb", "MariaDB", ("mariadb://",), 3306, "pymysql", "PyMySQL",
+                       "pyformat", "expand", lambda sql: f"SELECT * FROM ({sql}) AS report_query LIMIT 0"),  # nosec B608
+    "snowflake": Dialect("snowflake", "Snowflake", ("snowflake://",), 443, "snowflake.connector", "snowflake-connector-python",
+                         "pyformat", "expand", lambda sql: f"SELECT * FROM ({sql}) AS report_query LIMIT 0", "warehouse"),  # nosec B608
+    "clickhouse": Dialect("clickhouse", "ClickHouse", ("clickhouse://",), 8123, "json", "-",
+                          "pyformat", "expand", lambda sql: f"SELECT * FROM ({sql}) AS report_query LIMIT 0", "warehouse"),  # nosec B608
+    "elasticsearch": Dialect("elasticsearch", "Elasticsearch", ("elasticsearch://",), 9200, "json", "-",
+                             "pyformat", "expand", None, "nosql"),
+    "redis": Dialect("redis", "Redis", ("redis://", "rediss://"), 6379, "redis", "redis",
+                     "dollar", "expand", lambda sql: f"SELECT * FROM ({sql}) AS report_query LIMIT 0", "nosql"),  # nosec B608
+    "sqlite": Dialect("sqlite", "SQLite file", ("sqlite://",), 0, "sqlite3", "-",
+                      "named", "expand", lambda sql: f"SELECT * FROM ({sql}) AS report_query LIMIT 0", "file"),  # nosec B608
+    "duckdb": Dialect("duckdb", "DuckDB file", ("duckdb://",), 0, "duckdb", "duckdb",
+                      "dollar", "expand", lambda sql: f"SELECT * FROM ({sql}) AS report_query LIMIT 0", "file"),  # nosec B608
+    "files": Dialect("files", "Files (CSV, Excel, JSON)", ("files://",), 0, "duckdb", "duckdb",
+                     "dollar", "expand", lambda sql: f"SELECT * FROM ({sql}) AS report_query LIMIT 0", "file"),  # nosec B608
+    "gsheets": Dialect("gsheets", "Google Sheets", ("gsheets://",), 0, "duckdb", "duckdb",
+                       "dollar", "expand", lambda sql: f"SELECT * FROM ({sql}) AS report_query LIMIT 0", "file"),  # nosec B608
 }
+# No database name in the URL (Elasticsearch, Redis): the wizard may leave the path empty.
+NO_DATABASE = {"elasticsearch", "redis"}
+LOCAL_KINDS = {"sqlite", "duckdb", "files", "gsheets"}   # uploaded files or a Google Sheet: no database login
 SQL_TYPES = set(DIALECTS)
 URL_PREFIXES = {kind: d.prefixes for kind, d in DIALECTS.items()}
 
@@ -64,7 +89,7 @@ def dialect(kind: str) -> Dialect:
 def _driver(kind: str = "postgresql"):
     spec = dialect(kind)
     try:
-        return __import__(spec.module)
+        return importlib.import_module(spec.module)
     except ImportError as exc:  # pragma: no cover - requirements.txt installs them
         raise ConnectorQueryError(f"The {spec.label} driver is not installed: pip install \"{spec.pip}\"") from exc
 
@@ -73,7 +98,7 @@ def valid_url(kind: str, url: str) -> bool:
     if not url.startswith(URL_PREFIXES.get(kind, ())):
         return False
     parts = urlsplit(url)
-    return bool(parts.hostname) and (kind == "postgresql" or bool(database_from_url(url)))
+    return bool(parts.hostname) and (kind in ("postgresql", *NO_DATABASE) or bool(database_from_url(url)))
 
 
 def database_from_url(url: str) -> str:
@@ -114,7 +139,8 @@ class _Session:
         self.module = _driver(kind)
         timeout_ms = max(1000, int(timeout_ms))
         try:
-            self.connection = getattr(self, f"_open_{kind}")(timeout_ms)
+            opener = getattr(self, f"_open_{kind}", None)
+            self.connection = opener(timeout_ms) if opener else self._open_other(timeout_ms)
         except ConnectorQueryError:
             raise
         except Exception as exc:  # noqa: BLE001 - every driver has its own error classes
@@ -128,8 +154,25 @@ class _Session:
         connection.read_only = True
         return connection
 
+    def _open_other(self, timeout_ms: int):
+        kind = self.kind
+        if kind == "snowflake":
+            return sources.open_snowflake(self.module, self.url, timeout_ms)
+        if kind == "clickhouse":
+            return sources.ClickHouseConnection(self.url, timeout_ms)
+        if kind == "elasticsearch":
+            return sources.ElasticConnection(self.url, timeout_ms)
+        if kind == "redis":
+            return sources.open_redis(self.url, timeout_ms)
+        if kind in ("sqlite", "duckdb"):
+            return sources.open_database_file(kind, self.url, timeout_ms)
+        return sources.open_files(kind, self.url, timeout_ms)
+
+    def _open_mariadb(self, timeout_ms: int):
+        return self._open_mysql(timeout_ms)
+
     def _open_mysql(self, timeout_ms: int):
-        p = _url_parts("mysql", self.url)
+        p = _url_parts(self.kind, self.url)
         ssl = {"ssl": {}} if p["query"].get("ssl", "").lower() in ("1", "true", "required") else {}
         connection = self.module.connect(
             host=p["host"], port=p["port"], user=p["user"], password=p["password"], database=p["database"],
@@ -215,7 +258,20 @@ TEST_QUERIES = {
     "mysql": "SELECT CONCAT('MySQL ', VERSION()), DATABASE()",
     "sqlserver": "SELECT CONCAT('SQL Server ', CAST(SERVERPROPERTY('ProductVersion') AS varchar(40))), DB_NAME()",
     "oracle": "SELECT 'Oracle', SYS_CONTEXT('USERENV', 'DB_NAME') FROM dual",
+    "mariadb": "SELECT CONCAT('MariaDB ', VERSION()), DATABASE()",
+    "snowflake": "SELECT 'Snowflake ' || CURRENT_VERSION(), CURRENT_DATABASE()",
+    "clickhouse": "SELECT concat('ClickHouse ', version()), currentDatabase()",
+    "elasticsearch": "SELECT 1, 2",
+    "redis": "SELECT 'Redis', 'keys'",
+    "sqlite": "SELECT 'SQLite ' || sqlite_version(), 'main'",
+    "duckdb": "SELECT 'DuckDB ' || version(), current_database()",
+    "files": "SELECT 'DuckDB ' || version(), 'files'",
+    "gsheets": "SELECT 'Google Sheet', 'sheet'",
 }
+
+
+def _few(names: list[str]) -> str:
+    return ", ".join(names[:6]) + (" \u2026" if len(names) > 6 else "")
 
 
 def test(kind: str, url: str) -> dict[str, Any]:
@@ -227,6 +283,14 @@ def test(kind: str, url: str) -> dict[str, Any]:
         cursor.close()
         if kind == "oracle":
             version = f"Oracle {session.connection.version}"
+        if kind == "elasticsearch":
+            version, database = f"Elasticsearch {session.connection.version}", session.connection.cluster
+        if kind == "redis":
+            found = sorted(sources.redis_tables(url))
+            database = f"{len(found)} key prefixes ({_few(found)})"
+        if kind in ("files", "gsheets"):
+            names = [row[0] for row in session.connection.con.execute("SELECT table_name FROM information_schema.tables ORDER BY 1").fetchall()]
+            database = f"{len(names)} tables ({_few(names)})"
     return {"ok": True, "message": f"Connected: {str(version).split(',')[0]} · database {database}", "database": str(database or "")}
 
 
@@ -260,7 +324,7 @@ def iter_query(kind: str, url: str, prepared: PreparedSql, values: dict[str, Any
                 cursor = session.connection.cursor(name="report_export")       # psycopg: a server-side cursor
                 cursor.itersize = batch_size
                 cursor.execute(sql, params)
-            elif kind == "mysql":
+            elif kind in ("mysql", "mariadb"):
                 cursor = session.connection.cursor(session.module.cursors.SSCursor)  # PyMySQL: unbuffered
                 cursor.execute(sql, params)
             else:
@@ -292,15 +356,17 @@ def iter_query(kind: str, url: str, prepared: PreparedSql, values: dict[str, Any
 
 
 def describe(kind: str, url: str, prepared: PreparedSql, values: dict[str, Any] | None = None) -> list[str]:
-    """The result columns without reading data (Jasper "Read Fields"): the query wrapped so it returns no rows.
+    """The result columns without reading data (classic "Read Fields"): the query wrapped so it returns no rows.
     SQL Server cannot wrap a WITH query or an ORDER BY without TOP; then the query itself runs and no row is read."""
     sql, params = _bind(kind, prepared, values or {})
     spec = dialect(kind)
     with _Session(kind, url, 15_000) as session:
         try:
+            if spec.describe_sql is None:
+                raise ConnectorQueryError("no wrapper")
             cursor = session.execute(spec.describe_sql(sql), params, "The fields could not be read")
         except ConnectorQueryError:
-            if kind != "sqlserver":
+            if kind not in ("sqlserver", "elasticsearch"):
                 raise
             session.connection.rollback()
             cursor = session.execute(sql, params, "The fields could not be read")
@@ -377,6 +443,36 @@ JOIN user_cons_columns a ON a.constraint_name = c.constraint_name
 JOIN user_cons_columns b ON b.constraint_name = c.r_constraint_name AND b.position = a.position WHERE c.constraint_type = 'R'""",
     },
 }
+_DUCK = {
+    "columns": """SELECT c.table_schema, c.table_name, t.table_type, c.column_name, c.data_type, c.is_nullable, c.ordinal_position
+FROM information_schema.columns c JOIN information_schema.tables t ON t.table_schema = c.table_schema AND t.table_name = c.table_name
+WHERE c.table_schema NOT IN ('information_schema', 'pg_catalog') ORDER BY c.table_schema, c.table_name, c.ordinal_position""",
+    "primaryKeys": """SELECT schema_name, table_name, unnest(constraint_column_names) FROM duckdb_constraints() WHERE constraint_type = 'PRIMARY KEY'""",
+    "foreignKeys": """SELECT schema_name, table_name, unnest(constraint_column_names), schema_name, referenced_table, unnest(referenced_column_names)
+FROM duckdb_constraints() WHERE constraint_type = 'FOREIGN KEY'""",
+}
+SCHEMA_SQL.update({
+    "mariadb": SCHEMA_SQL["mysql"],
+    "snowflake": {"columns": _INFO_COLUMNS.format(where="c.table_schema <> 'INFORMATION_SCHEMA'")},
+    "clickhouse": {
+        "columns": """SELECT c.database, c.table, if(t.engine LIKE '%View', 'VIEW', 'BASE TABLE'), c.name, c.type,
+ if(startsWith(c.type, 'Nullable'), 'YES', 'NO'), c.position FROM system.columns c
+ JOIN system.tables t ON t.database = c.database AND t.name = c.table WHERE c.database = currentDatabase() ORDER BY c.table, c.position""",
+        "primaryKeys": "SELECT database, table, name FROM system.columns WHERE database = currentDatabase() AND is_in_primary_key",
+    },
+    "sqlite": {
+        "columns": """SELECT 'main', m.name, CASE m.type WHEN 'view' THEN 'VIEW' ELSE 'BASE TABLE' END, p.name, p.type,
+ CASE p."notnull" WHEN 1 THEN 'NO' ELSE 'YES' END, p.cid + 1 FROM sqlite_master m JOIN pragma_table_info(m.name) p
+ WHERE m.type IN ('table', 'view') AND m.name NOT LIKE 'sqlite_%' ORDER BY m.name, p.cid""",
+        "primaryKeys": """SELECT 'main', m.name, p.name FROM sqlite_master m JOIN pragma_table_info(m.name) p WHERE m.type = 'table' AND p.pk > 0""",
+        "foreignKeys": """SELECT 'main', m.name, f."from", 'main', f."table", f."to" FROM sqlite_master m JOIN pragma_foreign_key_list(m.name) f
+ WHERE m.type = 'table'""",
+    },
+    "duckdb": _DUCK, "redis": _DUCK,
+    "elasticsearch": {},     # read by SHOW TABLES / SHOW COLUMNS (sources.elastic_schema)
+    "files": {**_DUCK, "columns": _DUCK["columns"].replace("t.table_type", "'BASE TABLE'")},
+    "gsheets": {**_DUCK, "columns": _DUCK["columns"].replace("t.table_type", "'BASE TABLE'")},
+})
 SCHEMA_MAX_COLUMNS = 50_000
 
 
@@ -385,7 +481,12 @@ def read_schema(kind: str, url: str) -> dict[str, Any]:
     queries = SCHEMA_SQL[dialect(kind).kind]
     out: dict[str, Any] = {"truncated": False}
     with _Session(kind, url, 30_000) as session:
+        if kind == "elasticsearch":
+            return {"truncated": False, "columns": sources.elastic_schema(session.connection), "primaryKeys": [], "foreignKeys": []}
         for part in ("columns", "primaryKeys", "foreignKeys"):
+            if part not in queries:
+                out[part] = []
+                continue
             try:
                 cursor = session.execute(queries[part], {}, "The schema could not be read")
             except ConnectorQueryError:
@@ -405,7 +506,19 @@ def read_schema(kind: str, url: str) -> dict[str, Any]:
     return out
 
 
+URL_HINTS = {
+    "snowflake": "snowflake://user:password@account/DATABASE/SCHEMA?warehouse=WH&role=ROLE",
+    "clickhouse": "clickhouse://user:password@host:8123/database (?secure=true for HTTPS on 8443)",
+    "elasticsearch": "elasticsearch://user:password@host:9200 (?secure=true for HTTPS)",
+    "redis": "redis://:password@host:6379/0 (rediss:// for TLS)",
+    "sqlite": "upload a SQLite database file", "duckdb": "upload a DuckDB database file",
+    "files": "upload CSV, Excel, JSON or Parquet files", "gsheets": "paste the link of a Google Sheet shared as Anyone with the link",
+}
+
+
 def url_hint(kind: str) -> str:
+    if kind in URL_HINTS:
+        return f"Give a {dialect(kind).label} connection: {URL_HINTS[kind]}"
     spec = dialect(kind)
     return f"Give a {spec.label} URL: {spec.prefixes[0]}user:password@host:{spec.default_port}/{'service_name' if kind == 'oracle' else 'database'}"
 

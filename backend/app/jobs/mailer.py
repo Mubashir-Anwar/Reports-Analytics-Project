@@ -1,4 +1,4 @@
-"""E-mail for scheduled reports (JasperReports Server: Notifications). Configured only by environment variables:
+"""E-mail for scheduled reports (a report server: Notifications). Configured only by environment variables:
 
 SMTP_HOST, SMTP_PORT (587), SMTP_USER, SMTP_PASSWORD, SMTP_FROM, SMTP_SECURITY = starttls | ssl | none."""
 from __future__ import annotations

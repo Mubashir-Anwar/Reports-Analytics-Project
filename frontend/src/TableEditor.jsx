@@ -1,4 +1,4 @@
-// Table editor (Jaspersoft Studio opens a table in its own editor tab): the table's Column Header, Detail and
+// Table editor (a classic report designer opens a table in its own editor tab): the table's Column Header, Detail and
 // Column Footer cells side by side. Click a cell to edit it, drag a column edge to resize, add / move / delete columns,
 // and choose the dataset the table reads.
 import { useRef, useState } from 'react';

@@ -574,6 +574,13 @@ no files of the server, no other programs, no ctypes). Those guard rails stop mi
 not a container. Give the right to people you trust with the data, or run the service in Docker for a hard boundary.
 Every run is in the audit trail (`analytics.python.run`).
 
+**Pipelines (ETL / ELT)** (the *Pipelines (ETL)* right, with Analytics): steps over datasets — source, filter, choose
+columns, remove duplicates, fill empty, change type, new column, join, stack, group & total, sort, SQL and Python —
+whose last step is loaded as a dataset that runs again on refresh or on its schedule. Blocks and SQL steps run in one
+DuckDB connection that can read only the source datasets' files and its own temporary folder; Python steps need the
+Python scripts right too and run like Python scripts. `ANALYTICS_PIPELINE_TIMEOUT_SECONDS` (default 900) stops a run;
+every step may have at most `ANALYTICS_IMPORT_MAX_ROWS` rows. Runs are in the audit trail (`analytics.pipeline.run`).
+
 Size the server for it: the Parquet file is usually 5–20× smaller than the source data (20 000 orders ≈ 250 KB), and
 a query reads only the columns it uses. Several servers behind a load balancer need `REPORTING_ANALYTICS_DIR` on a
 shared disk; imports run on whichever server received the request or the schedule.

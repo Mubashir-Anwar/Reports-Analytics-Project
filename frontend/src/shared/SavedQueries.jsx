@@ -5,6 +5,7 @@ import { createPortal } from 'react-dom';
 import { api } from '../api.js';
 import { useMe } from './session.js';
 import './saved-queries.css';
+import ObjectIcon from '../query/ObjectIcon.jsx';
 
 export const SAVED_EVENT = 'saved-queries-changed';
 const changed = () => window.dispatchEvent(new Event(SAVED_EVENT));
@@ -128,8 +129,9 @@ export function SavedQueryList({ saved, onOpen, onEdit, onDelete, filter = '', k
   const row = (q) => (
     <li key={q.id} className="sq-row">
       <button type="button" className="sq-open" onClick={() => onOpen(q)} title={q.description || `Open ${q.name}`}>
-        <span className={`sq-kind k-${q.kind}`}>{q.kind === 'sql' ? 'SQL' : 'MDB'}</span>
-        <span className="sq-name">{q.name}</span>
+        <span className={`sq-kind k-${q.kind}`}><ObjectIcon kind={q.kind === 'sql' ? 'sql' : 'mongo'} size={15} /></span>
+        <span className="sq-text"><span className="sq-name">{q.name}</span>
+          <small className="sq-sub">{q.kind === 'sql' ? 'SQL' : 'MongoDB'}{q.collection ? ` · ${q.collection}` : ''}{q.description ? ` · ${q.description}` : ''}</small></span>
         {q.mine
           ? (q.sharedWith?.length ? <span className="sq-badge" title={q.sharedWith.includes('*') ? 'Shared with everyone' : `Shared with ${q.sharedWith.join(', ')}`}>{q.sharedWith.includes('*') ? '🌐' : `👥${q.sharedWith.length}`}</span> : null)
           : <span className="sq-badge from" title={`Shared by ${q.owner}`}>by {q.owner}</span>}
@@ -140,7 +142,7 @@ export function SavedQueryList({ saved, onOpen, onEdit, onDelete, filter = '', k
   );
   return (
     <div className="sq-list">
-      {mine.length > 0 && <><p className="sq-group">Mine <em>{mine.length}</em></p><ul>{mine.map(row)}</ul></>}
+      {mine.length > 0 && <><p className="sq-group">My queries <em>{mine.length}</em></p><ul>{mine.map(row)}</ul></>}
       {shared.length > 0 && <><p className="sq-group">Shared with me <em>{shared.length}</em></p><ul>{shared.map(row)}</ul></>}
     </div>
   );

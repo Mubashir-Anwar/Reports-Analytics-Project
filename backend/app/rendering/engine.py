@@ -1,4 +1,4 @@
-"""Band-based (Jasper-style) report design: validation and PDF rendering.
+"""Band-based (Classic-style) report design: validation and PDF rendering.
 
 A design is plain JSON data. Nothing in it is ever executed: expressions are
 `$F{field}` / `$P{param}` / `$V{variable}` tokens plus a tiny, AST-checked
@@ -50,22 +50,22 @@ def design_bands(design: dict[str, Any]) -> list[dict[str, Any]]:
 
 ELEMENT_TYPES = {"staticText", "textField", "line", "rectangle", "image", "chart", "ellipse", "frame", "break", "barcode",
                  "table", "crosstab", "list", "subreport", "note"}
-# Elements that print many records and make their band grow (Jasper components fed by a dataset).
+# Elements that print many records and make their band grow (classic components fed by a dataset).
 DATASET_TYPES = {"table", "crosstab", "list", "subreport"}
 TABLE_FOOTERS = {"none", "text", "Sum", "Count", "Average", "Min", "Max"}
 CROSSTAB_CALCULATIONS = {"Sum", "Count", "Average", "Min", "Max"}
 MAX_SUBREPORT_DEPTH = 2
-# Sub-datasets (Jasper subDataset): a Table or Crosstab can read its own query instead of the report's records.
+# Sub-datasets (classic subDataset): a Table or Crosstab can read its own query instead of the report's records.
 DATASET_COMPONENTS = {"table", "crosstab"}
 MAX_DATASETS = 10
 DATASET_LANGUAGES = {"aggregation-json", "mongosh", "javascript", "python", "sql"}
 DATASET_PARAMETER_TYPES = {"string", "integer", "number", "date", "boolean"}
-# Jasper "When No Data Type". Auto = the No Data band when there is one, else all sections without Detail.
+# classic "When No Data Type". Auto = the No Data band when there is one, else all sections without Detail.
 NO_DATA_TYPES = {"Auto", "NoPages", "BlankPage", "AllSectionsNoDetail", "NoDataSection"}
 BARCODE_TYPES = {"qr", "code128", "code39", "ean13"}
 LINE_STYLES = {"solid": None, "dashed": (4, 3), "dotted": (1, 2)}
 EVALUATION_TIMES = {"Now", "Report", "Auto"}
-# Jaspersoft Studio → Appearance / Text Field properties
+# Appearance / Text Field properties
 POSITION_TYPES = {"Float", "FixRelativeToTop", "FixRelativeToBottom"}
 STRETCH_TYPES = {"NoStretch", "RelativeToTallestObject", "RelativeToBandHeight", "ContainerHeight", "ContainerBottom"}
 TEXT_ADJUSTS = {"CutText", "StretchHeight", "ScaleFont"}
@@ -99,7 +99,7 @@ PDF_FAMILIES = {
     "Times": ("Times-Roman", "Times-Bold", "Times-Italic", "Times-BoldItalic"),
     "Courier": ("Courier", "Courier-Bold", "Courier-Oblique", "Courier-BoldOblique"),
 }
-# Jasper "markup": none = text as-is; html = a safe subset of HTML; styled = Jasper <style ...> tags (plus the HTML subset).
+# classic "markup": none = text as-is; html = a safe subset of HTML; styled = classic <style ...> tags (plus the HTML subset).
 MARKUPS = {"none", "html", "styled"}
 _HTML_FONT_SIZES = {"1": 8, "2": 10, "3": 12, "4": 14, "5": 18, "6": 24, "7": 36}
 _CSS_COLOR = re.compile(r"^(#[0-9a-fA-F]{3}|#[0-9a-fA-F]{6}|[a-zA-Z]{3,20})$")
@@ -138,7 +138,7 @@ def _css_size(value: str, base: float) -> float | None:
 
 
 class _MarkupParser:
-    """Turn HTML / Jasper styled text into ReportLab paragraph markup (for PDF) or plain text (for Excel/CSV).
+    """Turn HTML / classic styled text into ReportLab paragraph markup (for PDF) or plain text (for Excel/CSV).
 
     Only formatting survives: bold, italic, underline, strike, sub/superscript, colour, size, font, line
     breaks, paragraphs and lists. Scripts, links, images, tables' structure and every other tag are dropped
@@ -372,11 +372,11 @@ def validate_design(design: Any, columns: list[str], parameter_names: set[str]) 
         "margins": {side: _num(margins.get(side), f"margins.{side}", 0, 300, 30)
                     for side in ("top", "right", "bottom", "left")},
         "ignorePagination": raw_page.get("ignorePagination") is True,
-        # Excel/CSV: "grid" = the whole page laid out in cells like Jasper's XLSX exporter (headings, images,
+        # Excel/CSV: "grid" = the whole page laid out in cells like the classic XLSX exporter (headings, images,
         # every band); "table" = one header row and one row per record (best for data analysis).
         "sheetLayout": raw_page.get("sheetLayout") if raw_page.get("sheetLayout") in ("grid", "mixed") else "table",
-        # designer only: vertical guide lines (x in px from the left margin), like Jaspersoft Studio's ruler guides
-        # Report properties (Jaspersoft Studio: Report → Properties)
+        # designer only: vertical guide lines (x in px from the left margin), like a classic report designer's ruler guides
+        # Report properties (a classic report designer: Report → Properties)
         "whenNoDataType": raw_page.get("whenNoDataType") if raw_page.get("whenNoDataType") in NO_DATA_TYPES else "Auto",
         "titleNewPage": raw_page.get("titleNewPage") is True,
         "summaryNewPage": raw_page.get("summaryNewPage") is True,
@@ -512,14 +512,14 @@ def validate_design(design: Any, columns: list[str], parameter_names: set[str]) 
             "backColor": _color(raw.get("backColor"), "backColor"),
             "borderColor": _color(raw.get("borderColor"), "borderColor"),
             "borderWidth": _num(raw.get("borderWidth"), "borderWidth", 0, 20, 0),
-            # Jasper "Stretch With Overflow" (textAdjust=StretchHeight): long text makes the element and its band taller
+            # classic "Stretch With Overflow" (textAdjust=StretchHeight): long text makes the element and its band taller
             "stretch": raw.get("stretch") is True and kind in ("staticText", "textField"),
             # designer only: a locked element cannot be moved or resized on the canvas
             "locked": raw.get("locked") is True,
         }
         if kind != "line" and element["height"] < 1:
             element["height"] = 1.0
-        # Appearance / Advanced (Jaspersoft Studio property tabs)
+        # Appearance / Advanced (a classic report designer property tabs)
         element["padding"] = _num(raw.get("padding"), "padding", 0, 50, 2)
         element["lineStyle"] = raw.get("lineStyle") if raw.get("lineStyle") in LINE_STYLES else "solid"
         raw_borders = raw.get("borders")
@@ -534,7 +534,7 @@ def validate_design(design: Any, columns: list[str], parameter_names: set[str]) 
             check_expression(print_when, f"{band_name} Print When")
         element["printWhenExpression"] = print_when
         # Appearance: Position Type / Stretch Type ("" = the earlier automatic behaviour: float below a growing
-        # text, grow with a text on the same line), Transparent, Label / Key, print details (Jasper names)
+        # text, grow with a text on the same line), Transparent, Label / Key, print details (classic names)
         element["positionType"] = raw.get("positionType") if raw.get("positionType") in POSITION_TYPES else ""
         element["stretchType"] = raw.get("stretchType") if raw.get("stretchType") in STRETCH_TYPES else ""
         element["transparent"] = raw.get("transparent") is True
@@ -575,7 +575,7 @@ def validate_design(design: Any, columns: list[str], parameter_names: set[str]) 
                 check_expression(pattern_expression, f"{band_name} Pattern Expression")
             element["patternExpression"] = pattern_expression
             element["blankWhenNull"] = raw.get("blankWhenNull", True) is True
-            # Jasper Evaluation Time: Now = while filling; Report/Auto = variables take their final (report-end) value
+            # classic Evaluation Time: Now = while filling; Report/Auto = variables take their final (report-end) value
             element["evaluationTime"] = raw.get("evaluationTime") if raw.get("evaluationTime") in EVALUATION_TIMES else "Now"
             check_expression(element["expression"], f"{band_name} textField")
         elif kind == "barcode":
@@ -726,7 +726,7 @@ def validate_design(design: Any, columns: list[str], parameter_names: set[str]) 
             raise ValueError(f"The elements of band '{name}' must be a list")
         band: dict[str, Any] = {"height": height, "elements": [clean_element(item, name) for item in elements]}
         print_when = str(raw.get("printWhenExpression", "") or "").strip()[:4000]
-        if print_when:                                     # Jasper: a band's own Print When Expression
+        if print_when:                                     # Classic reports: a band's own Print When Expression
             if not jexpr.check_syntax(print_when):
                 raise ValueError(f"Band '{name}': the Print When expression could not be understood: {print_when[:60]}")
             check_expression(print_when, f"Band {name} Print When")
@@ -751,7 +751,7 @@ def validate_design(design: Any, columns: list[str], parameter_names: set[str]) 
     for item in calculated:
         check_expression(item["expression"], f"calculated field {item['name']}")
 
-    # Dataset filter expression (Jasper: Dataset → Filter Expression): only records for which it is true are printed
+    # Dataset filter expression (classic reports: Dataset → Filter Expression): only records for which it is true are printed
     filter_expression = str(design.get("filterExpression", "") or "").strip()[:1000]
     if filter_expression:
         if not jexpr.check_syntax(filter_expression):
@@ -764,7 +764,7 @@ def validate_design(design: Any, columns: list[str], parameter_names: set[str]) 
 
 
 def _clean_datasets(raw: Any) -> list[dict[str, Any]]:
-    """Jasper sub-datasets: a name, an optional own data adapter, a query, its fields and its parameters.
+    """classic sub-datasets: a name, an optional own data adapter, a query, its fields and its parameters.
     The query itself is checked (read-only, parameters defined) by definitions.compile_dataset when it runs or is saved."""
     if raw in (None, ""):
         return []
@@ -1205,7 +1205,7 @@ class _Render:
         return {name: self.variable_value(name) for name in names}
 
     def print_when(self, element: dict[str, Any], row: dict[str, Any] | None) -> bool:
-        """Jasper "Print When Expression": the element is printed only when it is true."""
+        """classic "Print When Expression": the element is printed only when it is true."""
         expression = element.get("printWhenExpression")
         if not expression:
             return True
@@ -1237,7 +1237,7 @@ class _Render:
         return used
 
     def shown(self, element: dict[str, Any], row: dict[str, Any] | None) -> bool:
-        """Is the element printed for this record? Print When Expression, then Jasper's "Print Repeated Values"
+        """Is the element printed for this record? Print When Expression, then the classic "Print Repeated Values"
         (off: a value equal to the one printed before is left out), unless it is the first whole band on a new
         page ("Print In First Whole Band") or its group just changed ("Print When Group Changes")."""
         if not self.print_when(element, row):
@@ -1290,7 +1290,7 @@ class _Render:
             value: Any = eval_expression(expression.lstrip()[1:], resolve)
             text = format_value(value, pattern)
         elif found:
-            # one field alone: its value is the text (with markup HTML a value that is HTML prints formatted, like Jasper)
+            # one field alone: its value is the text (with markup HTML a value that is HTML prints formatted, like classic reports)
             text = format_value(resolve(found.group(1), found.group(2)), pattern)
         elif element.get("markup", "none") in ("html", "styled"):
             # words with data between them: the values are printed as text (escaped)
@@ -1365,7 +1365,7 @@ class _Render:
 
     @staticmethod
     def leading(element: dict[str, Any], size: float) -> float:
-        """Paragraph → Line Spacing (Jasper): Single, 1½, Double, Proportional (× size), Fixed / At Least (points)."""
+        """Paragraph → Line Spacing (classic reports): Single, 1½, Double, Proportional (× size), Fixed / At Least (points)."""
         base, amount = size * element.get("_line", 1.2), element.get("lineSpacingSize", 1) or 1
         spacing = element.get("lineSpacing", "Single")
         if spacing == "1_1_2":
@@ -1450,7 +1450,7 @@ class _Render:
     def band_layout(self, band: dict[str, Any], row: dict[str, Any] | None) -> tuple[float, list[tuple[float, float]]]:
         """(band height, [(y, height) per element]) after "Stretch With Overflow".
 
-        Like Jasper: a stretching text grows to fit its value; elements on the same line grow with it
+        Like Classic reports: a stretching text grows to fit its value; elements on the same line grow with it
         (stretchType RelativeToTallestObject), elements below it move down (positionType Float) and the band grows.
         """
         elements = band["elements"]
@@ -1577,7 +1577,7 @@ class _Render:
         return rows
 
     def subdataset_rows(self, element: dict[str, Any], row: dict[str, Any] | None) -> list[dict[str, Any]]:
-        """Run the component's sub-dataset (Jasper datasetRun). Parameters: the mapped expressions; a dataset
+        """Run the component's sub-dataset (classic datasetRun). Parameters: the mapped expressions; a dataset
         parameter that is not mapped takes the report parameter of the same name, when there is one."""
         dataset = next((d for d in self.design.get("datasets", []) if d["name"] == element["datasetName"]), None)
         if dataset is None:
@@ -1725,7 +1725,7 @@ class _Render:
                 yield ("row", {"height": rh, "elements": elements}, None, self, None)
 
     def _list_segments(self, lst, band, row, level):
-        """Jasper List: the elements drawn inside the List box are printed once per record."""
+        """classic List: the elements drawn inside the List box are printed once per record."""
         inside = _contained(lst, band)
         template = [{**e, "y": e["y"] - lst["y"]} for e in inside]
         if lst["backColor"] or lst["borderWidth"] or lst.get("borders"):
@@ -1847,7 +1847,7 @@ class _Render:
             else:
                 canvas.rect(x, y, w, h, stroke=1 if element["borderWidth"] else 0, fill=1 if back else 0)
             canvas.restoreState()
-        if element.get("borders"):  # a separate border per side (Jasper Borders tab)
+        if element.get("borders"):  # a separate border per side (classic Borders tab)
             canvas.saveState()
             sides = element["borders"]
             for side, (x1, y1, x2, y2) in {"top": (x, y + h, x + w, y + h), "bottom": (x, y, x + w, y),
@@ -2116,10 +2116,10 @@ class _Render:
         has_last_footer = band_present(last_footer)
         state = {"y": top_limit, "first": True}
 
-        # Jasper "No Data" section: with no rows, only the No Data band is printed.
+        # classic "No Data" section: with no rows, only the No Data band is printed.
         no_data = self.page.get("whenNoDataType", "Auto")
         if not self.rows and (no_data in ("NoPages", "BlankPage") or (no_data == "NoDataSection" and not band_present(bands.get("noData")))):
-            # Jasper "No Pages" / "Blank Page": nothing is printed (a PDF still needs one empty page)
+            # classic "No Pages" / "Blank Page": nothing is printed (a PDF still needs one empty page)
             self.page_number += 1
             self.pages_drawn += 1
             self.content_end = top_limit
@@ -2145,7 +2145,7 @@ class _Render:
                 for part in self.printed(self.bands["title"], None):
                     place(part, None)  # a Table in the Title can run over several pages
                 if self.page.get("titleNewPage"):
-                    canvas.showPage()  # Jasper "Title on a new page": the title page has no page header or footer
+                    canvas.showPage()  # classic "Title on a new page": the title page has no page header or footer
                     start_page(False)
                     return
                 if self.pages_drawn != before:
@@ -2174,7 +2174,7 @@ class _Render:
                 return
             breaks = sorted(e["y"] for e in band["elements"] if e["type"] == "break" and eng.print_when(e, row))
             if breaks:
-                # Jasper Break element: what is above it stays on this page, what is below it starts a new page.
+                # classic Break element: what is above it stays on this page, what is below it starts a new page.
                 cut = breaks[0]
                 above = {"height": cut, "elements": [e for e in band["elements"] if e["type"] != "break" and e["y"] < cut]}
                 below = {"height": max(0.0, band["height"] - cut),
@@ -2224,7 +2224,7 @@ class _Render:
         for band_item, band_row, band_level in self.sequence():
             place(band_item, band_row, band_level)
         if self.page.get("summaryNewPage") and band_present(self.bands["summary"]) and state["y"] > top_limit:
-            end_page()  # Jasper "Summary on a new page"
+            end_page()  # classic "Summary on a new page"
             start_page(False)
         for part in self.printed(self.bands["summary"], None):
             place(part, None)
@@ -2247,7 +2247,7 @@ def render_design_pdf(design: dict[str, Any], title: str, columns: list[str], ro
     if len(rows) > MAX_ROWS_RENDER:
         raise ValueError(f"The designer PDF supports up to {MAX_ROWS_RENDER:,} rows")
     if design["page"].get("ignorePagination"):
-        # Jasper "Ignore pagination": one page as tall as the content. Measure first, then draw.
+        # classic "Ignore pagination": one page as tall as the content. Measure first, then draw.
         probe = {**design, "page": {**design["page"], "height": 14400}}
         measure = _Render(probe, title, columns, rows, parameters, 1)
         measure.run(pdf_canvas.Canvas(io.BytesIO(), pagesize=(probe["page"]["width"], 14400)))
@@ -2460,7 +2460,7 @@ def _grid(design, title, columns, rows, parameters):
 
 
 def render_grid_csv(design, title, columns, rows, parameters) -> bytes:
-    """Jasper-style CSV: every printed text (title, headings, details, totals) in its grid position."""
+    """Classic-style CSV: every printed text (title, headings, details, totals) in its grid position."""
     import csv
     items, xs, _ys = _grid(design, title, columns, rows, parameters)
     cells: dict[tuple[int, int], Any] = {}
@@ -2477,7 +2477,7 @@ def render_grid_csv(design, title, columns, rows, parameters) -> bytes:
 
 
 def render_grid_xlsx(design, title, columns, rows, parameters) -> bytes:
-    """Jasper-style XLSX: the page layout in cells (merged where an element spans several), with fonts,
+    """Classic-style XLSX: the page layout in cells (merged where an element spans several), with fonts,
     colours, borders, lines and images — so the sheet looks like the PDF, headings included."""
     from openpyxl import Workbook
     from openpyxl.utils import get_column_letter

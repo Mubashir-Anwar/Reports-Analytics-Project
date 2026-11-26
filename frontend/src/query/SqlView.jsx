@@ -8,12 +8,30 @@ import UseQuery from './UseQuery.jsx';
 import { SaveQueryButton } from '../shared/SavedQueries.jsx';
 import QueryHelper from './QueryHelper.jsx';
 import { HelperButton } from './MongoView.jsx';
-import { buildSql, emptyHelper, fieldTypes, newFilter } from './queryHelper.js';
+import { buildSql, emptyHelper, fieldTypes, newFilter, quoteName } from './queryHelper.js';
+import { DIALECT_TIPS, snippets } from './snippets.js';
 
 const PARAM = /\$[PX]!?\{(?:IN|NOTIN)?\s*,?[^,}]*,?\s*([A-Za-z_]\w*)\}/g;
 
-export default function SqlView({ tab, onChange, notify }) {
+/** The first table of the schema and a text, number and date column of it: what the examples are written on. */
+function examplePick(schema, dialect) {
+  const tables = (schema?.schemas || []).flatMap((s) => s.tables.map((t) => ({ ...t, schemaName: s.name })));
+  const t = tables.find((x) => x.kind === 'table' && x.columns.length > 1) || tables[0];
+  if (!t) return {};
+  const of = (re) => t.columns.find((c) => re.test(c.type || ''))?.name;
+  const q = (name) => (name ? quoteName(name, dialect) : undefined);
+  const schemaPart = t.schemaName && !['public', 'dbo', 'main'].includes(t.schemaName) ? `${quoteName(t.schemaName, dialect)}.` : '';
+  return {
+    t: `${schemaPart}${quoteName(t.name, dialect)}`,
+    c: q(of(/char|text|string|keyword|varchar/i) || t.columns[0]?.name),
+    n: q(of(/int|num|dec|float|double|real|money|long/i)),
+    d: q(of(/date|time/i)),
+  };
+}
+
+export default function SqlView({ tab, onChange, notify, schema, dialect }) {
   const area = useRef(null);
+  const [examples, setExamples] = useState(false);
   const [result, setResult] = useState(null);
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
@@ -50,13 +68,24 @@ export default function SqlView({ tab, onChange, notify }) {
       <div className="qs-toolbar">
         <button type="button" className="btn primary" disabled={busy || !sql.trim()} onClick={run} title="Ctrl+Enter — runs the selected text, or all of it">{busy ? 'Running…' : '▶ Run'}</button>
         <label className="qs-limit">Rows <select value={tab.limit || 200} onChange={(e) => onChange({ limit: Number(e.target.value) })}>{[50, 200, 1000, 5000].map((n) => <option key={n}>{n}</option>)}</select></label>
+        <div className="qs-examples">
+          <button type="button" className="btn sm" aria-expanded={examples} onClick={() => setExamples(!examples)} title="Ready SQL in this database's own words">✨ Examples ▾</button>
+          {examples && (
+            <ul className="qs-examples-menu" role="menu" onMouseLeave={() => setExamples(false)}>
+              {snippets(dialect || tab.dialect, examplePick(schema, dialect || tab.dialect)).map((s) => (
+                <li key={s.label}><button type="button" role="menuitem" onClick={() => { onChange({ sql: s.sql }); setExamples(false); }}><b>{s.label}</b><small>{s.hint}</small></button></li>
+              ))}
+            </ul>
+          )}
+        </div>
         <span className="grow" />
+        {DIALECT_TIPS[dialect || tab.dialect] && <span className="qs-tip" title={DIALECT_TIPS[dialect || tab.dialect]}>{DIALECT_TIPS[dialect || tab.dialect]}</span>}
         <button type="button" className="btn sm" disabled={!sql.trim()} onClick={() => { navigator.clipboard?.writeText(sql); notify('Copied the SQL'); }}>Copy</button>
         <SaveQueryButton disabled={!sql.trim()} saved={tab.saved} notify={notify} onSaved={(item) => onChange({ saved: item, title: item.name })}
           query={() => ({ kind: 'sql', connectionId: tab.connectionId, text: sql })} />
         <UseQuery disabled={!sql.trim()} query={() => ({ connectionId: tab.connectionId, queryLanguage: 'sql', querySource: sql })} />
       </div>
-      <CodeArea ref={area} rows={9} value={sql} onChange={(e) => onChange({ sql: e.target.value })}
+      <CodeArea ref={area} language="sql" rows={9} value={sql} onChange={(e) => onChange({ sql: e.target.value })}
         placeholder={'SELECT *\nFROM orders\nWHERE branch = $P{Branch}\nORDER BY placed_on DESC'}
         onKeyDown={(e) => { if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') { e.preventDefault(); run(); } }} />
       {names.length > 0 && (

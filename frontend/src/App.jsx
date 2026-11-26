@@ -285,7 +285,7 @@ export default function App() {
     } catch (error) { notify(`Could not open the server report: ${error.message}`, 'error'); }
   };
 
-  /** Open file…: a .mrd report file, or a Jaspersoft Studio .jrxml (converted). Nothing is saved until Save. */
+  /** Open file…: a .mrd report file, or a .jrxml (converted). Nothing is saved until Save. */
   const openFile = async (chosen) => {
     // one report file, or a .jrxml together with the pictures it uses
     const { report: file, images, skipped } = await splitReportFiles(chosen instanceof File ? [chosen] : chosen);
@@ -313,7 +313,7 @@ export default function App() {
     notify(`Downloaded ${payload.id || 'report'}.mrd — open it again with “Open file…”, or upload it on /server (Add Resource)`, 'ok');
   };
 
-  /** Save as JRXML: the same report for Jaspersoft Studio. What Jasper has no match for is listed afterwards. */
+  /** Save as JRXML: the same report for other report designers. What JRXML has no match for is listed afterwards. */
   const [exportInfo, setExportInfo] = useState(null);
   const saveJrxml = async () => {
     try {
@@ -551,7 +551,7 @@ export default function App() {
       }
       const ctrl = event.ctrlKey || event.metaKey;
       const key = event.key.toLowerCase();
-      // clipboard and selection shortcuts, like Jaspersoft Studio / Photoshop
+      // clipboard and selection shortcuts, like desktop designers
       if (ctrl && key === 'v') { event.preventDefault(); actions.paste(); return; }
       if (ctrl && key === 'a') { event.preventDefault(); actions.selectAll(); return; }
       if (selection.kind !== 'element' || !findElement(design, selection.id)) return;
@@ -819,7 +819,7 @@ function ExportDialog({ info, onClose }) {
         <h3>Saved as JRXML</h3>
         <p><b>{info.fileName}</b> is in your Downloads folder.</p>
         <ol className="import-next">
-          <li>In Jaspersoft Studio: <b>File → Open File…</b> and choose it (or copy it into a project).</li>
+          <li>In your report designer: <b>File → Open File…</b> and choose it.</li>
           <li>Pick the data adapter at the top of the report, then Preview.</li>
           {info.warnings.length > 0 && <li>Look at the {info.warnings.length} note{info.warnings.length > 1 ? 's' : ''} below.</li>}
         </ol>
@@ -848,7 +848,7 @@ function ImportDialog({ info, onGo, onClose }) {
         <h3>JRXML imported</h3>
         <p><b>{info.name}</b> — {info.parameters} parameters, {info.columns} fields.</p>
         <ol className="import-next">
-          <li>Choose the data adapter{info.hints?.dataAdapter ? <> (in Jaspersoft it was <code>{info.hints.dataAdapter}</code>)</> : null}: <button type="button" className="linkish" onClick={() => onGo({ target: 'adapter', note: 'Choose the data adapter this report reads from.' })}>Setup → Data adapter</button></li>
+          <li>Choose the data adapter{info.hints?.dataAdapter ? <> (in the file it was <code>{info.hints.dataAdapter}</code>)</> : null}: <button type="button" className="linkish" onClick={() => onGo({ target: 'adapter', note: 'Choose the data adapter this report reads from.' })}>Setup → Data adapter</button></li>
           {items.length > 0 && <li>{todo ? `Fix the ${todo} thing${todo > 1 ? 's' : ''} marked “To do” below` : 'Look at the items below'} (each has a Go there button).</li>}
           <li>Preview it, then Save.</li>
         </ol>

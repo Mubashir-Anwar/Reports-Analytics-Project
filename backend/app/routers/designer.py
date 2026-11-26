@@ -36,7 +36,7 @@ def register(app: FastAPI, ctx: SimpleNamespace) -> None:
 
     @app.post("/api/admin/query/fields")
     async def admin_read_sql_fields(request: Request) -> dict[str, Any]:
-        """Jasper "Read Fields" for a SQL query: checks it (one read-only statement) and asks the database for the
+        """classic "Read Fields" for a SQL query: checks it (one read-only statement) and asks the database for the
         result columns with LIMIT 0 — no data rows are read. Parameters are NULL, $X{IN} lists empty."""
         require_admin(request, "designer")
         payload = await json_body(request)
@@ -98,7 +98,7 @@ def register(app: FastAPI, ctx: SimpleNamespace) -> None:
 
     @app.post("/api/admin/jrxml/import")
     async def admin_import_jrxml(request: Request) -> dict[str, Any]:
-        """Convert a Jaspersoft Studio .jrxml into a draft report + design. Nothing is saved or executed."""
+        """Convert a .jrxml into a draft report + design. Nothing is saved or executed."""
         require_admin(request, "designer")
         try:
             payload = await request.json()
@@ -112,7 +112,7 @@ def register(app: FastAPI, ctx: SimpleNamespace) -> None:
 
     @app.post("/api/admin/jrxml/export")
     async def admin_export_jrxml(request: Request) -> dict[str, Any]:
-        """The designer's report (+ design) as a Jaspersoft Studio .jrxml: {xml, fileName, warnings}. Nothing is saved."""
+        """The designer's report (+ design) as a .jrxml: {xml, fileName, warnings}. Nothing is saved."""
         require_admin(request, "designer")
         try:
             payload = await request.json()

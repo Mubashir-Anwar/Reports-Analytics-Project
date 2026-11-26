@@ -51,7 +51,7 @@ class ParameterSpec:
     default: Any = None
     allowed_values: tuple[Any, ...] = ()
     max_length: int = 200
-    # Jasper isForPrompting=false + defaultValueExpression: never asked, computed from other parameters.
+    # classic isForPrompting=false + defaultValueExpression: never asked, computed from other parameters.
     prompt: bool = True
     expression: str = ""
     # CNIC, account number…: the run log stores the value masked (12****89).
@@ -79,7 +79,7 @@ class ReportDefinition:
 
     @property
     def folder(self) -> str:
-        """The repository folder (like JasperReports Server, the same ID may be used again in another folder)."""
+        """The repository folder (like a report server, the same ID may be used again in another folder)."""
         try:
             return normalize_folder_path((self.editor_config or {}).get("folder", "General"))
         except ValueError:
@@ -240,7 +240,7 @@ def _dynamic_report(payload: dict[str, Any], source_path: Path | None = None) ->
         prompt = raw.get("prompt", True) is not False
         expression = str(raw.get("expression", "") or "").strip()
         if not prompt:
-            # Derived parameter (Jasper isForPrompting=false): computed from other parameters (any order, no loops).
+            # Derived parameter (classic isForPrompting=false): computed from other parameters (any order, no loops).
             if not expression:
                 raise ValueError(f"{name} is not asked from the user, so its expression (default value) is required")
             if not jexpr.check_syntax(expression):
@@ -711,7 +711,7 @@ def validate_parameters(definition: ReportDefinition, query_pairs: list[tuple[st
 
 
 def _order_computed(parameters: list[ParameterSpec]) -> list[ParameterSpec]:
-    """Asked parameters keep their order; computed ones follow, each after the computed ones it uses (like Jasper,
+    """Asked parameters keep their order; computed ones follow, each after the computed ones it uses (like classic reports,
     the order in the list does not matter). Unknown references and loops are refused."""
     names = {spec.name for spec in parameters}
     computed = {spec.name: spec for spec in parameters if not spec.prompt}

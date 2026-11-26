@@ -48,7 +48,7 @@ export function designFromImport(result, previous) {
     bands: {
       ...base.bands,
       background: { height: result.background.length ? height : 0, elements: place(result.background) },
-      // whole points that add up to no more than the page (Jasper refuses bands taller than the page)
+      // whole points that add up to no more than the page (JRXML refuses bands taller than the page)
       pageHeader: { height: Math.round(headerEnd), elements: place(inRegion('header')) },
       detail: { height: Math.round(footerStart) - Math.round(headerEnd), elements: place(body, Math.round(headerEnd)) },
       pageFooter: { height: Math.max(0, Math.floor(height) - Math.round(footerStart)), elements: place(inRegion('footer'), Math.round(footerStart)) },

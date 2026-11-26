@@ -1,6 +1,6 @@
 // /analytics: dashboards, datasets and the model. Needs the Analytics right; datasets and the model also the
 // Designer or Admin right. Addresses: #dash/<id>, #ds/<id>, #ds/new, #model, #q/<id>, #q/new (DAX / SQL queries),
-// #sources (its data sources), #ml (ML lab), #py/<id>, #py/new (Python scripts), #embed/<dashboard> (how to show it in a website).
+// #sources (its data sources), #ml (ML lab), #py/<id>, #py/new (Python scripts), #etl/<id>, #etl/new (pipelines), #embed/<dashboard> (how to show it in a website).
 import SiteFooter from '../shared/SiteFooter.jsx';
 import PixelField from '../shared/PixelField.jsx';
 import Resizer, { useStoredWidth } from '../shared/Resizer.jsx';
@@ -19,11 +19,12 @@ import MlLab from './MlLab.jsx';
 import ModelView from './ModelView.jsx';
 import PowerBiImport, { readBase64 } from './PowerBiImport.jsx';
 import PythonLab from './PythonLab.jsx';
+import PipelineEditor from './PipelineEditor.jsx';
 import { readPbixReport } from './pbix.js';
 
 const readHash = () => {
   const [kind, id] = window.location.hash.slice(1).split('/');
-  return ['dash', 'ds', 'model', 'q', 'ml', 'py', 'embed', 'sources'].includes(kind) ? { kind, id: id || '' } : { kind: 'home', id: '' };
+  return ['dash', 'ds', 'model', 'q', 'ml', 'py', 'etl', 'embed', 'sources'].includes(kind) ? { kind, id: id || '' } : { kind: 'home', id: '' };
 };
 
 /** A number (or "a/b", "a · b") that counts up from 0 when the page opens. */
@@ -164,8 +165,8 @@ Type the ID of the data adapter to use: ${info.adapters.map((a) => a.id).join(',
     return (<><Topbar current="/analytics" /><div className="login-wrap"><div className="card login"><Notice message={{ text: denied, kind: 'error' }} /><button type="button" className="btn" onClick={signOut}>Sign out and use another account</button></div></div></>);
   }
   useEffect(() => {
-    const names = { dash: 'Dashboard', ds: 'Dataset', q: 'Query', model: 'Model', ml: 'ML lab', py: 'Python' };
-    const item = ({ dash: dashboards, ds: datasets, py: datasets, q: savedQueries }[view.kind] || []).find((x) => x.id === view.id);
+    const names = { dash: 'Dashboard', ds: 'Dataset', q: 'Query', model: 'Model', ml: 'ML lab', py: 'Python', etl: 'Pipeline' };
+    const item = ({ dash: dashboards, ds: datasets, py: datasets, etl: datasets, q: savedQueries }[view.kind] || []).find((x) => x.id === view.id);
     setTeamPlace(names[view.kind] ? { place: `${view.kind}/${view.id || ''}`, title: `${names[view.kind]}${item ? ` · ${item.name || item.title || item.id}` : ''}` } : {});
   }, [view, datasets, dashboards, savedQueries]);
   if (!info) return (<><Topbar current="/analytics" /><div className="login-wrap"><p className="muted">Connecting…</p></div></>);
@@ -186,7 +187,7 @@ Type the ID of the data adapter to use: ${info.adapters.map((a) => a.id).join(',
       <AnalyticsRibbon info={info} view={view} go={go} onNewDashboard={newDashboard} onImport={() => picker.current?.click()}
         dashName={view.kind === 'dash' ? dashboards.find((d) => d.id === view.id)?.name : ''}
         onDownload={(withData) => { const entry = dashboards.find((d) => d.id === view.id); if (entry) downloadDashboard(entry, withData); }}
-        onRefreshAll={refreshAll} onReload={reload} readyCount={datasets.filter((d) => d.status === 'ready').length} />
+        datasets={datasets} onRefreshAll={refreshAll} onReload={reload} readyCount={datasets.filter((d) => d.status === 'ready').length} />
       <div className="bi bi-new" style={{ '--bi-side': `${sideWidth}px` }}>
         <Resizer width={sideWidth} onWidth={setSideWidth} normal={250} min={190} max={520} label="Contents width" className="bi-resizer"
           style={{ left: sideWidth - 5, right: 'auto' }} />
@@ -206,15 +207,18 @@ Type the ID of the data adapter to use: ${info.adapters.map((a) => a.id).join(',
           </div>
           <div className="bi-group">
             <div className="bi-group-head"><span>Datasets <em className="bi-count">{datasets.length}</em></span><span className="row tight">
+              {info.mayPipelines && <a className="btn small" href="#etl/new" title="A dataset made by pipeline steps (ETL / ELT)">+ ETL</a>}
               {info.mayPython && <a className="btn small" href="#py/new" title="A dataset made by a Python script (pandas, scikit-learn, scipy)">+ Py</a>}
               {info.mayModel && <a className="btn small" href="#ds/new">+ New</a>}</span></div>
             {datasets.length === 0 && <p className="muted small">No datasets yet.</p>}
             {datasets.map((d, i) => {
               const py = d.sourceKind === 'python';
+              const etl = d.sourceKind === 'pipeline';
+              const kind = py ? 'py' : etl ? 'etl' : 'ds';
               return (
-              <a key={d.id} href={`#${py ? 'py' : 'ds'}/${d.id}`} className={`bi-link ${current(py ? 'py' : 'ds', d.id) ? 'on' : ''}`} style={{ '--i': i }}
-                title={py ? 'Made by a Python script' : undefined}>
-                <span><i className={`bi-mark ${py ? 'tint-a py-mark' : 'tint-g'}`} aria-hidden="true">{py ? 'Py' : '⛁'}<i className={`dot ${d.status}`} /></i>{d.name}</span>
+              <a key={d.id} href={`#${kind}/${d.id}`} className={`bi-link ${current(kind, d.id) ? 'on' : ''}`} style={{ '--i': i }}
+                title={py ? 'Made by a Python script' : etl ? 'Made by a pipeline (ETL)' : undefined}>
+                <span><i className={`bi-mark ${py ? 'tint-a py-mark' : etl ? 'tint-v py-mark' : 'tint-g'}`} aria-hidden="true">{py ? 'Py' : etl ? 'ETL' : '⛁'}<i className={`dot ${d.status}`} /></i>{d.name}</span>
                 <small className="muted">{d.status === 'ready' ? `${(d.rowCount || 0).toLocaleString()} rows · ${describeBytes(d.sizeBytes)}` : d.status}</small>
               </a>
               );
@@ -232,6 +236,7 @@ Type the ID of the data adapter to use: ${info.adapters.map((a) => a.id).join(',
           {info.mayModel && <a href="#sources" className={`bi-link model ${view.kind === 'sources' ? 'on' : ''}`}><span><i className="bi-mark tint-g" aria-hidden="true">⛁</i>Data sources</span><small className="muted">{info.adapters.length || 'connect'}</small></a>}
           <a href="#model" className={`bi-link model ${view.kind === 'model' ? 'on' : ''}`}><span><i className="bi-mark tint-v" aria-hidden="true">⇄</i>Model (relationships)</span><small className="muted">{relationships.length}</small></a>
           <a href="#ml" className={`bi-link model ${view.kind === 'ml' ? 'on' : ''}`}><span><i className="bi-mark tint-c" aria-hidden="true">✦</i>ML lab</span><small className="muted">predict</small></a>
+          {info.mayPipelines && <a href="#etl/new" className={`bi-link model ${view.kind === 'etl' && !view.id ? 'on' : ''}`}><span><i className="bi-mark tint-v py-mark" aria-hidden="true">ETL</i>Pipelines</span><small className="muted">extract · load</small></a>}
           {info.mayPython && <a href="#py/new" className={`bi-link model ${view.kind === 'py' && !view.id ? 'on' : ''}`}><span><i className="bi-mark tint-a py-mark" aria-hidden="true">Py</i>Python scripts</span><small className="muted">clean · ML</small></a>}
           <a href="#embed" className={`bi-link model ${view.kind === 'embed' ? 'on' : ''}`}><span><i className="bi-mark tint-b" aria-hidden="true">⧉</i>Embed in a website</span><small className="muted">guide</small></a>
         </aside>
@@ -250,24 +255,32 @@ Type the ID of the data adapter to use: ${info.adapters.map((a) => a.id).join(',
                   : embed;
               })()} />
           )}
-          {view.kind === 'ds' && datasets.find((d) => d.id === view.id)?.sourceKind === 'python' && (
-            <PythonLab key={view.id} datasetId={view.id} info={info} datasets={datasets} folders={folderList} notify={notify}
+          {view.kind === 'etl' && (
+            <PipelineEditor key={view.id || 'new'} datasetId={view.id || 'new'} info={info} datasets={datasets} folders={folderList} onFolders={reload} notify={notify}
+              onSaved={(newId) => { reload(); if (newId) go(`etl/${newId}`); }} onDeleted={() => { reload(); go(''); }} />
+          )}
+          {view.kind === 'ds' && datasets.find((d) => d.id === view.id)?.sourceKind === 'pipeline' && (
+            <PipelineEditor key={view.id} datasetId={view.id} info={info} datasets={datasets} folders={folderList} onFolders={reload} notify={notify}
               onSaved={() => reload()} onDeleted={() => { reload(); go(''); }} />
           )}
-          {view.kind === 'ds' && datasets.find((d) => d.id === view.id)?.sourceKind !== 'python' && (
-            <DatasetEditor key={view.id} datasetId={view.id} info={info} onConnected={reloadInfo} notify={notify}
+          {view.kind === 'ds' && datasets.find((d) => d.id === view.id)?.sourceKind === 'python' && (
+            <PythonLab key={view.id} datasetId={view.id} info={info} datasets={datasets} folders={folderList} onFolders={reload} notify={notify}
+              onSaved={() => reload()} onDeleted={() => { reload(); go(''); }} />
+          )}
+          {view.kind === 'ds' && !['python', 'pipeline'].includes(datasets.find((d) => d.id === view.id)?.sourceKind) && (
+            <DatasetEditor key={view.id} datasetId={view.id} info={info} onConnected={reloadInfo} notify={notify} onFolders={reload}
               folders={[...new Set(['Analytics', ...datasets.map((d) => d.folder), ...dashboards.map((d) => d.folder)].filter(Boolean))].sort()}
               onSaved={(newId) => { reload(); if (newId) go(`ds/${newId}`); }} onDeleted={() => { reload(); go(''); }} />
           )}
           {powerBi && <PowerBiImport {...powerBi} datasets={datasets} onDone={powerBiDone} onCancel={() => setPowerBi(null)} />}
           {view.kind === 'q' && (
-            <QueryEditor key={view.id || 'new'} queryId={view.id || 'new'} datasets={datasets} adapters={info.adapters || []} mayModel={info.mayModel} notify={notify} folders={folderList}
+            <QueryEditor key={view.id || 'new'} queryId={view.id || 'new'} datasets={datasets} adapters={info.adapters || []} mayModel={info.mayModel} notify={notify} folders={folderList} onFolders={reload}
               onDatasetMade={() => reload()}
               onSaved={(newId) => { reload(); if (newId && newId !== view.id) go(`q/${newId}`); }} onDeleted={() => { reload(); go(''); }} />
           )}
           {view.kind === 'sources' && info.mayModel && <DataSourcesPanel area="analytics" notify={notify} onChanged={reloadInfo} />}
           {view.kind === 'py' && (
-            <PythonLab key={view.id || 'new'} datasetId={view.id || 'new'} info={info} datasets={datasets} folders={folderList} notify={notify}
+            <PythonLab key={view.id || 'new'} datasetId={view.id || 'new'} info={info} datasets={datasets} folders={folderList} onFolders={reload} notify={notify}
               onSaved={(newId) => { reload(); if (newId) go(`py/${newId}`); }} onDeleted={() => { reload(); go(''); }} />
           )}
           {view.kind === 'ml' && <MlLab datasets={datasets} dashboards={dashboards} notify={notify} onAdded={reload} go={go} />}

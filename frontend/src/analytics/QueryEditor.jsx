@@ -7,6 +7,7 @@
 // DAX / SQL queries.
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { bi, queries } from './api.js';
+import AnalyticsFolder from './AnalyticsFolder.jsx';
 
 export const MODES = [
   ['dax', 'DAX', 'datasets'],
@@ -79,7 +80,7 @@ function toCsv(result) {
   return [result.columns.map((c) => cell(c.name)).join(','), ...result.rows.map((r) => r.map(cell).join(','))].join('\n');
 }
 
-export default function QueryEditor({ queryId, datasets, adapters = [], mayModel, notify, onSaved, onDeleted, onDatasetMade, folders }) {
+export default function QueryEditor({ queryId, datasets, adapters = [], mayModel, notify, onSaved, onDeleted, onDatasetMade, folders, onFolders }) {
   const isNew = queryId === 'new' || !queryId;
   const [saved, setSaved] = useState(null);
   const [name, setName] = useState('New query');
@@ -250,7 +251,7 @@ export default function QueryEditor({ queryId, datasets, adapters = [], mayModel
           {saved && <p className="muted small">by {saved.owner} · changed {new Date(saved.updatedAt).toLocaleString()}{dirty && mayEdit ? ' · not saved' : ''}</p>}
         </div>
         <div className="row">
-          {mayEdit && <select value={folder} onChange={(e) => setFolder(e.target.value)} aria-label="Folder">{[...new Set([folder, ...folders])].map((f) => <option key={f}>{f}</option>)}</select>}
+          {mayEdit && <div className="q-folder"><AnalyticsFolder folders={folders} value={folder} mayManage={mayModel} notify={notify} onFoldersChanged={onFolders} onChange={setFolder} /></div>}
           <button type="button" className="btn primary" onClick={run} disabled={running || (live && !connectionId)} title="Run (Ctrl+Enter)">{running ? 'Running…' : '▶ Run'}</button>
           {mayEdit && <button type="button" className="btn" onClick={() => save()} disabled={!dirty && Boolean(saved)} title="Save (Ctrl+S)">Save</button>}
           {mayEdit && saved && <button type="button" className="btn" onClick={() => save(true)}>Save as copy</button>}

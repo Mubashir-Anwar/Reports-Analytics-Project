@@ -1,5 +1,5 @@
 // Multi-selection, alignment, distribution, clipboard and snapping for the canvas
-// (Jaspersoft Studio's "Arrange" toolbar, plus Photoshop/Illustrator-like smart guides).
+// (a classic report designer's "Arrange" toolbar, plus Photoshop/Illustrator-like smart guides).
 import {
   BACKDROP_TYPES, DEFAULT_BAND_HEIGHT, bandKeys, bandKind, bandPresent, bandWidth, findElement, getBand, mapElements, newId, setBand,
 } from './designModel.js';
@@ -65,8 +65,8 @@ const bounds = (items) => {
 };
 
 /**
- * Align the selected elements. With one element it aligns to its band (like Jasper's "Align in container");
- * with more it aligns to the edges of the whole selection. y values are band-relative, as in Jasper.
+ * Align the selected elements. With one element it aligns to its band (like the classic "Align in container");
+ * with more it aligns to the edges of the whole selection. y values are band-relative, as in classic reports.
  */
 export function alignElements(design, ids, mode) {
   const items = selectedElements(design, ids).filter(({ element }) => !element.locked);

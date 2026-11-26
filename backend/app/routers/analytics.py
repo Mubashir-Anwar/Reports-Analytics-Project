@@ -22,6 +22,11 @@ Who may do what (accounts need the Analytics right for all of it):
     POST   /api/analytics/powerbi/inspect               a Power BI template (.pbit, base64 "content") or the report part of a
                                                         .pbix ("parts": {name: base64}): its pages, visuals and tables
     POST   /api/analytics/powerbi/import                {content | parts, name, pages, tables: {table: choice}, folder}
+    GET    /api/analytics/folders                       the folders this user sees (the server's folders and the Analytics ones)
+    POST   /api/analytics/folders                       {path} a new folder (Manage on the parent)
+    POST   /api/analytics/folders/rename                {path, newPath} datasets, dashboards, queries and subfolders go with it
+    DELETE /api/analytics/folders                       {path, moveTo?} (Designer or Admin right, Manage); reports on the
+                                                        server keep a folder: those are moved on the Analytics Server
 
 Report Server (/server: the Report Server right; the folder permissions of the dashboard's folder apply):
     GET    /api/server/dashboards/{id}                  the dashboard and the columns of its datasets
@@ -63,6 +68,7 @@ from backend.app.analytics import (
     importer,
     ml,
     model as analytics_model,
+    pipeline,
     powerbi,
     pyscript,
     queries as analytics_queries,
@@ -78,7 +84,8 @@ from backend.app.security.access import client_address, enabled_areas
 from backend.app.security.users import find_user
 from backend.app.services import access
 from backend.app.services.capacity import caller_of
-from backend.app.storage.files import add_saved_folder, normalize_folder_path
+from backend.app.storage.files import add_saved_folder, list_saved_folders, normalize_folder_path, save_folder_list
+from backend.app.storage.store import get_store
 
 MAX_BATCH = 40
 
@@ -107,13 +114,32 @@ def register(app: FastAPI, ctx: SimpleNamespace) -> None:
     def is_python(item: dict[str, Any] | None) -> bool:
         return bool(item) and item.get("sourceKind") == "python"
 
+    def is_pipeline(item: dict[str, Any] | None) -> bool:
+        return bool(item) and item.get("sourceKind") == "pipeline"
+
+    def may_pipeline(session: dict[str, Any]) -> bool:
+        return bool(session.get("superAdmin")) or "pipelines" in (session.get("rights") or [])
+
+    def pipeline_user(request: Request, steps: Any = None) -> dict[str, Any]:
+        """The Pipelines right; a pipeline with a Python step needs the Python right too."""
+        session = user(request)
+        if not may_pipeline(session):
+            raise HTTPException(status_code=403, detail="Pipelines need the Pipelines (ETL) right as well (ask an administrator)")
+        if pipeline.has_python(steps) and not may_python(session):
+            raise HTTPException(status_code=403, detail="A Python step needs the Python scripts right as well (ask an administrator)")
+        return session
+
     def made_from(dataset_id: str) -> list[str]:
-        """Python datasets that read this dataset."""
-        return [d["name"] for d in store.datasets() if is_python(d) and dataset_id in (d.get("inputs") or [])]
+        """Python and pipeline datasets that read this dataset."""
+        return [d["name"] for d in store.datasets() if (is_python(d) or is_pipeline(d)) and dataset_id in (d.get("inputs") or [])]
 
     def may_change_dataset(request: Request, item: dict[str, Any] | None, payload: dict[str, Any] | None = None) -> dict[str, Any]:
-        """Python datasets: the Python right; the others: Designer or Admin."""
-        if is_python(item) or (payload or {}).get("sourceKind") == "python":
+        """Python datasets: the Python right; pipelines: the Pipelines right; the others: Designer or Admin."""
+        payload = payload or {}
+        if is_pipeline(item) or payload.get("sourceKind") == "pipeline":
+            steps = payload.get("steps") if "steps" in payload else (item or {}).get("querySource")
+            return pipeline_user(request, steps if isinstance(steps, list) else None)
+        if is_python(item) or payload.get("sourceKind") == "python":
             return python_user(request)
         return modeller(request)
 
@@ -145,7 +171,7 @@ def register(app: FastAPI, ctx: SimpleNamespace) -> None:
         return HTTPException(status_code=422, detail=str(exc))
 
     # ------------------------------------------------------------- views
-    def dataset_view(item: dict[str, Any], full: bool, python: bool = False) -> dict[str, Any]:
+    def dataset_view(item: dict[str, Any], full: bool, python: bool = False, pipelines: bool = False) -> dict[str, Any]:
         view = {name: item.get(name) for name in ("id", "name", "folder", "description", "columns", "status", "rowCount",
                                                   "sizeBytes", "refreshedAt", "nextRefreshAt", "lastError",
                                                   "refreshEveryMinutes", "createdBy", "createdAt", "updatedBy", "updatedAt")}
@@ -158,7 +184,14 @@ def register(app: FastAPI, ctx: SimpleNamespace) -> None:
             view.update({name: item.get(name) for name in ("connectionId", "queryLanguage", "collection", "querySource")})
         if is_python(item) and (full or python):  # the script: modellers and people with the Python right
             view["script"] = item.get("querySource") or ""
+        if is_pipeline(item):
+            view["lastSteps"] = item.get("lastSteps") or []
+            if full or pipelines:                 # the steps: modellers and people with the Pipelines right
+                view["steps"] = item.get("querySource") or []
         return view
+
+    def views_for(session: dict[str, Any]) -> tuple[bool, bool, bool]:
+        return may_model(session), may_python(session), may_pipeline(session)
 
     def find_dataset(dataset_id: str) -> dict[str, Any]:
         item = store.dataset(dataset_id)
@@ -247,6 +280,10 @@ def register(app: FastAPI, ctx: SimpleNamespace) -> None:
                 "python": {"available": not pyscript.available(), "problem": pyscript.available(), "timeoutSeconds": pyscript.timeout_seconds(),
                            "memoryMb": pyscript.memory_mb(), "maxRows": pyscript.max_rows(), "maxInputs": pyscript.MAX_INPUTS,
                            "example": pyscript.EXAMPLE} if python else None,
+                "mayPipelines": may_pipeline(session),
+                "pipeline": {"kinds": list(pipeline.KINDS), "operators": list(pipeline.OPERATORS), "types": list(pipeline.TYPES),
+                             "aggregations": list(pipeline.AGGS), "joins": list(pipeline.HOWS), "maxSteps": pipeline.MAX_STEPS,
+                             "timeoutSeconds": pipeline.timeout_seconds()} if may_pipeline(session) else None,
                 "visuals": list(store.VISUALS), "models": list(ml.MODELS), "aggregations": list(store.AGGREGATIONS), "buckets": [b for b in store.BUCKETS if b],
                 "operators": list(store.OPERATORS), "languages": list(store.LANGUAGES),
                 "adapters": [{"id": item["id"], "name": item.get("name", item["id"]), "type": item.get("type", "mongodb")}
@@ -256,7 +293,7 @@ def register(app: FastAPI, ctx: SimpleNamespace) -> None:
     @app.get("/api/analytics/datasets")
     def list_datasets(request: Request) -> dict[str, Any]:
         session = user(request)
-        return {"datasets": [dataset_view(item, may_model(session), may_python(session)) for item in store.datasets()]}
+        return {"datasets": [dataset_view(item, *views_for(session)) for item in store.datasets()]}
 
     @app.post("/api/analytics/datasets/test")
     async def test_dataset(request: Request) -> dict[str, Any]:
@@ -285,7 +322,8 @@ def register(app: FastAPI, ctx: SimpleNamespace) -> None:
         record["nextRefreshAt"] = next_refresh(record)
         store.save_dataset(record)
         audit(request, session, "analytics.dataset.created", record["id"],
-              {"name": record["name"], "adapter": record["connectionId"]} if not is_python(record)
+              {"name": record["name"], "pipeline": True, "inputs": record["inputs"], "steps": len(record["querySource"])} if is_pipeline(record)
+              else {"name": record["name"], "adapter": record["connectionId"]} if not is_python(record)
               else {"name": record["name"], "python": True, "inputs": record["inputs"], "scriptChars": len(record["querySource"])})
         if payload.get("refresh", True):
             record = refresher.request(record, "manual", session["username"])
@@ -294,7 +332,7 @@ def register(app: FastAPI, ctx: SimpleNamespace) -> None:
     @app.get("/api/analytics/datasets/{dataset_id}")
     def get_dataset(request: Request, dataset_id: str) -> dict[str, Any]:
         session = user(request)
-        return {"dataset": dataset_view(find_dataset(dataset_id), may_model(session), may_python(session))}
+        return {"dataset": dataset_view(find_dataset(dataset_id), *views_for(session))}
 
     @app.put("/api/analytics/datasets/{dataset_id}")
     async def update_dataset(request: Request, dataset_id: str) -> dict[str, Any]:
@@ -312,7 +350,8 @@ def register(app: FastAPI, ctx: SimpleNamespace) -> None:
             record["nextRefreshAt"] = next_refresh(record)
         store.save_dataset(record)
         audit(request, session, "analytics.dataset.changed", dataset_id, {"name": record["name"], "sourceChanged": source_changed,
-                                                                          **({"python": True, "inputs": record["inputs"]} if is_python(record) else {})})
+                                                                          **({"python": True, "inputs": record["inputs"]} if is_python(record) else {}),
+                                                                          **({"pipeline": True, "inputs": record["inputs"]} if is_pipeline(record) else {})})
         if source_changed and payload.get("refresh", True):
             record = refresher.request(record, "manual", session["username"])
         return {"dataset": dataset_view(record, True), "sourceChanged": source_changed}
@@ -340,7 +379,14 @@ def register(app: FastAPI, ctx: SimpleNamespace) -> None:
     async def refresh_dataset(request: Request, dataset_id: str) -> JSONResponse:
         ctx.require_json_request(request)
         current = find_dataset(dataset_id)
-        session = python_user(request) if is_python(current) and not may_model(user(request)) else modeller(request)
+        if may_model(user(request)):
+            session = modeller(request)
+        elif is_python(current):
+            session = python_user(request)
+        elif is_pipeline(current):
+            session = pipeline_user(request)
+        else:
+            session = modeller(request)
         item = refresher.request(current, "manual", session["username"])
         return JSONResponse({"dataset": dataset_view(item, True)}, status_code=202)
 
@@ -376,6 +422,24 @@ def register(app: FastAPI, ctx: SimpleNamespace) -> None:
         audit(request, session, "analytics.python.run", ",".join(source["inputs"])[:200],
               {"ok": result["ok"], "rows": result["rowCount"], "durationMs": result["durationMs"], "scriptChars": len(source["script"]),
                "sha256": hashlib.sha256(source["script"].encode("utf-8")).hexdigest()[:16], "error": result["error"][:300]})
+        return result
+
+    # ------------------------------------------------------------- pipelines (ETL / ELT)
+    @app.post("/api/analytics/pipelines/run")
+    def run_pipeline(request: Request, payload: dict[str, Any]) -> dict[str, Any]:
+        """Try the steps: {steps, until (a step name: run up to it), datasetId (when changing one)} → every step's rows,
+        columns and time, and the first rows of the last step run. Nothing is saved."""
+        session = pipeline_user(request, payload.get("steps"))
+        ctx.require_json_request(request)
+        try:
+            clean = pipeline.clean_steps(payload.get("steps"), store.dataset, str(payload.get("datasetId") or ""))
+            with ctx.run_gate.slot(caller_of("", user=session["username"])):
+                result = pipeline.run(clean["steps"], store.dataset, until=str(payload.get("until") or ""))
+        except ValueError as exc:
+            raise bad(exc) from None
+        audit(request, session, "analytics.pipeline.run", ",".join(clean["inputs"])[:200],
+              {"ok": result["ok"], "steps": len(clean["steps"]), "rows": result["rowCount"], "durationMs": result["durationMs"],
+               "python": pipeline.has_python(clean["steps"]), "failedStep": result["failedStep"], "error": result["error"][:300]})
         return result
 
     # ------------------------------------------------------------- relationships
@@ -622,6 +686,153 @@ def register(app: FastAPI, ctx: SimpleNamespace) -> None:
             raise bad(exc) from None
         ctx.require_folder(session, folder, permissions.MANAGE)
         return JSONResponse(install(request, session, {**payload, "folder": folder}, folder), status_code=201)
+
+    # ------------------------------------------------------------- folders (shared with the Analytics Server and its permissions)
+    def inside(path: str, folder: str) -> bool:
+        return path == folder or path.startswith(f"{folder}/")
+
+    def moved(path: str, folder: str, target: str) -> str:
+        return target + path[len(folder):]
+
+    def analytics_items() -> list[tuple[str, dict[str, Any], Any]]:
+        """(kind, record, save) for every dataset, dashboard and saved query."""
+        return ([("dataset", item, store.save_dataset) for item in store.datasets()]
+                + [("dashboard", item, store.save_dashboard) for item in store.dashboards()]
+                + [("query", item, store.save_query) for item in store.queries()])
+
+    def folder_path(raw: Any, name: str = "path") -> str:
+        text = str(raw or "").strip().strip("/")
+        if not text:
+            raise HTTPException(status_code=422, detail=f"{name}: choose a folder")
+        try:
+            return normalize_folder_path(text)
+        except ValueError as exc:
+            raise bad(exc) from None
+
+    def parent_of(folder: str) -> str:
+        return folder.rsplit("/", 1)[0] if "/" in folder else ""
+
+    def folder_list(session: dict[str, Any]) -> list[str]:
+        rules = permissions.load_rules()
+        found = set(list_saved_folders()) | {"Analytics"}
+        found |= {str(item.get("folder") or "Analytics") for _kind, item, _save in analytics_items()}
+        found.discard("General")
+        return sorted((f for f in found if permissions.level(session, f, rules) >= permissions.RUN), key=str.casefold)
+
+    def server_things(folder: str) -> list[str]:
+        """What in this folder belongs to the Analytics Server (reports, data adapters): not moved from here."""
+        contents = ctx.folder_contents(folder)
+        found = []
+        if contents.get("reports"):
+            found.append(f"{len(contents['reports'])} report(s)")
+        if contents.get("adapters"):
+            found.append(f"{len(contents['adapters'])} data adapter(s)")
+        return found
+
+    def move_rules(folder: str, target: str, by: str) -> None:
+        rules = permissions.load_rules()
+        for path, entry in rules.items():
+            if inside(path, folder):
+                permissions.save_rules_for(moved(path, folder, target), entry, by=by)
+        permissions.remove_rules_under(folder)
+
+    def folder_manager(request: Request, folder: str) -> dict[str, Any]:
+        session = modeller(request)
+        if folder == "Analytics":
+            raise HTTPException(status_code=400, detail="Analytics is the usual folder: it cannot be renamed or deleted")
+        ctx.require_folder(session, folder, permissions.MANAGE)
+        return session
+
+    @app.get("/api/analytics/folders")
+    def analytics_folders(request: Request) -> dict[str, Any]:
+        session = user(request)
+        rules = permissions.load_rules()
+        folders = folder_list(session)
+        return {"folders": folders, "manage": [f for f in folders if permissions.level(session, f, rules) >= permissions.MANAGE]}
+
+    @app.post("/api/analytics/folders")
+    async def analytics_new_folder(request: Request) -> dict[str, Any]:
+        session = user(request)
+        payload = await body(request)
+        folder = folder_path(payload.get("path"))
+        if folder == "General" or folder in folder_list(session):
+            raise HTTPException(status_code=409, detail=f"The folder /{folder} is already there")
+        ctx.require_folder(session, parent_of(folder), permissions.MANAGE)
+        add_saved_folder(folder)
+        audit(request, session, "analytics.folder.created", folder, {})
+        return {"folder": folder, "folders": folder_list(session)}
+
+    @app.post("/api/analytics/folders/rename")
+    async def analytics_rename_folder(request: Request) -> dict[str, Any]:
+        """Rename or move a folder: its datasets, dashboards, saved queries, subfolders and permissions go with it."""
+        payload = await body(request)
+        folder = folder_path(payload.get("path"))
+        session = folder_manager(request, folder)
+        target = folder_path(payload.get("newPath"), "newPath")
+        if target == folder:
+            return {"folder": folder, "folders": folder_list(session), "moved": 0}
+        if inside(target, folder):
+            raise HTTPException(status_code=400, detail="A folder cannot go inside itself")
+        if target == "General" or target in set(list_saved_folders()) | {str(i.get("folder") or "Analytics") for _k, i, _s in analytics_items()}:
+            raise HTTPException(status_code=409, detail=f"The folder /{target} is already there: choose another name")
+        ctx.require_folder(session, parent_of(target), permissions.MANAGE)
+        busy = server_things(folder)
+        if busy:
+            raise HTTPException(status_code=409, detail=f"/{folder} also holds {' and '.join(busy)} on the Analytics Server: "
+                                                        "move those first, or rename the folder there")
+        count = 0
+        for _kind, item, save in analytics_items():
+            where = str(item.get("folder") or "Analytics")
+            if inside(where, folder):
+                save({**item, "folder": moved(where, folder, target)})
+                count += 1
+        saved = list_saved_folders()
+        for path in sorted((f for f in saved if inside(f, folder)), key=len, reverse=True):     # the old, now empty, folders
+            get_store().remove_dir("/".join(["reports", *path.split("/")]))
+        renamed = [moved(f, folder, target) if inside(f, folder) else f for f in saved]
+        save_folder_list([*renamed, target])
+        for path in renamed:
+            if inside(path, target):
+                add_saved_folder(path)
+        move_rules(folder, target, session["username"])
+        ctx.bump_revision()
+        audit(request, session, "analytics.folder.renamed", folder, {"to": target, "items": count})
+        return {"folder": target, "folders": folder_list(session), "moved": count}
+
+    @app.delete("/api/analytics/folders")
+    async def analytics_delete_folder(request: Request) -> dict[str, Any]:
+        """Delete a folder. moveTo (a folder) first moves its datasets, dashboards and queries there; without it the
+        folder must be empty of them."""
+        payload = await body(request)
+        folder = folder_path(payload.get("path"))
+        session = folder_manager(request, folder)
+        move_to = payload.get("moveTo")
+        busy = server_things(folder)
+        if busy:
+            raise HTTPException(status_code=409, detail=f"/{folder} also holds {' and '.join(busy)} on the Analytics Server: "
+                                                        "delete or move those there first")
+        items = [(kind, item, save) for kind, item, save in analytics_items() if inside(str(item.get("folder") or "Analytics"), folder)]
+        if items and move_to in (None, ""):
+            names = ", ".join(str(item.get("name") or item["id"]) for _k, item, _s in items[:5])
+            raise HTTPException(status_code=409, detail=f"/{folder} is not empty ({len(items)}: {names}): choose a folder to move them to")
+        target = ""
+        if items:
+            target = folder_path(move_to, "moveTo")
+            if inside(target, folder):
+                raise HTTPException(status_code=400, detail="Choose a folder outside the one you delete")
+            ctx.require_folder(session, target, permissions.MANAGE)
+            if target != "Analytics":
+                add_saved_folder(target)
+            for _kind, item, save in items:
+                save({**item, "folder": target})
+        saved = list_saved_folders()
+        for path in sorted((f for f in saved if inside(f, folder)), key=len, reverse=True):
+            get_store().remove_dir("/".join(["reports", *path.split("/")]))
+        save_folder_list([f for f in saved if not inside(f, folder)])
+        permissions.remove_rules_under(folder)
+        ctx.bump_revision()
+        audit(request, session, "analytics.folder.deleted", folder, {"moved": len(items), "to": target})
+        return {"deleted": folder, "folders": folder_list(session), "moved": len(items), "movedTo": target}
 
     # ------------------------------------------------------------- inside another website (routers/embed.py checks the token)
     def embedded_dashboard(item: dict[str, Any]) -> dict[str, Any]:

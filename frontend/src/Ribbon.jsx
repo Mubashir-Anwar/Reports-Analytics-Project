@@ -611,7 +611,7 @@ export default function Ribbon({
         <Group label="Share">
           <Big icon="publish" label="Publish" title="Copy this report to a folder on the report server" onClick={onPublish} primary />
           <Big icon="download" label="Save as file" title="Download one .mrd file to send to someone" onClick={onSaveFile} />
-          <Big icon="download" label="JRXML" title="Save as JRXML: download a .jrxml to open in Jaspersoft Studio" onClick={onSaveJrxml} />
+          <Big icon="download" label="JRXML" title="Save as JRXML: download a .jrxml report file" onClick={onSaveJrxml} />
         </Group>
         <Group label="Link">
           <Big icon="link" label={linkCopied ? 'Copied' : 'Copy link'} title={report.isNew ? 'Save and publish the report first' : `Copy ${runLink}`} disabled={report.isNew} onClick={() => { navigator.clipboard?.writeText(runLink).then(() => setLinkCopied(true), () => {}); setTimeout(() => setLinkCopied(false), 2000); }} />
@@ -633,12 +633,12 @@ export default function Ribbon({
   const fileItems = (
     <>
       <button type="button" role="menuitem" onClick={() => { setMenu(null); onNew(); }} title="New report (starts with the layout gallery)"><RIcon name="newDoc" /><span>New report</span></button>
-      <label className="rb-menuitem" role="menuitem" title="Open a .mrd report file, or import a Jaspersoft Studio .jrxml — choose its PNG/JPEG pictures together with it (Ctrl+click)"><RIcon name="open" /><span>Open file (.mrd, .jrxml)</span>
+      <label className="rb-menuitem" role="menuitem" title="Open a .mrd report file, or import a .jrxml report — choose its PNG/JPEG pictures together with it (Ctrl+click)"><RIcon name="open" /><span>Open file (.mrd, .jrxml)</span>
         <input type="file" accept={MRD_WITH_IMAGES_ACCEPT} multiple hidden onChange={(e) => { const files = Array.from(e.target.files || []); e.target.value = ''; setMenu(null); onOpenFile(files); }} />
       </label>
       <button type="button" role="menuitem" onClick={() => { setMenu(null); onSave(); }} title="Save in your designer workspace. The server is not changed."><RIcon name="save" /><span>Save</span><kbd>Ctrl S</kbd></button>
       <button type="button" role="menuitem" onClick={() => { setMenu(null); onSaveFile(); }} title="Download this report as one .mrd file (query, parameters, adapter, design, images)"><RIcon name="download" /><span>Save as file (.mrd)</span></button>
-      <button type="button" role="menuitem" onClick={() => { setMenu(null); onSaveJrxml?.(); }} title="Download a Jaspersoft Studio .jrxml of this report, to open and edit in Studio"><RIcon name="download" /><span>Save as JRXML (Jaspersoft)</span></button>
+      <button type="button" role="menuitem" onClick={() => { setMenu(null); onSaveJrxml?.(); }} title="Download this report as a .jrxml file, to open in another report designer"><RIcon name="download" /><span>Save as JRXML</span></button>
       <button type="button" role="menuitem" onClick={() => { setMenu(null); onPublish(); }} title="Copy this report to a folder on the report server"><RIcon name="publish" /><span>Publish to the server</span></button>
       <hr />
       <button type="button" role="menuitem" onClick={() => { setMenu(null); onTemplates(); }} title="Apply a layout template"><RIcon name="layouts" /><span>Layouts</span></button>

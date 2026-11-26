@@ -1,4 +1,4 @@
-"""Import a Jaspersoft Studio .jrxml into this platform's draft report + band design.
+"""Import a .jrxml into this platform's draft report + band design.
 
 Nothing here executes Java or Mongo. Expressions are *translated* by pattern into the
 safe `$F{}` / `$P{}` / `$V{}` template language; anything unrecognised is dropped with a
@@ -224,7 +224,7 @@ class _Ctx:
 
 _ALIGN = {"Left": "left", "Center": "center", "Right": "right", "Justified": "justified"}
 _MARKUP = {"html": "html", "styled": "styled", "none": "none", "": "none"}
-# Jasper font names that the designer offers directly; anything else falls back to SansSerif with a warning.
+# classic font names that the designer offers directly; anything else falls back to SansSerif with a warning.
 _FONT_ALIASES = {"DejaVu Sans": "SansSerif", "DejaVu Serif": "Serif", "DejaVu Sans Mono": "Monospaced", "Times-Roman": "Times New Roman",
                  "Courier": "Courier New", "Liberation Sans": "Arial", "Liberation Serif": "Times New Roman"}
 _FONT_NAMES = {"SansSerif", "Arial", "Helvetica", "Verdana", "Tahoma", "Calibri", "Segoe UI", "Serif", "Times New Roman", "Georgia",
@@ -308,7 +308,7 @@ def _convert_element(node: ET.Element, ctx: _Ctx, band_name: str, dx: float = 0,
             what = f"'{name}'" if name else f"from the expression {reference[:80]!r}" if reference else "(no image expression)"
             ctx.warnings.append(f"{band_name}: image {what} was not included; choose it together with the .jrxml, or upload it in the designer")
     if kind in ("staticText", "textField"):
-        # Jasper 6.10+ textAdjust="StretchHeight", older isStretchWithOverflow="true" -> "Stretch with overflow"
+        # classic 6.10+ textAdjust="StretchHeight", older isStretchWithOverflow="true" -> "Stretch with overflow"
         element["stretch"] = node.get("textAdjust") == "StretchHeight" or _is_true(node.get("isStretchWithOverflow", "false"))
         element["textAdjust"] = node.get("textAdjust") if node.get("textAdjust") in ("CutText", "StretchHeight", "ScaleFont") else (
             "StretchHeight" if element["stretch"] else "CutText")
@@ -326,7 +326,7 @@ def _convert_element(node: ET.Element, ctx: _Ctx, band_name: str, dx: float = 0,
                     if paragraph.get(attribute) is not None:
                         element[name] = _num(paragraph.get(attribute))
         box = _kid(node, "box")
-        # Jasper's default padding is 0 (ours is 2): without one in the file, keep the text where Studio shows it
+        # the classic default padding is 0 (ours is 2): without one in the file, keep the text where Studio shows it
         sides = [box.get(f"{side}Padding") for side in ("left", "right")] if box is not None else []
         if box is not None and box.get("padding") is not None:
             element["padding"] = _num(box.get("padding"), 0)
@@ -338,7 +338,7 @@ def _convert_element(node: ET.Element, ctx: _Ctx, band_name: str, dx: float = 0,
         raw_pattern = _text(_kid(node, "patternExpression")).strip()
         if raw_pattern:
             element["patternExpression"] = java_condition(raw_pattern, ctx.aliases, ctx.warnings, f"{band_name} pattern expression")
-    # Appearance: Position Type, Stretch Type, Transparent, Key and the print details (Jaspersoft Studio names)
+    # Appearance: Position Type, Stretch Type, Transparent, Key and the print details (a classic report designer names)
     if rep.get("positionType") in ("Float", "FixRelativeToTop", "FixRelativeToBottom"):
         element["positionType"] = rep.get("positionType")
     if rep.get("stretchType") in ("NoStretch", "RelativeToTallestObject", "RelativeToBandHeight", "ContainerHeight", "ContainerBottom"):
@@ -362,7 +362,7 @@ def _convert_element(node: ET.Element, ctx: _Ctx, band_name: str, dx: float = 0,
 
 
 def _convert_section(holder: ET.Element | None, name: str, ctx: _Ctx, table_out: dict[str, Any]) -> dict[str, Any]:
-    """Every <band> of a section: Jasper allows several in Detail and in group headers / footers, each with its own
+    """Every <band> of a section: classic allows several in Detail and in group headers / footers, each with its own
     Print When Expression. The first is the band, the others go to band["more"]."""
     nodes = _kids(holder, "band") if holder is not None else []
     result = _convert_band(nodes[0] if nodes else None, name, ctx, table_out)
@@ -521,10 +521,10 @@ def _extract_query(query_text: str) -> tuple[str, str]:
         collection = match.group(1) or match.group(2)
         start = text.index("[", text.index('"pipeline"'))
     elif re.search(r"""['"]?findQuery['"]?\s*:""", text) or re.search(r"""['"]?collectionName['"]?\s*:""", text):
-        # JasperReports Mongo find style: { collectionName: 'x', findQuery: {...}, sort/limit/fields optional }
+        # JRXML reports Mongo find style: { collectionName: 'x', findQuery: {...}, sort/limit/fields optional }
         name = re.search(r"""['"]?collectionName['"]?\s*:\s*(?:['"]([^'"]+)['"]|(\$P\{\w+\}))""", text)
         collection = (name.group(1) or name.group(2)) if name else ""
-        # Jaspersoft's aggregate form: { collectionName: 'x', aggregate: [ ...stages... ] }
+        # JRXML's aggregate form: { collectionName: 'x', aggregate: [ ...stages... ] }
         aggregate = re.search(r"""['"]?aggregate['"]?\s*:\s*\[""", text)
         if aggregate:
             literal, _end = core._extract_literal_array(text, aggregate.end() - 1)
@@ -642,7 +642,7 @@ def import_jrxml(xml_text: str, resources: dict[str, str] | None = None) -> dict
                    else '{"$paramIn": "' + aliases[m.group(1)][1] + '"}') if m.group(1) in aliases else m.group(0),
         literal,
     )
-    # Jaspersoft Studio is lenient with a missing comma or colon; repair those (and say where) instead of refusing the file
+    # a classic report designer is lenient with a missing comma or colon; repair those (and say where) instead of refusing the file
     from backend.app.queries.mongo_query import QuerySyntaxError
     for _attempt in range(50):
         try:
@@ -655,7 +655,7 @@ def import_jrxml(xml_text: str, resources: dict[str, str] | None = None) -> dict
             literal = literal[:at] + char + literal[at:]
             warnings.append(f"Query line {exc.line}: a missing '{char}' was added (near: {exc.near}). Check the query on the Setup tab.")
     else:
-        raise ValueError("The query of the JRXML has too many mistakes (missing commas) to repair; fix it in Jaspersoft Studio first")
+        raise ValueError("The query of the JRXML has too many mistakes (missing commas) to repair; fix it in the .jrxml first")
     param_names = {p["name"] for p in user_params}
     core._validate_pipeline_parameter_names(pipeline, param_names)
     core._validate_read_only_pipeline(pipeline)
@@ -726,7 +726,7 @@ def import_jrxml(xml_text: str, resources: dict[str, str] | None = None) -> dict
             continue
         calc = CALC_MAP.get(var.get("calculation", "Nothing"))
         expr, _p = translate_expression(_text(_kid(var, "variableExpression")), aliases, warnings, f"variable {vname}")
-        # our own "Save as JRXML" wraps the field for Jasper's number/comparable classes; read it back as the field
+        # our own "Save as JRXML" wraps the field for the classic number/comparable classes; read it back as the field
         wrapped = re.fullmatch(r"\s*(\$F\{[^{}]+\})\s*==\s*null\s*\?\s*null\s*:\s*Double\.valueOf\(\s*String\.valueOf\(\s*\1\s*\)\s*\)\s*"
                                r"|\s*\(\s*java\.lang\.Comparable\s*\)\s*(\$F\{[^{}]+\})\s*", (expr or "").lstrip("="))
         if wrapped:

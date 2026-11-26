@@ -1,4 +1,4 @@
-"""Query parsing: Mongo shell / JSON / JS / Python literals, Jasper runCommand, $P{} parameters, read-only checks."""
+"""Query parsing: Mongo shell / JSON / JS / Python literals, classic runCommand, $P{} parameters, read-only checks."""
 from __future__ import annotations
 
 import ast
@@ -17,7 +17,7 @@ def _date_boundary(value: date, boundary: str) -> datetime:
     return datetime.combine(value, end_time, tzinfo=timezone.utc)
 
 
-# $P!{X} (Jasper: paste the text into the query) is allowed only as a filter made of field names, values and these
+# $P!{X} (classic reports: paste the text into the query) is allowed only as a filter made of field names, values and these
 # comparison operators — no $where, $expr, $function or anything else that could run code or read other data.
 RAW_FILTER_OPERATORS = {
     "$eq", "$ne", "$gt", "$gte", "$lt", "$lte", "$in", "$nin", "$exists", "$regex", "$options", "$not", "$all",
@@ -304,7 +304,7 @@ def _parse_mongosh_literal(source: str, first_line: int = 1) -> Any:
             return ast.literal_eval(value)
         if kind == "parameter":
             name = re.fullmatch(r"\$P!?\{([A-Za-z_][A-Za-z0-9_]*)\}", value).group(1)
-            # Jasper's $P!{} pastes text; here it becomes a value that may be a checked filter (see _raw_filter)
+            # the classic $P!{} pastes text; here it becomes a value that may be a checked filter (see _raw_filter)
             return {"$param": name, "raw": True} if value.startswith("$P!") else {"$param": name}
         if kind == "number":
             if any(char in value for char in ".eE"):
@@ -343,7 +343,7 @@ def _parse_mongosh_literal(source: str, first_line: int = 1) -> Any:
 
 
 def _replace_jasper_parameters(source: str) -> str:
-    """Translate unquoted Jasper parameter references into safe typed markers."""
+    """Translate unquoted classic parameter references into safe typed markers."""
     output: list[str] = []
     index = 0
     quote: str | None = None
@@ -382,7 +382,7 @@ _JASPER_FIND = re.compile(r"""['"]?(?:findQuery|collectionName)['"]?\s*:""")
 
 
 def split_jasper_query(source: Any) -> tuple[str, str] | None:
-    """Jaspersoft Studio MongoDbQuery text → (collection, pipeline literal), or None for other styles.
+    """a classic report designer MongoDbQuery text → (collection, pipeline literal), or None for other styles.
 
     Accepts { runCommand: { aggregate: 'coll', pipeline: [...] } } (also without the runCommand
     wrapper) and { collectionName: 'coll', findQuery: {...} }. Nothing is executed.
@@ -471,7 +471,7 @@ def parse_query_source(language: str, source: str) -> list[dict[str, Any]]:
         except (SyntaxError, ValueError) as exc:
             raise ValueError(f"The Python pipeline could not be read: {exc}") from None
     elif (jasper := split_jasper_query(source)) is not None:
-        # Jaspersoft Studio MongoDbQuery ({runCommand: {aggregate, pipeline}}) works in every text mode.
+        # a classic report designer MongoDbQuery ({runCommand: {aggregate, pipeline}}) works in every text mode.
         uncommented = _strip_query_comments(source)
         found_at = uncommented.find(jasper[1])
         pipeline = _parse_mongosh_literal(jasper[1], uncommented.count("\n", 0, found_at) + 1 if found_at >= 0 else 1)
