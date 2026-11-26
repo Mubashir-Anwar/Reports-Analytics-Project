@@ -25,11 +25,10 @@ from test_workspace_and_server import ADMIN, client, login, setup_login  # noqa:
 # (signed out, the pages only redirect to /login; see test_access_rights.py)
 PUBLIC = {("GET", "/"), ("GET", "/ui"), ("GET", "/designer"), ("GET", "/server"), ("GET", "/home"), ("GET", "/admin"), ("GET", "/ready"),
           ("GET", "/analytics"), ("GET", "/query"), ("GET", "/login"),
-          ("GET", "/api/v1/openapi.json"),                       # describes the public API; no data
           ("GET", "/api/branding"),                              # product name and tagline for the sign-in page; no data
           ("GET", "/brand/logo"),                                # the product logo for the sign-in page; no data
-          ("GET", "/health"), ("POST", "/api/server/logout"), ("GET", "/docs"), ("GET", "/redoc"),
-          ("GET", "/openapi.json"), ("GET", "/docs/oauth2-redirect"),
+          ("GET", "/health"), ("POST", "/api/server/logout"),
+          ("GET", "/docs"), ("GET", "/redoc"), ("GET", "/docs/oauth2-redirect"),   # signed out: only a redirect to /login
           ("GET", "/api/server/password-help"),                  # which forgot-password ways the sign-in page offers
           ("POST", "/api/server/forgot-password")}               # same answer for every account, known or not
 
@@ -122,3 +121,15 @@ def test_docs_are_off_when_the_areas_say_so(tmp_path, monkeypatch):
     app = TestClient(core.make_app())
     assert app.get("/docs").status_code == 404 and app.get("/openapi.json").status_code == 404
     assert "reports" not in app.get("/ready").json()
+
+
+def test_api_map_and_probe_details_need_a_sign_in(client):
+    client.cookies.clear()
+    assert client.get("/openapi.json").status_code == 401
+    docs = client.get("/docs", follow_redirects=False)
+    assert docs.status_code == 303 and docs.headers["location"].startswith("/login?next=")
+    assert client.get("/redoc", follow_redirects=False).status_code == 303
+    health, ready = client.get("/health").json(), client.get("/ready").json()
+    assert set(health) == {"status"} and set(ready) == {"status"}      # no version, database name or error text
+    assert client.get("/openapi.json", headers={"X-Admin-Token": ADMIN}).status_code == 200
+    assert "version" in client.get("/health", headers={"X-Admin-Token": ADMIN}).json()

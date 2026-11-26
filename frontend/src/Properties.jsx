@@ -171,7 +171,7 @@ function ExpressionExamples({ fields, params, onPick }) {
   );
 }
 
-export default function Properties({ state, dispatch, notify, actions, onEditExpression, onOpenQuery, onOpenTable, resizeMode = 'auto' }) {
+export default function Properties({ state, dispatch, notify, actions, onEditExpression, onEditProperty = () => {}, onOpenQuery, onOpenTable, resizeMode = 'auto' }) {
   const { design, report, selection } = state;
   const [shiftColumns, setShiftColumns] = useState(null);   // null = follow View → Canvas → Resizing
   const [elementTab, setElementTab] = useState('');
@@ -235,7 +235,11 @@ export default function Properties({ state, dispatch, notify, actions, onEditExp
       patch({ borders: Object.values(next).some(Boolean) ? next : null });
     };
     const expressionRow = (label, key, placeholder) => (
-      <Row label={label}><span className="expr-row"><textarea rows={2} value={element[key] || ''} placeholder={placeholder} onChange={(e) => patch({ [key]: e.target.value })} />{key === 'expression' && element.type !== 'barcode' ? <button type="button" className="btn sm" title="Expression Editor: Fields, Parameters, Variables, functions (or double-click the element)" onClick={() => onEditExpression(element.id)}>…</button> : null}</span></Row>
+      <Row label={label}><span className="expr-row"><textarea rows={2} value={element[key] || ''} placeholder={placeholder} onChange={(e) => patch({ [key]: e.target.value })}
+        onDoubleClick={key === 'expression' && element.type !== 'barcode' ? () => onEditExpression(element.id) : key !== 'expression' ? () => onEditProperty({ id: element.id, key, label }) : undefined}
+        title={element.type === 'barcode' && key === 'expression' ? undefined : 'Double-click to open the Expression Editor'} />
+        {element.type === 'barcode' && key === 'expression' ? null : <button type="button" className="btn sm" title="Expression Editor: Fields, Parameters, Variables, functions"
+          onClick={() => (key === 'expression' ? onEditExpression(element.id) : onEditProperty({ id: element.id, key, label }))}>…</button>}</span></Row>
     );
 
     return (
@@ -545,8 +549,13 @@ export default function Properties({ state, dispatch, notify, actions, onEditExp
         <p className="hint band-purpose">{bandPurpose(selection.key)}</p>
         <Row label="Height (px)"><Num value={band.height} min={0} max={1500} onChange={setHeight} /></Row>
         <Row label="Print When Expression">
-          <textarea rows={2} value={band.printWhenExpression || ''} placeholder='$F{Amount} > 0   (empty = always)'
-            onChange={(e) => { const value = e.target.value; design$((d) => setBand(d, selection.key, { ...getBand(d, selection.key), printWhenExpression: value }), `band-when-${selection.key}`); }} />
+          <span className="expr-row">
+            <textarea rows={2} value={band.printWhenExpression || ''} placeholder='$F{Amount} > 0   (empty = always)' title="Double-click to open the Expression Editor"
+              onDoubleClick={() => onEditProperty({ bandKey: selection.key, key: 'printWhenExpression', label: 'Print When Expression' })}
+              onChange={(e) => { const value = e.target.value; design$((d) => setBand(d, selection.key, { ...getBand(d, selection.key), printWhenExpression: value }), `band-when-${selection.key}`); }} />
+            <button type="button" className="btn sm" title="Expression Editor: Fields, Parameters, Variables, functions"
+              onClick={() => onEditProperty({ bandKey: selection.key, key: 'printWhenExpression', label: 'Print When Expression' })}>…</button>
+          </span>
         </Row>
         <div className="row-actions">
           <button className="btn sm" onClick={() => actions.addBandAt(selection.key)} title="A second, third… band of this kind: it prints right after this one">＋ Add another</button>

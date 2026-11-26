@@ -6,12 +6,13 @@ import * as echarts from 'echarts/core';
 import { BarChart, EffectScatterChart, HeatmapChart, LineChart, MapChart, PieChart, ScatterChart } from 'echarts/charts';
 import { GeoComponent, GridComponent, LegendComponent, TooltipComponent, VisualMapComponent } from 'echarts/components';
 import { CanvasRenderer } from 'echarts/renderers';
+import { LegacyGridContainLabel } from 'echarts/features';   // echarts 6: keeps grid.containLabel working
 import { useLook } from '../shared/ThemeMenu.jsx';
 import { formatNumber } from './api.js';
 import MlResult, { mlOption } from './MlResult.jsx';
 import { countryOf, loadWorld, placeOf } from './worldMap.js';
 
-echarts.use([BarChart, EffectScatterChart, HeatmapChart, LineChart, MapChart, PieChart, ScatterChart, GeoComponent, GridComponent, LegendComponent, TooltipComponent, VisualMapComponent, CanvasRenderer]);
+echarts.use([BarChart, EffectScatterChart, HeatmapChart, LineChart, MapChart, PieChart, ScatterChart, GeoComponent, GridComponent, LegendComponent, TooltipComponent, VisualMapComponent, CanvasRenderer, LegacyGridContainLabel]);
 
 const SERIES = {
   light: ['#2a78d6', '#eb6834', '#1baf7a', '#eda100', '#e87ba4', '#008300', '#6250d6', '#e34948'],
@@ -161,7 +162,8 @@ function chartOption(tile, result, colors, dark) {
   const stacked = Boolean(tile.options?.stacked) && series.length > 1;
   const kind = tile.type === 'line' || tile.type === 'area' ? 'line' : 'bar';
   const categoryAxis = { type: 'category', data: categories, axisLabel: { ...axisText, hideOverlap: true }, axisLine: { lineStyle: { color: colors.line } }, axisTick: { show: false } };
-  const valueAxis = { type: 'value', axisLabel: { ...axisText, formatter: fmt }, splitLine: { lineStyle: { color: colors.line, opacity: 0.6 } } };
+  // the last label of a horizontal value axis ends at the edge, so it is never cut off
+  const valueAxis = { type: 'value', axisLabel: { ...axisText, formatter: fmt, alignMaxLabel: horizontal ? 'right' : undefined }, splitLine: { lineStyle: { color: colors.line, opacity: 0.6 } } };
   return {
     color: colors.series,
     grid: { left: 8, right: 16, top: series.length > 1 ? 30 : 12, bottom: 8, containLabel: true },

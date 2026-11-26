@@ -1,8 +1,8 @@
 /* Setup, guided: one friendly question per screen. Cards and pills in place of plain boxes; theme tokens only. */
 .setup.is-guided[data-step] { max-width: 860px; }
 .setup.is-guided[data-step] .coach-top, .setup.is-guided[data-step] .coach-card { border: 0; }
-.setup.is-guided[data-step] .coach-top { padding: 26px 30px 0; border-radius: 28px 28px 0 0; background: var(--step-soft, var(--tint-v)); }
-.setup.is-guided[data-step] .coach-card { padding: 6px 30px 22px; background: var(--step-soft, var(--tint-v)); }
+.setup.is-guided[data-step] .coach-top { padding: 26px 30px 0; border-radius: var(--radius-lg) var(--radius-lg) 0 0; background: var(--step-soft, var(--tint-b)); }
+.setup.is-guided[data-step] .coach-card { padding: 6px 30px 22px; background: var(--step-soft, var(--tint-b)); }
 .setup.is-guided[data-step] .coach h3 { font-size: 30px; font-weight: 800; letter-spacing: -.03em; text-wrap: balance; }
 .setup.is-guided[data-step] .coach-why { max-width: 60ch; color: var(--text); opacity: .78; font-size: 15px; }
 .setup.is-guided[data-step] .coach-count { letter-spacing: 0; text-transform: none; font-size: 13px; color: var(--step, var(--accent)); }
@@ -19,12 +19,12 @@
 .setup.is-guided[data-step] .coach-buttons { margin-top: 20px; }
 .setup.is-guided[data-step] .coach-buttons .btn { min-height: 48px; padding: 0 24px; font-size: 15px; font-weight: 700; }
 /* a colour per step */
-.setup.is-guided[data-step="details"] { --step: var(--tint-v-tx); --step-soft: var(--tint-v); }
+.setup.is-guided[data-step="details"] { --step: var(--tint-b-tx); --step-soft: var(--tint-b); }
 .setup.is-guided[data-step="source"] { --step: var(--tint-g-tx); --step-soft: var(--tint-g); }
 .setup.is-guided[data-step="query"] { --step: var(--tint-b-tx); --step-soft: var(--tint-b); }
 .setup.is-guided[data-step="fields"] { --step: var(--tint-a-tx); --step-soft: var(--tint-a); }
 .setup.is-guided[data-step="parameters"] { --step: var(--tint-c-tx); --step-soft: var(--tint-c); }
-.setup.is-guided[data-step="layout"] { --step: var(--tint-v-tx); --step-soft: var(--tint-v); }
+.setup.is-guided[data-step="layout"] { --step: var(--tint-a-tx); --step-soft: var(--tint-a); }
 
 /* the question's own field: a soft ring on the box itself, never a frame around label and hint */
 .setup.is-guided[data-step] .guide-target:not(button) { outline: 0; box-shadow: none; animation: none; border-radius: 0; background: transparent; }

@@ -1,0 +1,70 @@
+/* PixelFX: the shared look of every page. Square pixels instead of soft glows:
+   - buttons and cards lift with a hard pixel shadow, moving in steps;
+   - focus is a dashed pixel outline;
+   - sections come in with a blocky wipe;
+   - .px-loader is three pixels stepping; .px-grid is a fine pixel grid behind a hero.
+   Theme variables only (light, dark, every accent). Motion stops with prefers-reduced-motion. */
+
+:root {
+  --px: 4px;                                       /* one "pixel" of the effects */
+  --px-shadow: color-mix(in srgb, var(--text) 88%, transparent);
+  --px-steps: steps(3, end);
+}
+
+@keyframes px-wipe { from { clip-path: inset(0 100% 0 0); } to { clip-path: inset(0 0 0 0); } }
+@keyframes px-rise { from { opacity: 0; transform: translateY(12px); } to { opacity: 1; transform: none; } }
+@keyframes px-blink { 0%, 100% { opacity: 1; } 50% { opacity: 0; } }
+@keyframes px-step { 0%, 100% { transform: translateY(0); opacity: .35; } 50% { transform: translateY(calc(var(--px) * -2)); opacity: 1; } }
+
+/* the canvas of PixelField fills its box */
+.px-field { display: block; width: 100%; height: 100%; }
+
+/* a fine pixel grid behind heroes (squares, not a glow) */
+.px-grid {
+  background-color: var(--panel);
+  background-image:
+    linear-gradient(color-mix(in srgb, var(--line) 70%, transparent) 1px, transparent 1px),
+    linear-gradient(90deg, color-mix(in srgb, var(--line) 70%, transparent) 1px, transparent 1px);
+  background-size: 16px 16px;
+}
+
+/* buttons: a hard pixel shadow appears in steps on hover; pressed = flat */
+.btn.primary, .btn.danger { transition: transform .12s var(--px-steps), box-shadow .12s var(--px-steps), background-color .15s; }
+.btn.primary:hover:not(:disabled), .btn.danger:hover:not(:disabled) { transform: translate(calc(var(--px) * -.5), calc(var(--px) * -.5)); box-shadow: var(--px) var(--px) 0 0 var(--px-shadow); }
+.btn.primary:active:not(:disabled), .btn.danger:active:not(:disabled) { transform: translate(0, 0); box-shadow: 0 0 0 0 var(--px-shadow); }
+
+/* focus: a dashed pixel outline everywhere (keyboard only) */
+:where(a, button, input, select, textarea, summary, [tabindex]):focus-visible { outline: 2px dashed var(--accent); outline-offset: 2px; }
+
+/* cards across the product: flat, a crisp edge, and a pixel shadow when you point at them */
+:where(.hm-part, .q-home-card, .report-card, .start-card, .own-card, .sg-card, .model-card, .delivery-card, .bi-dash-card, .col-card, .coach-card, .adm-tile, .fd-tile, .srv-card) {
+  border-radius: var(--radius-sm) !important;
+}
+:where(.hm-part, .q-home-card, .report-card, .start-card, .own-card, .model-card, .delivery-card, .bi-dash-card, .col-card, .adm-tile, .fd-tile, .srv-card):hover {
+  transform: translate(calc(var(--px) * -1), calc(var(--px) * -1)) !important;
+  box-shadow: calc(var(--px) * 1.5) calc(var(--px) * 1.5) 0 0 var(--accent) !important;
+  border-color: var(--text) !important;
+  transition: transform .14s var(--px-steps), box-shadow .14s var(--px-steps), border-color .1s !important;
+}
+
+/* sections come in with a blocky wipe (once, on page load) */
+.px-in { animation: px-wipe .42s steps(7, end) backwards; }   /* backwards: no clip (and no clipped shadow) after the wipe */
+.px-in-2 { animation: px-wipe .42s .08s steps(7, end) backwards; }
+.px-up { animation: px-rise .35s steps(5, end) both; animation-delay: var(--d, 0ms); }
+
+/* a blinking pixel cursor after a heading */
+.px-caret::after { content: ''; display: inline-block; width: .5em; height: .9em; margin-left: .12em; vertical-align: -.08em; background: var(--accent); animation: px-blink 1s steps(1, end) infinite; }
+
+/* loader: three pixels stepping */
+.px-loader { display: inline-flex; gap: var(--px); align-items: flex-end; height: calc(var(--px) * 4); }
+.px-loader i { width: calc(var(--px) * 1.5); height: calc(var(--px) * 1.5); background: currentColor; animation: px-step .6s steps(2, end) infinite; }
+.px-loader i:nth-child(2) { animation-delay: .1s; } .px-loader i:nth-child(3) { animation-delay: .2s; }
+
+/* the mono label style used by the new pages ("01 — Sign in") */
+.px-kicker { margin: 0; font-family: var(--mono); font-size: 11.5px; font-weight: 600; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
+.px-kicker b { color: var(--accent); font-weight: 700; }
+
+@media (prefers-reduced-motion: reduce) {
+  .px-in, .px-in-2, .px-up, .px-caret::after, .px-loader i { animation: none !important; }
+  .btn.primary, .btn.danger { transition: none; }
+}

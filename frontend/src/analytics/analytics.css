@@ -304,8 +304,8 @@ a.btn.primary, a.btn.primary:hover { color: var(--on-accent); }
 
 /* Home */
 .bi-hero { position: relative; overflow: hidden; align-items: center; flex-wrap: nowrap; padding: 24px; margin-bottom: 0; background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius-lg); box-shadow: var(--shadow); }
-.bi-hero::after { content: ""; position: absolute; right: -60px; top: -90px; width: 260px; height: 260px; border-radius: 50%; pointer-events: none;
-  background: radial-gradient(circle, color-mix(in srgb, var(--accent) 16%, transparent), transparent 70%); }
+.bi-hero::after { content: ""; position: absolute; right: 0; top: 0; width: 112px; height: 112px; pointer-events: none;
+  background: var(--accent); opacity: .16; border-radius: 0; clip-path: polygon(0 0, 100% 0, 100% 100%, 75% 100%, 75% 75%, 50% 75%, 50% 50%, 25% 50%, 25% 25%, 0 25%); }
 .bi-hero .eyebrow { display: inline-block; padding: 3px 10px; border-radius: var(--radius-pill); background: var(--tint-c); color: var(--tint-c-tx); font-weight: 800; letter-spacing: .06em; }
 .bi-hero h1 { font-family: var(--font-head); font-size: 32px; letter-spacing: -.02em; margin: 8px 0 4px; }
 .bi-hero p.muted { max-width: 70ch; margin: 0; }

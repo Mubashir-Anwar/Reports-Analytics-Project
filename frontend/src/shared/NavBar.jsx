@@ -122,7 +122,7 @@ export default function NavBar({ current, context, children }) {
         <Logo />
         <span className="fx-name"><b>{brand.first}{brand.second && <span>{brand.second}</span>}</b><small>{here ? here.label : brand.tagline}</small></span>
       </a>
-      <button type="button" className="fx-icon-btn fx-burger" aria-expanded={open} aria-controls="fx-links" aria-label="Menu" onClick={() => setOpen(!open)}>{open ? '✕' : '☰'}</button>
+      {apps.length > 0 && <button type="button" className="fx-icon-btn fx-burger" aria-expanded={open} aria-controls="fx-links" aria-label="Menu" onClick={() => setOpen(!open)}>{open ? '✕' : '☰'}</button>}
       {apps.length > 0 && <span className="fx-divider" aria-hidden="true" />}
       <nav className="fx-links" id="fx-links" aria-label="Main navigation">
         {apps.map((app) => (

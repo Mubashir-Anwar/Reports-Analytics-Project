@@ -172,6 +172,23 @@ export default function App() {
 
   // Expression Editor (double-click a Text Field / Static Text on the canvas or in the Outline)
   const [exprId, setExprId] = useState(null);
+  // the same editor for one property: { id | bandKey, key, label } (double-click Print When Expression in Properties)
+  const [propEdit, setPropEdit] = useState(null);
+  const savePropEdit = (values) => {
+    const { id, bandKey } = propEdit;
+    dispatch({
+      type: 'DESIGN',
+      update: (d) => {
+        if (bandKey) return setBand(d, bandKey, { ...getBand(d, bandKey), ...values });
+        const found = findElement(d, id);
+        if (!found) return d;
+        const band = getBand(d, found.bandKey);
+        return setBand(d, found.bandKey, { ...band, elements: band.elements.map((el) => (el.id === id ? { ...el, ...values } : el)) });
+      },
+    });
+    setPropEdit(null);
+  };
+  const propEditTarget = propEdit && (propEdit.bandKey ? getBand(state.design, propEdit.bandKey) : findElement(state.design, propEdit.id)?.element);
   const applyLayout = (next, name) => {
     dispatch({ type: 'DESIGN', update: () => next });
     dispatch({ type: 'SELECT', selection: { kind: 'report' } });
@@ -650,7 +667,7 @@ export default function App() {
     }
     if (name === 'outline') return <Outline report={report} design={design} selection={selection} dispatch={dispatch} actions={actions} openMenu={openMenu} onDetectFields={() => setTab('setup')} onEditExpression={editExpression} />;
     if (name === 'palette') return <Palette tool={tool} dispatch={dispatch} />;
-    return <Properties state={state} dispatch={dispatch} notify={notify} actions={actions} resizeMode={canvasPrefs.resizeMode} onEditExpression={editExpression} onOpenQuery={(t) => setQueryTab(t || 'query')} onOpenTable={setTableId} />;
+    return <Properties state={state} dispatch={dispatch} notify={notify} actions={actions} resizeMode={canvasPrefs.resizeMode} onEditExpression={editExpression} onEditProperty={setPropEdit} onOpenQuery={(t) => setQueryTab(t || 'query')} onOpenTable={setTableId} />;
   };
   const widths = { '--left-w': `${showLeft ? dock.layout.width.left : 0}px`, '--right-w': `${showRight ? dock.layout.width.right : 0}px` };
   return (
@@ -712,6 +729,9 @@ export default function App() {
       {dataStart && <DataStart report={report} dispatch={dispatch} notify={notify} onClose={() => setDataStart(false)} onNext={() => { setDataStart(false); setRefreshKey((n) => n + 1); if (!hasBands(design)) setTemplates(true); }} />}
       {templates && <TemplateGallery report={report} design={design} onApply={applyLayout} onClose={() => setTemplates(false)} onImportDesign={(what) => { setTemplates(false); setImporting(what || true); }} />}
       {wizard && <ComponentWizard wizard={wizard} report={report} design={design} bandWidth={bandWidth(design)} onCancel={() => setWizard(null)} onDone={finishWizard} />}
+      {propEdit && propEditTarget && (
+        <ExpressionEditor element={propEditTarget} field={propEdit} report={report} design={design} onSave={savePropEdit} onClose={() => setPropEdit(null)} onAddField={addField} />
+      )}
       {exprId && findElement(design, exprId) && (
         <ExpressionEditor element={findElement(design, exprId).element} report={report} design={design} onSave={saveExpression} onClose={() => setExprId(null)} onAddField={addField} />
       )}

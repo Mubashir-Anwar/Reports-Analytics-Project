@@ -2,10 +2,13 @@
 from __future__ import annotations
 
 import logging
+import os
+import secrets
 import time
+from urllib.parse import quote
 
 from fastapi import FastAPI, Request
-from fastapi.responses import JSONResponse, Response
+from fastapi.responses import JSONResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 
 from backend.app.constants import SERVICE_VERSION
@@ -59,6 +62,13 @@ def make_app() -> FastAPI:
     app.state.ctx = ctx  # tests and tools reach the shared context (e.g. the job runner) here
     app.mount("/assets", StaticFiles(directory=str(ui_directory)), name="assets")
 
+    def signed_in_or_token(request: Request) -> bool:
+        if ctx.current_session(request) is not None:
+            return True
+        expected = os.getenv("REPORTING_ADMIN_TOKEN", "")
+        provided = request.headers.get("X-Admin-Token", "")
+        return bool(expected and provided and secrets.compare_digest(provided, expected))
+
     def _audit_change(request: Request, body: bytes) -> None:
         route = request.scope.get("route")
         found = audit_trail.describe(request.method, getattr(route, "path", ""), dict(request.path_params), body)
@@ -82,6 +92,11 @@ def make_app() -> FastAPI:
         elif area in ("admin", "designer", "management-api") and not management_ip_allowed(client):
             HTTP_LOG.warning("Management access refused for %s from %s (not in REPORTING_ADMIN_ALLOWED_IPS)", path, client)
             blocked = JSONResponse({"detail": "Access from this network address is not allowed"}, status_code=403)
+        if blocked is None and area == "docs" and not signed_in_or_token(request):
+            # the API map lists every endpoint: signed-in users (or the admin token) only
+            blocked = (JSONResponse({"detail": "Sign in to read the API description"}, status_code=401)
+                       if path.endswith(".json") else
+                       RedirectResponse(url=f"/login?next={quote(path, safe='')}", status_code=303))
         if blocked is None:
             blocked = too_large(request)
         if blocked is None and not path.startswith("/assets/"):

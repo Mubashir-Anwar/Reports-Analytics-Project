@@ -2,15 +2,17 @@
 .hm .tint-b { --t: var(--tint-b); --tx: var(--tint-b-tx); } .hm .tint-v { --t: var(--tint-v); --tx: var(--tint-v-tx); }
 .hm .tint-c { --t: var(--tint-c); --tx: var(--tint-c-tx); } .hm .tint-g { --t: var(--tint-g); --tx: var(--tint-g-tx); }
 .hm .sa-banner { margin: 0; }
-.hm-hero { display: flex; align-items: center; justify-content: space-between; gap: 24px; padding: 34px 36px; border-radius: 24px; overflow: hidden; border: 1px solid var(--line);
-  background: radial-gradient(120% 160% at 100% 0%, color-mix(in srgb, var(--accent) 24%, transparent), transparent 60%), linear-gradient(120deg, var(--panel), color-mix(in srgb, var(--accent-soft) 70%, var(--panel))); }
+.hm-hero { display: flex; align-items: center; justify-content: space-between; gap: 24px; padding: 34px 36px; border-radius: var(--radius-lg); overflow: hidden; border: 2px solid var(--text); box-shadow: 6px 6px 0 0 var(--accent);
+  background-color: var(--panel); background-image: linear-gradient(color-mix(in srgb, var(--line) 70%, transparent) 1px, transparent 1px),
+    linear-gradient(90deg, color-mix(in srgb, var(--line) 70%, transparent) 1px, transparent 1px); background-size: 16px 16px; }
 .hm-hero h1 { font-family: var(--font-head); font-size: clamp(24px, 4vw, 36px); letter-spacing: -.02em; }
 .hm-hero p { margin: 8px 0 0; color: var(--muted); font-size: 15px; }
 .hm-hero .hm-hi { margin: 0 0 6px; }
 .hm-hi b { color: var(--text); }
 .hm-go { margin-top: 18px; padding: 11px 20px; font-size: 14px; text-decoration: none; border-radius: 999px; }
-.hm-art { display: flex; align-items: flex-end; gap: 9px; height: 120px; flex: none; }
-.hm-art i { width: 20px; height: 42%; border-radius: 8px; background: var(--accent); opacity: .25; transform-origin: bottom; animation: hm-up .7s var(--ease) both; }
+.hm-art { display: block; width: 220px; height: 130px; flex: none; }
+@media (max-width: 620px) { .hm-art { display: none; } }
+.hm-art i { width: 20px; height: 42%; border-radius: 0; background: var(--accent); opacity: .25; transform-origin: bottom; animation: hm-up .7s var(--ease) both; }
 .hm-art i:nth-child(2) { height: 64%; opacity: .4; animation-delay: .08s; }
 .hm-art i:nth-child(3) { height: 50%; opacity: .3; animation-delay: .16s; }
 .hm-art i:nth-child(4) { height: 100%; opacity: .9; animation-delay: .24s; }
@@ -26,7 +28,7 @@
 .hm-steps .next .hm-num { background: var(--accent); border-color: var(--accent); color: var(--on-accent); }
 .hm-steps .done .hm-num { background: var(--ok-soft); border-color: transparent; color: var(--ok); }
 .hm-parts { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 14px; }
-.hm-part { display: flex; flex-direction: column; padding: 20px; border: 1px solid var(--line); border-radius: 20px; background: var(--panel); transition: transform .2s var(--ease), box-shadow .2s; animation: hm-in .4s var(--ease) both; animation-delay: calc(var(--i) * 60ms); }
+.hm-part { display: flex; flex-direction: column; padding: 20px; border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--panel); transition: transform .2s var(--ease), box-shadow .2s; animation: hm-in .4s var(--ease) both; animation-delay: calc(var(--i) * 60ms); }
 .hm-part:hover { transform: translateY(-3px); box-shadow: var(--shadow); }
 @keyframes hm-in { from { opacity: 0; transform: translateY(10px); } }
 .hm-ico { display: grid; place-items: center; width: 44px; height: 44px; border-radius: 14px; background: var(--t); color: var(--tx); margin-bottom: 12px; }

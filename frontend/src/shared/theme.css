@@ -1,3 +1,4 @@
+@import './pixelfx.css';
 /* Design tokens shared by the designer, /server and /admin. Light and dark themes; the page follows the system
    setting unless the user picked one (html[data-theme="light" | "dark"], see shared/theme.js). */
 :root {
@@ -12,7 +13,7 @@
   --tint-a: #fff3d9; --tint-a-tx: #8a5200; --tint-g: #e2f6e9; --tint-g-tx: #13703a;
   --desk: #e8eaf1; --desk-dot: #cfd3de;
   --band: #fbfcfe; --guide: #cbd5e1;
-  --radius-sm: 8px; --radius: 12px; --radius-lg: 18px; --radius-pill: 999px;
+  --radius-sm: 4px; --radius: 6px; --radius-lg: 10px; --radius-pill: 999px;   /* PixelFX: crisp corners */
   --shadow-sm: 0 1px 2px rgb(18 19 26 / .05);
   --shadow: 0 1px 2px rgb(18 19 26 / .05), 0 10px 30px rgb(18 19 26 / .07);
   --shadow-lg: 0 24px 60px rgb(18 19 26 / .22);

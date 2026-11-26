@@ -34,27 +34,41 @@ def register(app: FastAPI, ctx: SimpleNamespace) -> None:
     require_admin = ctx.require_admin
     require_report_access = ctx.require_report_access
 
+    def may_see_details(request: Request) -> bool:
+        """Version, database name and errors only for a signed-in user or the admin token."""
+        import secrets  # noqa: PLC0415
+        if ctx.current_session(request) is not None:
+            return True
+        expected, provided = os.getenv("REPORTING_ADMIN_TOKEN", ""), request.headers.get("X-Admin-Token", "")
+        return bool(expected and provided and secrets.compare_digest(provided, expected))
+
     @app.get("/health")
-    def health() -> JSONResponse:
+    def health(request: Request) -> JSONResponse:
+        """Liveness for probes. Signed out, only the state is given (no database name, version or error text)."""
+        full = may_see_details(request)
         if not any(item["id"] == "default" for item in load_connection_profiles()):
-            return JSONResponse({"status": "ok", "version": SERVICE_VERSION, "connection": None})
+            return JSONResponse({"status": "ok", **({"version": SERVICE_VERSION, "connection": None} if full else {})})
         try:
             _, database = get_connection("default")
-            return JSONResponse({"status": "ok", "version": SERVICE_VERSION, "connection": "default", "database": database})
+            return JSONResponse({"status": "ok", **({"version": SERVICE_VERSION, "connection": "default", "database": database} if full else {})})
         except HTTPException as exc:
             status = "not_configured" if exc.status_code == 503 and "set " in str(exc.detail).lower() else "unavailable"
-            return JSONResponse({"status": status, "version": SERVICE_VERSION, "detail": exc.detail}, status_code=exc.status_code)
+            return JSONResponse({"status": status, **({"version": SERVICE_VERSION, "detail": exc.detail} if full else {})},
+                                status_code=exc.status_code)
 
     @app.get("/ready")
-    def ready() -> JSONResponse:
+    def ready(request: Request) -> JSONResponse:
         """Readiness for a load balancer: the storage (files or PostgreSQL) answers. MongoDB is checked by /health."""
         from backend.app.storage.store import get_store
         try:
             store = get_store()
             store.read_json("connections.json")
         except Exception as exc:  # noqa: BLE001 - any storage failure means "not ready"
-            return JSONResponse({"status": "not_ready", "storage": "unavailable", "detail": type(exc).__name__}, status_code=503)
+            return JSONResponse({"status": "not_ready", **({"storage": "unavailable", "detail": type(exc).__name__} if may_see_details(request) else {})},
+                                status_code=503)
         runner = ctx.job_runner
+        if not may_see_details(request):
+            return JSONResponse({"status": "ready"})
         return JSONResponse({"status": "ready", "version": SERVICE_VERSION, "storage": store.backend,
                              "scheduler": "on" if runner.scheduler_on else "off"})
 
