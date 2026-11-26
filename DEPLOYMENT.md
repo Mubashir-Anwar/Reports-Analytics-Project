@@ -564,6 +564,15 @@ folders (folder **Analytics** when none is set).
 | `ANALYTICS_QUERY_MAX_ROWS` / `ANALYTICS_QUERY_TIMEOUT_SECONDS` | 5 000 / 30 s | rows and time of one visual |
 | `ANALYTICS_MEMORY_LIMIT` / `ANALYTICS_THREADS` | 1GB / 2 | memory and CPU of one query (DuckDB spills to disk above it) |
 | `ANALYTICS_REFRESH_WORKERS` | 1 | imports running at once in this process |
+| `ANALYTICS_PYTHON_TIMEOUT_SECONDS` / `ANALYTICS_PYTHON_MEMORY_MB` | 120 s / 2048 | time and memory of one Python script (its own process) |
+| `ANALYTICS_PYTHON_MAX_ROWS` | 1 000 000 | rows a Python script reads from one dataset and may return |
+
+**Python scripts** (the *Python scripts* right, with Analytics): a script reads up to five datasets with pandas,
+scikit-learn and scipy and can be saved as a dataset that runs again on every refresh. Each run is a separate Python
+process with an empty environment, a temporary folder, the time and memory limits above, and guard rails (no network,
+no files of the server, no other programs, no ctypes). Those guard rails stop mistakes and curious scripts; they are
+not a container. Give the right to people you trust with the data, or run the service in Docker for a hard boundary.
+Every run is in the audit trail (`analytics.python.run`).
 
 Size the server for it: the Parquet file is usually 5–20× smaller than the source data (20 000 orders ≈ 250 KB), and
 a query reads only the columns it uses. Several servers behind a load balancer need `REPORTING_ANALYTICS_DIR` on a

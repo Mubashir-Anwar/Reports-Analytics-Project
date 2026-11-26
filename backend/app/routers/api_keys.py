@@ -20,6 +20,7 @@ from urllib.parse import quote, urlencode
 from fastapi import FastAPI, HTTPException, Request
 
 from backend.app.constants import OUTPUT_FORMATS, SIGNED_LINK_KEYS
+from backend.app.db import get_records
 from backend.app.definitions import clean_folder, validate_parameters
 from backend.app.logs import LOG
 from backend.app.security import api_keys, embed_tokens, webhooks
@@ -74,7 +75,17 @@ def register(app: FastAPI, ctx: SimpleNamespace) -> None:
     @app.get("/api/admin/api-keys")
     def list_api_keys(request: Request) -> dict[str, Any]:
         require_admin(request)
-        return {"keys": [api_keys.key_view(item) for item in api_keys.load_keys()]}
+        # how much each key is used: calls in the last 30 days (from the API call log), to find keys nobody uses
+        since = datetime.now(timezone.utc) - timedelta(days=30)
+        records = get_records()
+        views = []
+        for item in api_keys.load_keys():
+            try:
+                calls = len(records.api_calls(apiKeyId=item["id"], since=since, limit=10_000))
+            except Exception:  # noqa: BLE001 - a missing log must not hide the keys
+                calls = None
+            views.append({**api_keys.key_view(item), "calls30": calls})
+        return {"keys": views, "unusedDays": 30}
 
     @app.post("/api/admin/api-keys")
     async def create_api_key(request: Request) -> dict[str, Any]:

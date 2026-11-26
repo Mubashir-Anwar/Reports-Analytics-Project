@@ -39,6 +39,7 @@ from backend.app.security.users import (
     set_user_password,
     user_rights,
 )
+from backend.app.services import access
 from backend.app.services.export_zip import build_zip, safe_name
 from backend.app.storage.files import add_saved_folder, list_saved_folders, move_target, normalize_folder_path
 
@@ -183,12 +184,12 @@ def register(app: FastAPI, ctx: SimpleNamespace) -> None:
             raise HTTPException(status_code=500, detail=str(exc)) from None
         rules = permissions.load_rules()
         reports = []
-        for item in published_report_summaries():
+        for item in (published_report_summaries() if access.sees_reports(session) else []):   # reports: the Designer right
             have = permissions.level(session, item["folder"], rules)
             if have >= permissions.RUN:
                 reports.append({**item, "access": permissions.NAMES[have]})
         dashboards = []
-        if "analytics" in enabled_areas():                 # dashboards live in the same folders, with the same permissions
+        if "analytics" in enabled_areas() and access.sees_dashboards(session):   # dashboards: the Analytics right; same folders and permissions
             for item in analytics_store.dashboards():
                 folder = item.get("folder") or "Analytics"
                 have = permissions.level(session, folder, rules)
@@ -202,10 +203,12 @@ def register(app: FastAPI, ctx: SimpleNamespace) -> None:
                    or any(s == f or s.startswith(f"{f}/") for s in seen_folders)]
         return {"folders": visible, "reports": sorted(reports, key=lambda item: item["title"].casefold()),
                 "dashboards": sorted(dashboards, key=lambda item: item["name"].casefold()),
-                "user": session_view(session), "folderAccess": {f: permissions.NAMES[permissions.level(session, f, rules)] for f in visible}}
+                "user": session_view(session), "folderAccess": {f: permissions.NAMES[permissions.level(session, f, rules)] for f in visible},
+                "shows": {"reports": access.sees_reports(session), "dashboards": access.sees_dashboards(session)}}
 
     def report_at(session: dict[str, Any], report_id: str, request: Request, needed: int) -> Any:
         """The report in ?folder= (the same ID may be used in several folders), if this user may use it at `needed`."""
+        access.require_server_reports(session)
         return ctx.require_report(session, report_id, needed, folder=clean_folder(request.query_params.get("folder")))
 
     @app.post("/api/server/reports/{report_id}/run")

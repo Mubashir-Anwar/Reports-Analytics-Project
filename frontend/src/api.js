@@ -133,7 +133,8 @@ export const api = {
   },
   // administration (admin token only)
   whoami: () => request('/api/admin/whoami'),
-  users: () => request('/api/admin/users'),
+  /** no argument: every account; { search, right, status, offset, limit }: one page and `total` */
+  users: (query) => request(`/api/admin/users${query ? `?${new URLSearchParams(Object.entries(query).filter(([, v]) => v !== '' && v != null)).toString()}` : ''}`),
   createUser: (payload) => request('/api/admin/users', { method: 'POST', body: payload }),
   updateUser: (username, change) => request(`/api/admin/users/${encodeURIComponent(username)}`, { method: 'PUT', body: change }),
   deleteUser: (username) => request(`/api/admin/users/${encodeURIComponent(username)}`, { method: 'DELETE' }),

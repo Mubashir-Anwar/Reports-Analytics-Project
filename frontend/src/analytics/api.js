@@ -31,6 +31,8 @@ export const bi = {
   inspectPowerBi: (body) => request('/api/analytics/powerbi/inspect', { method: 'POST', body }),
   importPowerBi: (body) => request('/api/analytics/powerbi/import', { method: 'POST', body }),
   query: (visual) => request('/api/analytics/query', { method: 'POST', body: visual }),
+  /** try a Python script on datasets: {script, inputs, datasetId?} → first rows, printed output or the error */
+  runPython: (body) => request('/api/analytics/python/run', { method: 'POST', body }),
   queryBatch: (queries, filters) => request('/api/analytics/query-batch', { method: 'POST', body: { queries, filters } }),
 };
 

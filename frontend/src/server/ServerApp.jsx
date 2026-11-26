@@ -263,6 +263,7 @@ function Repository({ user, onUser }) {
   const [folders, setFolders] = useState([]);
   const [reports, setReports] = useState([]);
   const [dashboards, setDashboards] = useState([]);
+  const [shows, setShows] = useState({ reports: true, dashboards: true });   // by right: Designer or Server = reports, Analytics = dashboards
   const [openDash, setOpenDash] = useState(null);   // the dashboard being viewed (replaces the three columns)
   const [folder, setFolder] = useState('');
   const [sideWidth, setSideWidth] = useState(readSide);
@@ -302,6 +303,7 @@ function Repository({ user, onUser }) {
       setFolders(data.folders);
       setReports(data.reports);
       setDashboards(data.dashboards || []);
+      setShows(data.shows || { reports: true, dashboards: true });
       setFolderAccess(data.folderAccess || {});
       onUser(data.user);
       setFolder((current) => (current && !data.folders.includes(current) ? '' : current));
@@ -512,7 +514,11 @@ function Repository({ user, onUser }) {
             {loading && <div className="empty">Loading…</div>}
             {!loading && !visible.length && !visibleDashboards.length && (
               <div className="empty">
-                {!reports.length && !dashboards.length ? 'Nothing is here yet. Publish a report from the Designer, make a dashboard in Analytics, or Add Resource → upload a .mrd or .mdash file.'
+                {!shows.reports && !shows.dashboards ? 'Your account shows no reports (they need the Designer or Server right) and no dashboards (they need the Analytics right). Ask an administrator.'
+                  : !reports.length && !dashboards.length ? (shows.reports && shows.dashboards
+                    ? 'Nothing is here yet. Publish a report from the Designer, make a dashboard in Analytics, or Add Resource → upload a .mrd or .mdash file.'
+                    : shows.reports ? 'No reports here yet. Publish one from the Designer, or Add Resource → upload a .mrd file. (Dashboards need the Analytics right.)'
+                      : 'No dashboards here yet. Make one in Analytics, or Add Resource → upload a .mdash file. (Reports need the Designer or Server right.)')
                   : search.trim() ? `Nothing matches “${search.trim()}”${folder ? ` in /${folder}` : ''}.` : folder ? 'Nothing directly in this folder.' : 'Nothing here.'}
                 {designer && folder && !search.trim() && canManageFolder(folder) && (
                   <div className="row" style={{ justifyContent: 'center', marginTop: 10 }}>

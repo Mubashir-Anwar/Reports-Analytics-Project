@@ -29,6 +29,25 @@ def report_level(ctx: SimpleNamespace, session: dict[str, Any], definition: Repo
     return permissions.level(session, ctx.report_folder(definition), rules)
 
 
+# On the Report Server reports are for the Designer or Server right, dashboards for the Analytics right (an admin sees both).
+def sees_reports(session: dict[str, Any]) -> bool:
+    return bool(set(session.get("rights") or ()) & {"designer", "server", "admin"})
+
+
+def sees_dashboards(session: dict[str, Any]) -> bool:
+    return bool(set(session.get("rights") or ()) & {"analytics", "admin"})
+
+
+def require_server_reports(session: dict[str, Any]) -> None:
+    if not sees_reports(session):
+        raise HTTPException(status_code=403, detail="Reports on the Report Server need the Designer or Server right (ask an administrator)")
+
+
+def require_server_dashboards(session: dict[str, Any]) -> None:
+    if not sees_dashboards(session):
+        raise HTTPException(status_code=403, detail="Dashboards on the Report Server need the Analytics right (ask an administrator)")
+
+
 def require_report(ctx: SimpleNamespace, session: dict[str, Any], report_id: str, needed: int = permissions.RUN,
                    folder: str | None = None) -> ReportDefinition:
     """The published report if the user may use it at `needed`; a hidden report looks like a missing one (404).

@@ -336,3 +336,30 @@ def test_my_queries_are_private_until_shared(client):
     assert "sara" in ali.get("/api/query/saved/people").json()["people"]
     assert ali.request("DELETE", f"/api/query/saved/{qid}", json={}).status_code == 200
     assert sara.get("/api/query/saved").json()["shared"] == []
+
+
+def test_users_are_searched_and_paged_and_keys_show_their_use(client):
+    admin = token(ADMIN)
+    for n in range(7):
+        made = client.post("/api/admin/users", headers=admin, json={"username": f"page{n}", "fullName": f"Paged Person {n}",
+                                                                   "email": f"page{n}@example.com", "password": "page-pass-1",
+                                                                   "rights": ["server"] if n % 2 else ["designer"]})
+        assert made.status_code == 200, made.text
+    everyone = client.get("/api/admin/users", headers=admin).json()
+    assert everyone["total"] == len(everyone["users"]) >= 7                       # no limit: all of them (as before)
+    first = client.get("/api/admin/users?search=paged&limit=3", headers=admin).json()
+    assert first["total"] == 7 and [u["username"] for u in first["users"]] == ["page0", "page1", "page2"]
+    third = client.get("/api/admin/users?search=paged&limit=3&offset=6", headers=admin).json()
+    assert [u["username"] for u in third["users"]] == ["page6"]
+    assert client.get("/api/admin/users?search=PAGE3@EXAMPLE", headers=admin).json()["total"] == 1   # e-mail, any case
+    designers = client.get("/api/admin/users?search=paged&right=designer", headers=admin).json()
+    assert {u["username"] for u in designers["users"]} == {"page0", "page2", "page4", "page6"}
+    assert client.get("/api/admin/users?search=paged&status=never", headers=admin).json()["total"] == 7
+    made = client.post("/api/admin/api-keys", headers=admin, json={"name": "Portal"})
+    assert made.status_code == 200, made.text
+    listed = client.get("/api/admin/api-keys", headers=admin).json()
+    portal = next(k for k in listed["keys"] if k["name"] == "Portal")
+    assert portal["calls30"] == 0 and portal["lastUsedAt"] in (None, "") and listed["unusedDays"] == 30
+    assert client.get("/reports", headers={"X-API-Key": made.json()["secret"]}).status_code == 200
+    portal = next(k for k in client.get("/api/admin/api-keys", headers=admin).json()["keys"] if k["name"] == "Portal")
+    assert portal["lastUsedAt"]                                                   # used: it is no longer "never used"

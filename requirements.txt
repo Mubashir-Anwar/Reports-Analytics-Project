@@ -16,6 +16,9 @@ SQLAlchemy>=2.0,<2.1
 pyodbc>=5.1,<6.0  # SQL Server with Windows login (mssql+pyodbc://…trusted_connection=yes)
 numpy>=2.0,<3.0  # analytics: machine learning models (regression, clusters, forecast)
 duckdb>=1.4,<2.0  # analytics: datasets as Parquet files, queried in-process
+pandas>=2.2,<4.0  # analytics: Python scripts (data cleaning), run in a separate process
+scikit-learn>=1.5,<2.0  # analytics: Python scripts (machine learning)
+scipy>=1.13,<2.0  # analytics: Python scripts (statistics)
 pdfplumber>=0.11,<1.0  # File → Import design: text, lines and pictures of a PDF / Illustrator page (+ pypdfium2)
 rapidocr>=3.4,<4.0  # Import design from a PNG/JPEG scan: reads its text (OCR, Apache-2.0)
 onnxruntime>=1.20,<2.0  # runs the OCR models of rapidocr

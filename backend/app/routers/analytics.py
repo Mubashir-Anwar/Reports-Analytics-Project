@@ -47,6 +47,7 @@ Public API v1 (an API key; its folders apply to the datasets' and dashboards' fo
 """
 from __future__ import annotations
 
+import hashlib
 import re
 import shutil
 import time
@@ -56,7 +57,18 @@ from typing import Any
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse
 
-from backend.app.analytics import bundle, engine, importer, ml, model as analytics_model, powerbi, queries as analytics_queries, settings, store
+from backend.app.analytics import (
+    bundle,
+    engine,
+    importer,
+    ml,
+    model as analytics_model,
+    powerbi,
+    pyscript,
+    queries as analytics_queries,
+    settings,
+    store,
+)
 from backend.app.analytics.refresher import next_refresh
 from backend.app.connectors.errors import ConnectorQueryError, MongoReadAccessError
 from backend.app.connectors.profiles import profiles_in
@@ -64,6 +76,7 @@ from backend.app.logs import LOG
 from backend.app.security import api_keys, permissions
 from backend.app.security.access import client_address, enabled_areas
 from backend.app.security.users import find_user
+from backend.app.services import access
 from backend.app.services.capacity import caller_of
 from backend.app.storage.files import add_saved_folder, normalize_folder_path
 
@@ -81,6 +94,28 @@ def register(app: FastAPI, ctx: SimpleNamespace) -> None:
     def may_model(session: dict[str, Any]) -> bool:
         rights = set(session.get("rights") or [])
         return bool(session.get("superAdmin")) or bool(rights & {"designer", "admin"})
+
+    def may_python(session: dict[str, Any]) -> bool:
+        return bool(session.get("superAdmin")) or "python" in (session.get("rights") or [])
+
+    def python_user(request: Request) -> dict[str, Any]:
+        session = user(request)
+        if not may_python(session):
+            raise HTTPException(status_code=403, detail="Python scripts need the Python scripts right as well (ask an administrator)")
+        return session
+
+    def is_python(item: dict[str, Any] | None) -> bool:
+        return bool(item) and item.get("sourceKind") == "python"
+
+    def made_from(dataset_id: str) -> list[str]:
+        """Python datasets that read this dataset."""
+        return [d["name"] for d in store.datasets() if is_python(d) and dataset_id in (d.get("inputs") or [])]
+
+    def may_change_dataset(request: Request, item: dict[str, Any] | None, payload: dict[str, Any] | None = None) -> dict[str, Any]:
+        """Python datasets: the Python right; the others: Designer or Admin."""
+        if is_python(item) or (payload or {}).get("sourceKind") == "python":
+            return python_user(request)
+        return modeller(request)
 
     def modeller(request: Request) -> dict[str, Any]:
         session = user(request)
@@ -110,15 +145,19 @@ def register(app: FastAPI, ctx: SimpleNamespace) -> None:
         return HTTPException(status_code=422, detail=str(exc))
 
     # ------------------------------------------------------------- views
-    def dataset_view(item: dict[str, Any], full: bool) -> dict[str, Any]:
+    def dataset_view(item: dict[str, Any], full: bool, python: bool = False) -> dict[str, Any]:
         view = {name: item.get(name) for name in ("id", "name", "folder", "description", "columns", "status", "rowCount",
                                                   "sizeBytes", "refreshedAt", "nextRefreshAt", "lastError",
                                                   "refreshEveryMinutes", "createdBy", "createdAt", "updatedBy", "updatedAt")}
         view["columns"] = view["columns"] or []
         view["status"] = view["status"] or "new"
         view["busy"] = refresher.busy(item["id"])
+        view["sourceKind"] = item.get("sourceKind") or ""
+        view["inputs"] = item.get("inputs") or []
         if full:                                  # the source (query text) only for people who may change it
             view.update({name: item.get(name) for name in ("connectionId", "queryLanguage", "collection", "querySource")})
+        if is_python(item) and (full or python):  # the script: modellers and people with the Python right
+            view["script"] = item.get("querySource") or ""
         return view
 
     def find_dataset(dataset_id: str) -> dict[str, Any]:
@@ -203,7 +242,11 @@ def register(app: FastAPI, ctx: SimpleNamespace) -> None:
     def info(request: Request) -> dict[str, Any]:
         session = user(request)
         modelling = may_model(session)
-        return {"user": session["username"], "mayModel": modelling, "limits": settings.limits(),
+        python = may_python(session)
+        return {"user": session["username"], "mayModel": modelling, "limits": settings.limits(), "mayPython": python,
+                "python": {"available": not pyscript.available(), "problem": pyscript.available(), "timeoutSeconds": pyscript.timeout_seconds(),
+                           "memoryMb": pyscript.memory_mb(), "maxRows": pyscript.max_rows(), "maxInputs": pyscript.MAX_INPUTS,
+                           "example": pyscript.EXAMPLE} if python else None,
                 "visuals": list(store.VISUALS), "models": list(ml.MODELS), "aggregations": list(store.AGGREGATIONS), "buckets": [b for b in store.BUCKETS if b],
                 "operators": list(store.OPERATORS), "languages": list(store.LANGUAGES),
                 "adapters": [{"id": item["id"], "name": item.get("name", item["id"]), "type": item.get("type", "mongodb")}
@@ -213,7 +256,7 @@ def register(app: FastAPI, ctx: SimpleNamespace) -> None:
     @app.get("/api/analytics/datasets")
     def list_datasets(request: Request) -> dict[str, Any]:
         session = user(request)
-        return {"datasets": [dataset_view(item, may_model(session)) for item in store.datasets()]}
+        return {"datasets": [dataset_view(item, may_model(session), may_python(session)) for item in store.datasets()]}
 
     @app.post("/api/analytics/datasets/test")
     async def test_dataset(request: Request) -> dict[str, Any]:
@@ -230,8 +273,8 @@ def register(app: FastAPI, ctx: SimpleNamespace) -> None:
 
     @app.post("/api/analytics/datasets")
     async def create_dataset(request: Request) -> JSONResponse:
-        session = modeller(request)
         payload = await body(request)
+        session = may_change_dataset(request, None, payload if isinstance(payload, dict) else {})
         try:
             clean = store.clean_dataset(payload, adapters())
         except ValueError as exc:
@@ -241,7 +284,9 @@ def register(app: FastAPI, ctx: SimpleNamespace) -> None:
                   "createdBy": session["username"], "createdAt": when, "updatedBy": session["username"], "updatedAt": when}
         record["nextRefreshAt"] = next_refresh(record)
         store.save_dataset(record)
-        audit(request, session, "analytics.dataset.created", record["id"], {"name": record["name"], "adapter": record["connectionId"]})
+        audit(request, session, "analytics.dataset.created", record["id"],
+              {"name": record["name"], "adapter": record["connectionId"]} if not is_python(record)
+              else {"name": record["name"], "python": True, "inputs": record["inputs"], "scriptChars": len(record["querySource"])})
         if payload.get("refresh", True):
             record = refresher.request(record, "manual", session["username"])
         return JSONResponse({"dataset": dataset_view(record, True)}, status_code=201)
@@ -249,37 +294,42 @@ def register(app: FastAPI, ctx: SimpleNamespace) -> None:
     @app.get("/api/analytics/datasets/{dataset_id}")
     def get_dataset(request: Request, dataset_id: str) -> dict[str, Any]:
         session = user(request)
-        return {"dataset": dataset_view(find_dataset(dataset_id), may_model(session))}
+        return {"dataset": dataset_view(find_dataset(dataset_id), may_model(session), may_python(session))}
 
     @app.put("/api/analytics/datasets/{dataset_id}")
     async def update_dataset(request: Request, dataset_id: str) -> dict[str, Any]:
-        session = modeller(request)
         current = find_dataset(dataset_id)
         payload = await body(request)
+        session = may_change_dataset(request, current, payload if isinstance(payload, dict) else {})
         try:
             clean = store.clean_dataset(payload, adapters(), current)
         except ValueError as exc:
             raise bad(exc) from None
-        source_changed = any(clean[name] != current.get(name) for name in ("connectionId", "queryLanguage", "querySource", "collection"))
+        source_changed = any(clean.get(name) != current.get(name) for name in ("connectionId", "queryLanguage", "querySource", "collection",
+                                                                            "sourceKind", "inputs"))
         record = {**current, **clean, "updatedBy": session["username"], "updatedAt": store.now()}
         if clean["refreshEveryMinutes"] != current.get("refreshEveryMinutes"):
             record["nextRefreshAt"] = next_refresh(record)
         store.save_dataset(record)
-        audit(request, session, "analytics.dataset.changed", dataset_id, {"name": record["name"], "sourceChanged": source_changed})
+        audit(request, session, "analytics.dataset.changed", dataset_id, {"name": record["name"], "sourceChanged": source_changed,
+                                                                          **({"python": True, "inputs": record["inputs"]} if is_python(record) else {})})
         if source_changed and payload.get("refresh", True):
             record = refresher.request(record, "manual", session["username"])
         return {"dataset": dataset_view(record, True), "sourceChanged": source_changed}
 
     @app.delete("/api/analytics/datasets/{dataset_id}")
     async def delete_dataset(request: Request, dataset_id: str, force: bool = False) -> dict[str, Any]:
-        session = modeller(request)
         ctx.require_json_request(request)
         item = find_dataset(dataset_id)
+        session = may_change_dataset(request, item)
         # a dataset counts as used wherever a dashboard names it: a visual's own dataset, its group-by / values /
         # filters (a related dataset) or a page filter, the same check as the Admin delete
         users_of = [d["name"] for d in store.dashboards() if dataset_id in bundle.used_datasets(d)]
-        if users_of and not force:
-            raise HTTPException(status_code=409, detail=f"Used by the dashboard(s) {', '.join(users_of[:5])}: "
+        scripts = made_from(dataset_id)
+        if (users_of or scripts) and not force:
+            used = [f"the dashboard(s) {', '.join(users_of[:5])}" if users_of else "",
+                    f"the Python dataset(s) {', '.join(scripts[:5])}" if scripts else ""]
+            raise HTTPException(status_code=409, detail=f"Used by {' and '.join(u for u in used if u)}: "
                                                         "remove those visuals first, or delete with force=true")
         store.delete_dataset(dataset_id)
         importer.remove_old_files(dataset_id, keep="")
@@ -288,9 +338,10 @@ def register(app: FastAPI, ctx: SimpleNamespace) -> None:
 
     @app.post("/api/analytics/datasets/{dataset_id}/refresh")
     async def refresh_dataset(request: Request, dataset_id: str) -> JSONResponse:
-        session = modeller(request)
         ctx.require_json_request(request)
-        item = refresher.request(find_dataset(dataset_id), "manual", session["username"])
+        current = find_dataset(dataset_id)
+        session = python_user(request) if is_python(current) and not may_model(user(request)) else modeller(request)
+        item = refresher.request(current, "manual", session["username"])
         return JSONResponse({"dataset": dataset_view(item, True)}, status_code=202)
 
     @app.get("/api/analytics/datasets/{dataset_id}/refreshes")
@@ -305,6 +356,27 @@ def register(app: FastAPI, ctx: SimpleNamespace) -> None:
         item = find_dataset(dataset_id)
         with ctx.run_gate.slot(caller_of("", user=session["username"])):
             return engine.sample(item, max(1, min(limit, 500)))
+
+    # ------------------------------------------------------------- Python scripts
+    @app.post("/api/analytics/python/run")
+    def run_python(request: Request, payload: dict[str, Any]) -> dict[str, Any]:
+        """Try a script: {script, inputs: [dataset IDs], datasetId (when changing one)} → the first rows, the printed
+        output or the error. Nothing is saved (save it as a dataset with sourceKind "python")."""
+        session = python_user(request)
+        ctx.require_json_request(request)
+        try:
+            source = pyscript.clean_source(payload, store.dataset, str(payload.get("datasetId") or ""))
+            inputs = [find_dataset(dataset_id) for dataset_id in source["inputs"]]
+            with ctx.run_gate.slot(caller_of("", user=session["username"])):
+                result = pyscript.run(source["script"], inputs)
+        except ValueError as exc:
+            audit(request, session, "analytics.python.run", ",".join(str(i) for i in (payload.get("inputs") or []))[:200],
+                  {"ok": False, "error": str(exc)[:300]})
+            raise bad(exc) from None
+        audit(request, session, "analytics.python.run", ",".join(source["inputs"])[:200],
+              {"ok": result["ok"], "rows": result["rowCount"], "durationMs": result["durationMs"], "scriptChars": len(source["script"]),
+               "sha256": hashlib.sha256(source["script"].encode("utf-8")).hexdigest()[:16], "error": result["error"][:300]})
+        return result
 
     # ------------------------------------------------------------- relationships
     @app.get("/api/analytics/relationships")
@@ -481,6 +553,7 @@ def register(app: FastAPI, ctx: SimpleNamespace) -> None:
     def server_dashboard(request: Request, dashboard_id: str, needed: int = permissions.RUN,
                          minimum: str = "viewer") -> tuple[dict[str, Any], dict[str, Any]]:
         session = ctx.require_session(request, minimum)
+        access.require_server_dashboards(session)
         item = store.dashboard(dashboard_id)
         if item is None or not sees(session, item):
             raise HTTPException(status_code=404, detail="This dashboard is not on the server")
@@ -541,6 +614,7 @@ def register(app: FastAPI, ctx: SimpleNamespace) -> None:
     @app.post("/api/server/dashboards/upload")
     async def server_upload_dashboard(request: Request) -> JSONResponse:
         session = ctx.require_session(request, "designer")
+        access.require_server_dashboards(session)
         payload = await json_body(request)
         try:
             folder = normalize_folder_path(payload.get("folder") or "General")

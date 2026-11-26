@@ -198,3 +198,33 @@ body:has(.adm-new) { background: var(--bg); }
 .dev-answer small { font-size: 12px; color: var(--muted); line-height: 1.4; }
 @media (max-width: 900px) { .dev-page { grid-template-columns: minmax(0, 1fr); } .dev-wire { width: 18px; } }
 @media (prefers-reduced-motion: reduce) { .dev-page *, .dev-page { animation: none !important; transition: none !important; } }
+
+/* Users & rights: sections as tabs (Teams no longer hides below the form), a search and pages for many accounts */
+.ut { display: grid; gap: 16px; }
+.ut-one { display: grid; gap: 16px; }
+.ut-tabs { display: flex; flex-wrap: wrap; gap: 6px; padding: 4px; border: 2px solid var(--text); background: var(--panel); box-shadow: 4px 4px 0 var(--accent); width: fit-content; max-width: 100%; }
+.ut-tabs button { display: inline-flex; align-items: center; gap: 7px; padding: 8px 14px; border: 0; background: transparent; color: var(--muted); font: inherit; font-weight: 700; cursor: pointer; }
+.ut-tabs button:hover { color: var(--text); background: var(--soft); }
+.ut-tabs button.on { background: var(--text); color: var(--panel); }
+.ut-tabs em { font-style: normal; font-family: var(--mono, ui-monospace, monospace); font-size: 11px; padding: 0 6px; border: 1px solid currentColor; }
+.ut-find { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; gap: 8px; margin-top: 12px; }
+.ut-find select { width: auto; }
+.ut-count { display: flex; align-items: center; gap: 8px; margin: 10px 0 8px; color: var(--muted); font-family: var(--mono, ui-monospace, monospace); font-size: 12px; }
+.ut-pager { display: flex; align-items: center; justify-content: center; gap: 12px; margin-top: 12px; font-family: var(--mono, ui-monospace, monospace); font-size: 12px; color: var(--muted); }
+.team-find { margin-bottom: 8px; }
+.team-members { max-height: 260px; overflow: auto; }
+@media (max-width: 720px) { .ut-find { grid-template-columns: 1fr; } }
+
+/* API keys: which are in use, which nobody uses */
+.ak-tools { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin: 12px 0 4px; }
+.ak-tools input { flex: 1 1 200px; width: auto; }
+.ak-filters { display: flex; flex-wrap: wrap; gap: 4px; padding: 3px; border: 2px solid var(--line); }
+.ak-filters button { display: inline-flex; align-items: center; gap: 6px; padding: 5px 10px; border: 0; background: transparent; color: var(--muted); font: inherit; font-size: 12.5px; font-weight: 700; cursor: pointer; }
+.ak-filters button.on { background: var(--text); color: var(--panel); }
+.ak-filters em { font-style: normal; font-family: var(--mono, ui-monospace, monospace); font-size: 11px; }
+.ak-state, .ak-calls { display: inline-block; margin-left: 8px; padding: 1px 7px; border: 1.5px solid currentColor; font: 700 10.5px/1.5 var(--mono, ui-monospace, monospace); text-transform: uppercase; letter-spacing: .04em; vertical-align: 2px; }
+.ak-state.ok { color: var(--ok, #15803d); }
+.ak-state.warn { color: #c77700; }
+.ak-state.bad { color: var(--danger, #d64545); }
+.ak-state.muted, .ak-calls { color: var(--muted); }
+.ak-item.ak-never, .ak-item.ak-idle { border-left: 4px solid #c77700; }

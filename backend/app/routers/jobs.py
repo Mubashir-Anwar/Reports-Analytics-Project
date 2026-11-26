@@ -18,6 +18,7 @@ from backend.app.jobs.runner import JobRunner
 from backend.app.logs import LOG
 from backend.app.security import permissions
 from backend.app.security.users import role_at_least
+from backend.app.services import access
 
 MEDIA = {"pdf": "application/pdf", "csv": "text/csv; charset=utf-8",
          "xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"}
@@ -197,6 +198,7 @@ def register(app: FastAPI, ctx: SimpleNamespace) -> None:
         """Like Run, but the file is made in the background and kept under Runs (for big reports)."""
         session = require_session(request)
         require_json_request(request)
+        access.require_server_reports(session)
         definition = ctx.require_report(session, report_id, permissions.RUN, folder=clean_folder(request.query_params.get("folder")))
         payload = await json_body(request)
         output_format = str(payload.get("format", "pdf")).lower()
