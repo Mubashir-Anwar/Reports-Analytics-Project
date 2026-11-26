@@ -25,7 +25,8 @@ export const bi = {
   createDashboard: (body) => request('/api/analytics/dashboards', { method: 'POST', body }),
   saveDashboard: (dashId, body) => request(`/api/analytics/dashboards/${id(dashId)}`, { method: 'PUT', body }),
   deleteDashboard: (dashId) => request(`/api/analytics/dashboards/${id(dashId)}`, { method: 'DELETE' }),
-  dashboardFile: (dashId) => request(`/api/analytics/dashboards/${id(dashId)}/file`),
+  /** withData: also the imported records (Parquet), so it opens on a server without the database */
+  dashboardFile: (dashId, withData = false) => request(`/api/analytics/dashboards/${id(dashId)}/file${withData ? '?data=true' : ''}`),
   importDashboard: (body) => request('/api/analytics/dashboards/import', { method: 'POST', body }),
   inspectPowerBi: (body) => request('/api/analytics/powerbi/inspect', { method: 'POST', body }),
   importPowerBi: (body) => request('/api/analytics/powerbi/import', { method: 'POST', body }),
@@ -85,10 +86,10 @@ export const describeBytes = (bytes) => {
 
 /** Save a dashboard file (.mdash) that the server sent as JSON. */
 export function saveDashboardFile(content, name) {
-  const blob = new Blob([JSON.stringify(content, null, 2)], { type: 'application/json' });
+  const blob = new Blob([JSON.stringify(content, null, content.withData ? 0 : 2)], { type: 'application/json' });
   const link = document.createElement('a');
   link.href = URL.createObjectURL(blob);
-  link.download = `${(name || 'dashboard').replace(/[^\w\- ]+/g, '_').trim() || 'dashboard'}.mdash`;
+  link.download = `${(name || 'dashboard').replace(/[^\w\- ]+/g, '_').trim() || 'dashboard'}${content.withData ? ' (with data)' : ''}.mdash`;
   document.body.append(link);
   link.click();
   link.remove();

@@ -1,6 +1,9 @@
 // /analytics: dashboards, datasets and the model. Needs the Analytics right; datasets and the model also the
 // Designer or Admin right. Addresses: #dash/<id>, #ds/<id>, #ds/new, #model, #q/<id>, #q/new (DAX / SQL queries),
 // #sources (its data sources), #ml (ML lab), #embed/<dashboard> (how to show it in a website).
+import SiteFooter from '../shared/SiteFooter.jsx';
+import PixelField from '../shared/PixelField.jsx';
+import Resizer, { useStoredWidth } from '../shared/Resizer.jsx';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Notice, Topbar } from '../portal/Shell.jsx';
 import { signOut } from '../shared/session.js';
@@ -22,6 +25,42 @@ const readHash = () => {
   return ['dash', 'ds', 'model', 'q', 'ml', 'embed', 'sources'].includes(kind) ? { kind, id: id || '' } : { kind: 'home', id: '' };
 };
 
+/** A number (or "a/b", "a · b") that counts up from 0 when the page opens. */
+function CountUp({ value }) {
+  const text = String(value);
+  const parts = text.split(/(\d[\d,]*)/);
+  const [t, setT] = useState(() => (window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ? 1 : 0));
+  useEffect(() => {
+    if (t >= 1) return undefined;
+    const began = performance.now();
+    let frame;
+    const step = (now) => { const k = Math.min(1, (now - began) / 900); setT(1 - (1 - k) ** 3); if (k < 1) frame = requestAnimationFrame(step); };
+    frame = requestAnimationFrame(step);
+    return () => cancelAnimationFrame(frame);
+  }, [text]); // eslint-disable-line react-hooks/exhaustive-deps
+  return <>{parts.map((part, i) => (/^\d/.test(part) ? Math.round(Number(part.replace(/,/g, '')) * t).toLocaleString() : part))}</>;
+}
+
+/** Download a dashboard as one .mdash file: with its data (like a Power BI file) or definitions only. */
+function DownloadMenu({ onPick }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <span className="bi-dl" onBlur={(event) => { if (!event.currentTarget.contains(event.relatedTarget)) setOpen(false); }}>
+      <button type="button" className="btn" aria-expanded={open} onClick={() => setOpen(!open)} title="Save this dashboard as one file (.mdash)">⤓ Download ▾</button>
+      {open && (
+        <span className="bi-dl-menu px-in" role="menu">
+          <button type="button" role="menuitem" onClick={() => { setOpen(false); onPick(true); }}>
+            <b>📦 With data</b><small>The dashboard, its datasets and their records. Opens on any server, even without the database (up to 15 MB of data).</small>
+          </button>
+          <button type="button" role="menuitem" onClick={() => { setOpen(false); onPick(false); }}>
+            <b>📄 Definitions only</b><small>Small file. The other server imports the data from its own database.</small>
+          </button>
+        </span>
+      )}
+    </span>
+  );
+}
+
 export default function AnalyticsApp() {
   const [info, setInfo] = useState(null);
   const [denied, setDenied] = useState('');
@@ -31,6 +70,7 @@ export default function AnalyticsApp() {
   const [dashboards, setDashboards] = useState([]);
   const [savedQueries, setSavedQueries] = useState([]);
   const [message, setMessage] = useState(null);
+  const [sideWidth, setSideWidth] = useStoredWidth('bi-side-width', 250, 190, 520);
   const notify = useCallback((text, kind = 'ok') => setMessage(text ? { text, kind } : null), []);
 
   const reload = useCallback(async () => {
@@ -111,8 +151,12 @@ Type the ID of the data adapter to use: ${info.adapters.map((a) => a.id).join(',
     const notes = result.notes.length ? ` Left out: ${result.notes.slice(0, 5).join('; ')}${result.notes.length > 5 ? ` and ${result.notes.length - 5} more` : ''}.` : '';
     window.setTimeout(() => notify(`${parts.join(', ')}.${notes}`, result.notes.length ? 'warn' : 'ok'), 60);
   };
-  const downloadDashboard = async (entry) => {
-    try { saveDashboardFile(await bi.dashboardFile(entry.id), entry.name); } catch (error) { notify(error.message, 'error'); }
+  const downloadDashboard = async (entry, withData = false) => {
+    try {
+      saveDashboardFile(await bi.dashboardFile(entry.id, withData), entry.name);
+      notify(withData ? `Downloaded “${entry.name} (with data).mdash”: it opens on another server even without the database.`
+        : `Downloaded “${entry.name}.mdash”: definitions only; the other server imports the data from its database.`, 'ok');
+    } catch (error) { notify(error.message, 'error'); }
   };
 
   if (denied) {
@@ -139,8 +183,12 @@ Type the ID of the data adapter to use: ${info.adapters.map((a) => a.id).join(',
     <>
       <Topbar current="/analytics" />
       <AnalyticsRibbon info={info} view={view} go={go} onNewDashboard={newDashboard} onImport={() => picker.current?.click()}
+        dashName={view.kind === 'dash' ? dashboards.find((d) => d.id === view.id)?.name : ''}
+        onDownload={(withData) => { const entry = dashboards.find((d) => d.id === view.id); if (entry) downloadDashboard(entry, withData); }}
         onRefreshAll={refreshAll} onReload={reload} readyCount={datasets.filter((d) => d.status === 'ready').length} />
-      <div className="bi bi-new">
+      <div className="bi bi-new" style={{ '--bi-side': `${sideWidth}px` }}>
+        <Resizer width={sideWidth} onWidth={setSideWidth} normal={250} min={190} max={520} label="Contents width" className="bi-resizer"
+          style={{ left: sideWidth - 5, right: 'auto' }} />
         <aside className="bi-side" aria-label="Analytics contents">
           <div className="bi-group">
             <div className="bi-group-head"><span>Dashboards <em className="bi-count">{dashboards.length}</em></span><span className="row tight">
@@ -190,7 +238,7 @@ Type the ID of the data adapter to use: ${info.adapters.map((a) => a.id).join(',
                 const entry = dashboards.find((d) => d.id === view.id);
                 const embed = entry ? <a className="btn" href={`#embed/${entry.id}`} title="Show this dashboard inside another website">Embed</a> : null;
                 return entry && (info.mayModel || entry.mayChange)
-                  ? <>{embed}<button type="button" className="btn" onClick={() => downloadDashboard(entry)} title="One .mdash file with the dashboard and its datasets' definitions (no data), to upload to another server or folder">Download</button></>
+                  ? <>{embed}<DownloadMenu onPick={(withData) => downloadDashboard(entry, withData)} /></>
                   : embed;
               })()} />
           )}
@@ -211,6 +259,7 @@ Type the ID of the data adapter to use: ${info.adapters.map((a) => a.id).join(',
           {view.kind === 'model' && <ModelView datasets={datasets} relationships={relationships} mayModel={info.mayModel} notify={notify} onChanged={reload} />}
         </main>
       </div>
+      <SiteFooter />
     </>
   );
 }
@@ -235,13 +284,18 @@ function Home({ info, datasets, dashboards, queries, relationships, onNew }) {
   ];
   return (
     <div className="stack bi-home">
-      <div className="page-head bi-hero"><div><p className="eyebrow">Analytics</p><h1>Dashboards from your data</h1>
-        <p className="muted">Import data from any data adapter into a dataset, relate datasets in the model, then build dashboards with charts, cards, tables and slicers. Clicking a bar or a slice filters the rest of the dashboard.</p></div>
-        <span className="bi-hero-art" aria-hidden="true">{[38, 62, 48, 84, 56, 72].map((h, i) => <i key={i} style={{ height: `${h}%`, animationDelay: `${0.15 + i * 0.07}s` }} />)}</span>
+      <div className="page-head bi-hero bi-hero-px px-in"><div><p className="px-kicker"><b>04</b> — Analytics</p><h1>Dashboards from your data<span className="px-caret" aria-hidden="true" /></h1>
+        <p className="muted">Import data from any data adapter into a dataset, relate datasets in the model, then build dashboards with charts, cards, tables and slicers. Clicking a bar or a slice filters the rest of the dashboard.</p>
+        <div className="bi-hero-go">
+          {info.mayModel && <button type="button" className="btn primary" onClick={onNew}>＋ New dashboard</button>}
+          {info.mayModel && <a className="btn" href="#ds/new">＋ Dataset</a>}
+          <a className="btn" href="#model">⇄ Model</a>
+        </div></div>
+        <span className="bi-hero-art bi-hero-pixels" aria-hidden="true"><PixelField cell={9} gap={3} bars={10} label="Analytics" /></span>
       </div>
       <div className="bi-kpis">
         {kpis.map(([label, value, note, tint], i) => (
-          <div key={label} className={`bi-kpi tint-${tint}`} style={{ '--i': i }}><small>{label}</small><strong>{value}</strong><span>{note}</span></div>
+          <div key={label} className={`bi-kpi tint-${tint}`} style={{ '--i': i }}><small>{label}</small><strong><CountUp value={value} /></strong><span>{note}</span></div>
         ))}
       </div>
       <ol className="bi-steps">

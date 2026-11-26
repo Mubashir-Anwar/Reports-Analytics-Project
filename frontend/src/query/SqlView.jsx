@@ -5,6 +5,7 @@ import { api } from '../api.js';
 import CodeArea from '../CodeArea.jsx';
 import Grid from './Grid.jsx';
 import UseQuery from './UseQuery.jsx';
+import { SaveQueryButton } from '../shared/SavedQueries.jsx';
 import QueryHelper from './QueryHelper.jsx';
 import { HelperButton } from './MongoView.jsx';
 import { buildSql, emptyHelper, fieldTypes, newFilter } from './queryHelper.js';
@@ -51,6 +52,8 @@ export default function SqlView({ tab, onChange, notify }) {
         <label className="qs-limit">Rows <select value={tab.limit || 200} onChange={(e) => onChange({ limit: Number(e.target.value) })}>{[50, 200, 1000, 5000].map((n) => <option key={n}>{n}</option>)}</select></label>
         <span className="grow" />
         <button type="button" className="btn sm" disabled={!sql.trim()} onClick={() => { navigator.clipboard?.writeText(sql); notify('Copied the SQL'); }}>Copy</button>
+        <SaveQueryButton disabled={!sql.trim()} saved={tab.saved} notify={notify} onSaved={(item) => onChange({ saved: item, title: item.name })}
+          query={() => ({ kind: 'sql', connectionId: tab.connectionId, text: sql })} />
         <UseQuery disabled={!sql.trim()} query={() => ({ connectionId: tab.connectionId, queryLanguage: 'sql', querySource: sql })} />
       </div>
       <CodeArea ref={area} rows={9} value={sql} onChange={(e) => onChange({ sql: e.target.value })}

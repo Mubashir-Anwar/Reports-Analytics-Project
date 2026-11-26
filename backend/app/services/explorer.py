@@ -55,21 +55,27 @@ def _limit(value: Any, default: int, top: int) -> int:
 
 
 # ------------------------------------------------------------------ MongoDB
-def mongo_collections(db: Any, max_time_ms: int = 5000) -> list[dict[str, Any]]:
-    out = []
-    for info in db.list_collections():
+def mongo_collections(db: Any, max_time_ms: int = 5000, search: str = "", offset: int = 0, limit: int = 50) -> dict[str, Any]:
+    """One page of the collections (names only from the server, counts only for this page), optionally those whose
+    name contains `search`. A database with thousands of collections does not load them all."""
+    flt = {"name": {"$regex": re.escape(search.strip()), "$options": "i"}} if search.strip() else None
+    infos = []
+    for info in db.list_collections(filter=flt, authorizedCollections=True, nameOnly=True):
         name = info.get("name", "")
-        if not name or SYSTEM_COLLECTION.match(name):
-            continue
-        kind = info.get("type", "collection")
-        item = {"name": name, "type": kind, "count": None}
-        if kind == "collection" and len(out) < 300:
+        if name and not SYSTEM_COLLECTION.match(name):
+            infos.append({"name": name, "type": info.get("type", "collection")})
+    infos.sort(key=lambda c: c["name"].lower())
+    offset = max(0, offset)
+    limit = max(1, min(limit, 500))
+    page = infos[offset:offset + limit]
+    for item in page:
+        item["count"] = None
+        if item["type"] == "collection":
             try:
-                item["count"] = db[name].estimated_document_count(maxTimeMS=max_time_ms)
+                item["count"] = db[item["name"]].estimated_document_count(maxTimeMS=max_time_ms)
             except Exception:  # noqa: BLE001 - no read right on this one: still listed
                 item["count"] = None
-        out.append(item)
-    return sorted(out, key=lambda c: c["name"].lower())
+    return {"collections": page, "total": len(infos), "offset": offset, "more": offset + len(page) < len(infos)}
 
 
 def mongo_find(db: Any, collection: str, payload: dict[str, Any], max_time_ms: int) -> dict[str, Any]:

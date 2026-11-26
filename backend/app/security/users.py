@@ -25,6 +25,12 @@ def set_user_password(user: dict[str, Any], password: str) -> None:
     """Store a new salted hash (current iteration count) on the user record."""
     user["salt"], user["hash"] = _hash_password(password)
     user["iterations"] = PASSWORD_ITERATIONS
+    if user.get("username"):                 # a new password unlocks an account locked by wrong passwords
+        from backend.app.security import shared_state  # noqa: PLC0415
+        try:
+            shared_state.clear_failures(shared_state.account_key(user["username"]))
+        except (OSError, ValueError):
+            pass
 
 
 def password_needs_upgrade(user: dict[str, Any]) -> bool:

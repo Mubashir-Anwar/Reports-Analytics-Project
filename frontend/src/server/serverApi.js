@@ -19,9 +19,14 @@ async function call(path, { method = 'GET', body, raw = false } = {}) {
     if (response.status === 404 && (!detail || detail === 'Not Found')) {
       detail = 'The server does not have this feature yet (HTTP 404): it is still running an older version. Restart the reporting service (uvicorn) and reload this page.';
     }
-    if (detail && typeof detail === 'object') detail = detail.message || '';
+    const info = detail && typeof detail === 'object' ? detail : null;
+    if (info) detail = info.message || '';
     const error = new Error(typeof detail === 'string' && detail ? detail : `Request failed (HTTP ${response.status})`);
     error.status = response.status;
+    if (info && typeof info.attemptsLeft === 'number') {
+      Object.assign(error, { attemptsLeft: info.attemptsLeft, lockMinutes: info.lockMinutes, failed: info.failed,
+        maxFailures: info.maxFailures, retryAfter: info.retryAfter });
+    }
     if (response.status === 401 && path !== '/api/server/login' && path !== '/api/server/me') onSignedOut();
     throw error;
   }
@@ -57,7 +62,7 @@ export const serverApi = {
   // dashboards (Analytics) published in the same folders
   dashboard: (id) => call(`/api/server/dashboards/${encodeURIComponent(id)}`),
   dashboardQuery: (id, queries, filters) => call(`/api/server/dashboards/${encodeURIComponent(id)}/query-batch`, { method: 'POST', body: { queries, filters } }),
-  dashboardFile: (id) => call(`/api/server/dashboards/${encodeURIComponent(id)}/file`),
+  dashboardFile: (id, withData = false) => call(`/api/server/dashboards/${encodeURIComponent(id)}/file${withData ? '?data=true' : ''}`),
   moveDashboard: (id, folder) => call(`/api/server/dashboards/${encodeURIComponent(id)}/move`, { method: 'POST', body: { folder } }),
   deleteDashboard: (id) => call(`/api/server/dashboards/${encodeURIComponent(id)}`, { method: 'DELETE', body: {} }),
   uploadDashboard: (body) => call('/api/server/dashboards/upload', { method: 'POST', body }),

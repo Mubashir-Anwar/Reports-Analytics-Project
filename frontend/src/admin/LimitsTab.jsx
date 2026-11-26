@@ -5,6 +5,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { request } from '../api.js';
 
 const GROUP_LOOK = {
+  signin: { icon: '🔒', tint: 'a', hint: 'Wrong passwords: how many before an account is locked, and for how long.' },
   reports: { icon: '📄', tint: 'b', hint: 'Protect the server when many people run reports at once.' },
   downloads: { icon: '📦', tint: 'g', hint: 'Files asked for with X-Deliver: later.' },
   analytics: { icon: '📊', tint: 'c', hint: 'Dataset imports and dashboard queries (DuckDB).' },

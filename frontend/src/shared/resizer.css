@@ -1,0 +1,14 @@
+/* The drag handle between a side panel and the page (PixelFX look: a pixel grip, a hard accent line while dragging). */
+.fx-resizer { position: absolute; top: 0; bottom: 0; width: 10px; z-index: 20; cursor: col-resize; touch-action: none; display: grid; place-items: center; outline: none; }
+.fx-resizer.edge-right { right: -5px; }
+.fx-resizer.edge-left { left: -5px; }
+.fx-resizer::before { content: ""; position: absolute; top: 0; bottom: 0; left: 4px; width: 2px; background: transparent; transition: background .15s; }
+.fx-resizer:hover::before, .fx-resizer:focus-visible::before, .fx-resizer.on::before { background: var(--accent, #6366f1); }
+.fx-resizer-grip { position: relative; display: grid; gap: 3px; padding: 5px 2px; background: var(--panel, #fff); border: 2px solid var(--line, #cbd5e1); opacity: 0; transition: opacity .15s; }
+.fx-resizer-grip i { width: 3px; height: 3px; background: var(--muted, #64748b); }
+.fx-resizer:hover .fx-resizer-grip, .fx-resizer:focus-visible .fx-resizer-grip, .fx-resizer.on .fx-resizer-grip { opacity: 1; border-color: var(--text, #0f172a); box-shadow: 2px 2px 0 var(--accent, #6366f1); }
+.fx-resizer.on .fx-resizer-grip i { background: var(--accent, #6366f1); }
+.fx-resizer-size { position: absolute; top: 50%; margin-top: 26px; padding: 1px 6px; background: var(--text, #0f172a); color: var(--panel, #fff);
+  font: 700 10.5px/1.5 ui-monospace, Consolas, monospace; white-space: nowrap; pointer-events: none; }
+:root.fx-resizing, :root.fx-resizing * { cursor: col-resize !important; user-select: none !important; }
+@media (max-width: 900px) { .fx-resizer { display: none; } }

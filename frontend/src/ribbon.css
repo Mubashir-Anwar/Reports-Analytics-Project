@@ -275,3 +275,32 @@
 .fonts-files > span { display: inline-flex; gap: 6px; align-items: center; padding: 2px 4px 2px 9px; border: 1px solid var(--line); border-radius: 99px; font-size: 12px; }
 .fonts-files button { width: 20px; height: 20px; padding: 0; border: 0; border-radius: 50%; background: transparent; color: inherit; cursor: pointer; }
 .fonts-files button:hover { background: #fdeaea; color: #8f1d1d; }
+
+/* The report bar stays on one line on laptop screens: the search box becomes an icon, then Check loses its word */
+@media (min-width: 901px) {
+  .rb-bar { flex-wrap: nowrap; }
+  .rb-doc { flex: 0 1 auto; min-width: 0; }
+  .rb-views, .rb-quickbar, .rb-search { flex: none; }
+}
+@media (max-width: 1360px) {
+  .rb-search { min-width: 0; }
+  .rb-search .lbl, .rb-search kbd { display: none; }
+}
+@media (max-width: 1200px) {
+  .rb-check .lbl { display: none; }
+  .rb-views button { padding: 0 9px; }
+  .rb-bar { gap: 6px; padding-left: 10px; padding-right: 10px; }
+}
+/* slim navigation bar (the ⌃ button in the top bar): the report bar gets lower too, more room for the canvas */
+:root[data-nav="slim"] .rb-bar { min-height: 0; padding-top: 4px; padding-bottom: 4px; }
+:root[data-nav="slim"] .rb-doc { min-height: 34px; padding-top: 2px; padding-bottom: 2px; }
+:root[data-nav="slim"] .rb-doc-text small { display: none; }
+:root[data-nav="slim"] .rb-quick, :root[data-nav="slim"] .rb-check, :root[data-nav="slim"] .rb-publish, :root[data-nav="slim"] .rb-search { height: 32px; }
+:root[data-nav="slim"] .rb-quick { width: 32px; }
+:root[data-nav="slim"] .rb-views button { height: 26px; }
+@media (min-width: 761px) and (max-width: 1024px) {
+  .rb-bar { gap: 4px; padding-left: 6px; padding-right: 6px; }
+  .rb-views button { padding: 0 7px; font-size: 12px; }
+  .rb-quickbar { gap: 4px; }
+  .rb-doc-text small { display: none; }
+}

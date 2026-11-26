@@ -78,6 +78,18 @@ function Replaced({ notice }) {
   );
 }
 
+const EMOJIS = ['👋', '👍', '🔥', '✅', '😂', '🙏', '👀', '🎉'];
+const WAVE = [6, 8, 15, 19, 21, 22, 23];   // a pixel smiley in a 5x5 grid for the empty chat
+const dayOf = (at) => {
+  const date = new Date(at);
+  if (Number.isNaN(date.getTime())) return '';
+  const today = new Date();
+  const yesterday = new Date(today.getFullYear(), today.getMonth(), today.getDate() - 1);
+  if (date.toDateString() === today.toDateString()) return 'Today';
+  if (date.toDateString() === yesterday.toDateString()) return 'Yesterday';
+  return date.toLocaleDateString(undefined, { weekday: 'short', day: 'numeric', month: 'short' });
+};
+
 function ChatPanel({ me, people, users, messages, chat, setChat, onSend, onClose, place }) {
   const [text, setText] = useState('');
   const [busy, setBusy] = useState(false);
@@ -104,13 +116,20 @@ function ChatPanel({ me, people, users, messages, chat, setChat, onSend, onClose
     try { await onSend(text.trim(), chat || null); setText(''); } catch (failure) { setError(failure.message); } finally { setBusy(false); }
   };
   const person = chat ? people.find((p) => p.username.toLowerCase() === chat.toLowerCase()) : null;
+  const box = useRef(null);
+  const addEmoji = (emoji) => { setText((value) => `${value}${value && !value.endsWith(' ') ? ' ' : ''}${emoji} `); box.current?.focus(); };
+  const sayHi = async () => { setBusy(true); try { await onSend('Hi 👋', chat || null); } catch (failure) { setError(failure.message); } finally { setBusy(false); } };
+  let lastDay = '';
   return (
-    <aside className="tm-chat" aria-label="Team chat">
+    <aside className="tm-chat tm-px" aria-label="Team chat">
       <header className="tm-chat-head">
-        <b>Team chat</b>
-        <select value={chat} onChange={(e) => setChat(e.target.value)} aria-label="Write to">
-          <option value="">Everyone</option>
-          {[...new Set([...users, ...talkedTo])].map((u) => <option key={u} value={u}>{u}{online.has(u.toLowerCase()) ? ' ●' : ''}</option>)}
+        <div className="tm-title">
+          <p className="tm-kicker"><b>◆</b> Team chat<span className="tm-caret" aria-hidden="true" /></p>
+          <span className="tm-online"><i aria-hidden="true" />{people.length ? `${people.length} more online` : 'only you right now'}</span>
+        </div>
+        <select value={chat} onChange={(e) => setChat(e.target.value)} aria-label="Write to" title="Start a chat with someone">
+          <option value="">＃ Everyone</option>
+          {[...new Set([...users, ...talkedTo])].map((u) => <option key={u} value={u}>{online.has(u.toLowerCase()) ? '● ' : '○ '}{u}</option>)}
         </select>
         <button type="button" className="tm-x" aria-label="Close chat" onClick={onClose}>✕</button>
       </header>
@@ -130,24 +149,37 @@ function ChatPanel({ me, people, users, messages, chat, setChat, onSend, onClose
           : 'Messages to everyone who can sign in.'}
       </p>
       <div className="tm-messages" ref={list}>
-        {shown.length === 0 && <p className="muted tm-empty">No messages yet. Say hello 👋</p>}
+        {shown.length === 0 && (
+          <div className="tm-empty">
+            <span className="tm-empty-art" aria-hidden="true">{Array.from({ length: 25 }, (_, i) => <i key={i} className={WAVE.includes(i) ? 'on' : ''} style={{ '--i': i }} />)}</span>
+            <b>It is quiet here</b>
+            <p className="muted">{chat ? `Start the chat with ${chat}.` : 'Be the first to say something.'}</p>
+            <button type="button" className="tm-hi" disabled={busy} onClick={sayHi}>Say hi 👋</button>
+          </div>
+        )}
         {shown.map((m) => {
           const mine = m.from.toLowerCase() === me.toLowerCase();
-          return (
+          const day = dayOf(m.at);
+          const divider = day !== lastDay ? <div key={`d-${m.id}`} className="tm-day"><span>{day}</span></div> : null;
+          lastDay = day;
+          return [divider,
             <div key={m.id} className={`tm-msg ${mine ? 'mine' : ''}`}>
               {!mine && <Avatar name={m.from} size={22} />}
               <div>
                 <small>{mine ? 'You' : m.from} · {time(m.at)}{m.place ? ` · ${m.place}` : ''}</small>
                 <p>{m.text}</p>
               </div>
-            </div>
-          );
+            </div>];
         })}
       </div>
+      <div className="tm-emojis" role="group" aria-label="Add an emoji">
+        {EMOJIS.map((emoji) => <button key={emoji} type="button" onClick={() => addEmoji(emoji)} aria-label={`Add ${emoji}`}>{emoji}</button>)}
+        {text.length > 1800 && <span className="tm-left">{2000 - text.length} left</span>}
+      </div>
       <form className="tm-send" onSubmit={send}>
-        <textarea rows={2} value={text} maxLength={2000} placeholder={chat ? `Message ${chat}…` : 'Message everyone…'}
+        <textarea ref={box} rows={2} value={text} maxLength={2000} placeholder={chat ? `Message ${chat}… (Enter sends)` : 'Message everyone… (Enter sends)'}
           onChange={(e) => setText(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) send(e); }} />
-        <button type="submit" className="btn primary" disabled={busy || !text.trim()}>Send</button>
+        <button type="submit" className="btn primary tm-go" disabled={busy || !text.trim()} aria-label="Send">{busy ? '…' : <>Send <span aria-hidden="true">➜</span></>}</button>
       </form>
       {place?.title && <p className="tm-chat-foot">Sent from: {place.title}</p>}
       {error && <p className="tm-error">{error}</p>}
@@ -247,7 +279,11 @@ export default function TeamBar({ app }) {
       </div>
       <button type="button" className={`tm-chat-btn ${open ? 'on' : ''}`} onClick={() => setOpen(!open)}
         title={`Team chat${people.length ? ` · ${people.length} online` : ''}`} aria-label="Team chat">
-        💬{unread > 0 && <span className="tm-badge">{unread > 99 ? '99+' : unread}</span>}
+        <svg viewBox="0 0 16 16" width="18" height="18" aria-hidden="true" className="tm-chat-ico" shapeRendering="crispEdges">
+          <path fill="currentColor" d="M2 2h12v1H2zM1 3h1v8H1zM14 3h1v8h-1zM2 11h3v1H2zM8 11h6v1H8zM5 12h1v2H5zM6 13h1v-1h1v-1H7v1H6z" />
+          <rect x="4" y="6" width="2" height="2" fill="currentColor" /><rect x="7" y="6" width="2" height="2" fill="currentColor" /><rect x="10" y="6" width="2" height="2" fill="currentColor" />
+        </svg>
+        {unread > 0 && <span className="tm-badge">{unread > 99 ? '99+' : unread}</span>}
       </button>
       {open && <ChatPanel me={me} people={people} users={users} messages={messages} chat={chat} setChat={setChat} onSend={send} onClose={() => setOpen(false)} place={place} />}
       {toast && !open && (

@@ -1,7 +1,7 @@
 // The Analytics ribbon (like the Designer's): tabs Home, Insert, Query, Data and View with grouped buttons.
 // Buttons call the page's own actions; a dashboard and the query editor listen for window events
 // ('bi-command' and 'bi-query'), so nothing here has its own logic.
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { RIcon } from '../Ribbon.jsx';
 import { TypeIcon, VISUAL_TYPES } from './VisualEditor.jsx';
 import '../ribbon.css';
@@ -27,7 +27,25 @@ const Group = ({ label, children }) => (
 );
 const Stack = ({ children }) => <div className="rb-stack">{children}</div>;
 
-export default function AnalyticsRibbon({ info, view, go, onNewDashboard, onImport, onRefreshAll, onReload, readyCount }) {
+export default function AnalyticsRibbon({ info, view, go, onNewDashboard, onImport, onRefreshAll, onReload, readyCount, dashName, onDownload }) {
+  // the File menu on the Analytics button (like the Designer's): new, open, save, download, publish
+  const [menu, setMenu] = useState(false);
+  const menuBox = useRef(null);
+  useEffect(() => {
+    if (!menu) return undefined;
+    const close = (event) => { if (!menuBox.current?.contains(event.target)) setMenu(false); };
+    const esc = (event) => { if (event.key === 'Escape') setMenu(false); };
+    document.addEventListener('mousedown', close);
+    document.addEventListener('keydown', esc);
+    return () => { document.removeEventListener('mousedown', close); document.removeEventListener('keydown', esc); };
+  }, [menu]);
+  useEffect(() => {
+    const save = (event) => {
+      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 's' && view.kind === 'dash') { event.preventDefault(); send('bi-command', { cmd: 'save' }); }
+    };
+    window.addEventListener('keydown', save);
+    return () => window.removeEventListener('keydown', save);
+  }, [view.kind]);
   const [ui, setUi] = useState(() => {
     try { return { tab: 'home', collapsed: false, ...JSON.parse(localStorage.getItem(KEY) || '{}') }; } catch { return { tab: 'home', collapsed: false }; }
   });
@@ -159,7 +177,34 @@ export default function AnalyticsRibbon({ info, view, go, onNewDashboard, onImpo
   return (
     <header className={`ribbon bi-ribbon ${ui.collapsed ? 'collapsed' : ''}`}>
       <div className="rb-bar">
-        <span className="rb-doc"><RIcon name="layouts" size={16} /><b>Analytics</b><small className="hide-narrow">{info.user}</small></span>
+        <div className="rb-filewrap" ref={menuBox}>
+          <button type="button" className="rb-doc" aria-haspopup="menu" aria-expanded={menu} onClick={() => setMenu(!menu)}
+            title={`File menu${onDash && dashName ? ` — ${dashName}` : ''}`}>
+            <span className="rb-doc-icon" aria-hidden="true"><RIcon name="layouts" size={16} /></span>
+            <span className="rb-doc-text"><span className="rb-doc-name"><b>{onDash && dashName ? dashName : 'Analytics'}</b>{dash.editing && <span className="rb-dirty" title="Editing">●</span>}</span>
+              <small className="hide-narrow">{onDash ? 'Dashboard' : info.user}</small></span>
+            <span className="rb-doc-file">File <span className="rb-caret" aria-hidden="true">▾</span></span>
+          </button>
+          {menu && (
+            <div className="rb-menu" role="menu" aria-label="File" onClick={(event) => { if (event.target.closest('button')) setMenu(false); }}>
+              <button type="button" role="menuitem" onClick={onNewDashboard} title="A new, empty dashboard"><RIcon name="newDoc" /><span>New dashboard</span></button>
+              {model && <button type="button" role="menuitem" onClick={() => go('ds/new')} title="Import data from a data adapter"><RIcon name="datasets" /><span>New dataset</span></button>}
+              {model && <button type="button" role="menuitem" onClick={() => go('q/new')} title="Write a DAX or SQL query over the datasets"><RIcon name="code" /><span>New query</span></button>}
+              {model && <button type="button" role="menuitem" onClick={onImport} title="Open a dashboard file (.mdash), or a Power BI report (.pbix) or template (.pbit)"><RIcon name="open" /><span>Open file (.mdash, .pbix, .pbit)</span></button>}
+              <hr />
+              <button type="button" role="menuitem" disabled={!onDash || !dash.editing} onClick={() => send('bi-command', { cmd: 'save' })} title="Save the changes to this dashboard"><RIcon name="save" /><span>Save</span><kbd>Ctrl S</kbd></button>
+              <button type="button" role="menuitem" disabled={!onDash || dash.editing || !dash.mayChange} onClick={() => send('bi-command', { cmd: 'edit' })} title="Add, move and change visuals"><RIcon name="canvas" /><span>Edit dashboard</span></button>
+              <button type="button" role="menuitem" disabled={!onDash} onClick={() => onDownload?.(true)} title="One .mdash file with the dashboard, its datasets and their records: opens on any server, even without the database"><RIcon name="download" /><span>Save as file, with data (.mdash)</span></button>
+              <button type="button" role="menuitem" disabled={!onDash} onClick={() => onDownload?.(false)} title="A small .mdash file: the other server imports the data from its own database"><RIcon name="download" /><span>Save as file, definitions only</span></button>
+              <button type="button" role="menuitem" disabled={!onDash} onClick={() => window.open('/server', '_blank', 'noopener')} title="Dashboards are on the Report Server already: open it to move, share or set permissions"><RIcon name="publish" /><span>Open on the Report Server ↗</span></button>
+              <hr />
+              <button type="button" role="menuitem" disabled={!onDash} onClick={() => send('bi-command', { cmd: 'reload' })} title="Run every visual again"><RIcon name="reset" /><span>Reload data</span></button>
+              {model && <button type="button" role="menuitem" disabled={!readyCount} onClick={onRefreshAll} title="Import every dataset again from its data adapter"><RIcon name="reset" /><span>Refresh all datasets</span></button>}
+              <button type="button" role="menuitem" onClick={() => go('model')} title="Relationships between datasets"><RIcon name="layouts" /><span>Model (relationships)</span></button>
+              <button type="button" role="menuitem" onClick={() => go('embed')} title="Show a dashboard in your own website"><RIcon name="publish" /><span>Embed in a website</span></button>
+            </div>
+          )}
+        </div>
         <div className="rb-tabs" role="tablist" aria-label="Ribbon">
           {tabs.map(([id, label, tint]) => (
             <button key={id} type="button" role="tab" aria-selected={ui.tab === id} className={`tint-${tint} ${ui.tab === id ? 'on' : ''}`} onClick={() => pick(id)}>{label}</button>

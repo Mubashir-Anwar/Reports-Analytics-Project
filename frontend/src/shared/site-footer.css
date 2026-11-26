@@ -1,0 +1,12 @@
+/* © line at the bottom of every page (PixelFX look: mono, dashed rule, three blinking pixels) */
+.fx-foot { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; padding: 12px 18px; margin-top: 24px; border-top: 2px dashed var(--line);
+  background: var(--bg); color: var(--muted); font-family: var(--mono, ui-monospace, monospace); font-size: 11.5px; letter-spacing: .03em; }
+.fx-foot.slim { margin-top: 0; padding: 4px 12px; font-size: 10.5px; border-top-width: 1px; }
+.fx-foot-mark { display: inline-flex; gap: 2px; }
+.fx-foot-mark i { width: 5px; height: 5px; background: var(--accent); }
+.fx-foot-mark i:nth-child(2) { opacity: .6; } .fx-foot-mark i:nth-child(3) { opacity: .3; }
+.fx-foot-grow { flex: 1; }
+.fx-foot-links { display: inline-flex; gap: 12px; }
+.fx-foot a { color: var(--muted); text-decoration: none; border-bottom: 1px dashed transparent; }
+.fx-foot a:hover { color: var(--accent); border-bottom-color: currentColor; }
+@media print { .fx-foot { display: none; } }

@@ -31,6 +31,7 @@ from backend.app.routers import (
     public_api,
     query_workspace,
     repository,
+    saved_queries,
     server_logs,
     server_portal,
     system,
@@ -150,4 +151,5 @@ def make_app() -> FastAPI:
     server_logs.register(app, ctx)
     team.register(app, ctx)
     query_workspace.register(app, ctx)
+    saved_queries.register(app, ctx)
     return app

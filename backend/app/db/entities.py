@@ -139,6 +139,14 @@ ANALYTICS_QUERIES = Entity("analytics_queries", {
     "updatedAt": ("time", None, False),
 }, key=("id",), indexes=(("name",),))
 
+# Query → My queries: a user's own queries (MongoDB pipeline or SQL), private unless shared with named users or "*".
+SAVED_QUERIES = Entity("saved_queries", {
+    "id": ("str", 40, True), "orgId": ("str", 64, True), "owner": ("str", 128, True), "name": ("str", 120, True),
+    "description": ("str", 500, False), "kind": ("str", 8, True), "connectionId": ("str", 64, True),
+    "collection": ("str", 255, False), "text": ("json", None, True), "sharedWith": ("json", None, False),
+    "createdAt": ("time", None, False), "updatedAt": ("time", None, False),
+}, key=("id",), indexes=(("owner",),))
+
 # ------------------------------------------------------------------ schema v2, step 1: folders and reports
 # Folders are a tree with ids (renaming or moving one is one update); a workspace file and a server report are
 # separate tables, linked both ways; versions and history belong to a server report by its id.
@@ -306,7 +314,7 @@ V2_STEP2 = (USERS_V2, USER_RIGHTS, USER_GROUPS, USER_GROUP_MEMBERS, FOLDER_ACCES
 
 ENTITIES = (USERS, API_KEYS, FOLDER_PERMISSIONS, REPORT_VERSIONS, REPORT_HISTORY, JOB_SCHEDULES, JOB_RUNS,
             REPORTS, DRAFTS, FOLDERS, DATA_SOURCES,
-            ANALYTICS_DATASETS, ANALYTICS_RELATIONSHIPS, ANALYTICS_DASHBOARDS, ANALYTICS_REFRESHES, ANALYTICS_QUERIES,
+            ANALYTICS_DATASETS, ANALYTICS_RELATIONSHIPS, ANALYTICS_DASHBOARDS, ANALYTICS_REFRESHES, ANALYTICS_QUERIES, SAVED_QUERIES,
             *V2_STEP1, *V2_STEP2, SECRETS, SCHEDULES, SCHEDULE_TARGETS, RUN_FILES, RUN_DELIVERIES)
 
 

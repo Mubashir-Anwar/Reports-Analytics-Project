@@ -4,7 +4,8 @@ import { inferColumns } from './designModel.js';
 import { AdapterOptions, DbLogo } from './panels.jsx';
 import { checkSetup, explainError, optionalFilters, placeOf } from './errorHelp.js';
 import { reportPayload } from './store.js';
-import { FolderPicker } from './shared/folders.jsx';
+import { FolderDeleteDialog, FolderPicker } from './shared/folders.jsx';
+import { SavedQueryBar } from './shared/SavedQueries.jsx';
 import './setup-genz.css';
 import CodeArea, { selectLine } from './CodeArea.jsx';
 import FieldsEditor from './FieldsEditor.jsx';
@@ -234,8 +235,16 @@ export function QueryEditor({ state, dispatch, notify, refreshKey, markLine, mar
     </>
   );
 
+  // My queries: use one as this report's query (the data adapter stays the one chosen above), or keep this one
+  const useSaved = (item) => {
+    set({ querySource: item.text, ...(item.kind === 'mongo' && item.collection ? { collection: item.collection } : {}) });
+    notify(`The query “${item.name}”${item.mine ? '' : ` (by ${item.owner})`} is now this report's query. Read the fields again if they changed.`, 'ok');
+  };
+  const savedBar = <SavedQueryBar kind={isSql ? 'sql' : 'mongo'} onUse={useSaved}
+    current={{ connectionId: report.connectionId || 'designer', collection: report.collection || '', text: report.querySource || '' }} />;
   const queryPart = (
     <>
+      {savedBar}
       {isSql ? (
         <div className="block query-block" data-guide="query"><div className="sg-code-head"><b>SQL query</b><span><code>$P&#123;StartDate&#125;</code> a value</span><span><code>$X&#123;IN, branch, Branches&#125;</code> a list, empty = all</span></div>
           <CodeArea focusName="query" markLine={markLine} markNote={markNote} rows={14} value={report.querySource} onChange={(e) => set({ querySource: e.target.value })} placeholder={'SELECT o.id, o.branch, o.amount, o.placed_on\nFROM orders o\nWHERE o.placed_on BETWEEN $P{StartDate} AND $P{EndDate}\n  AND $X{IN, o.branch, Branches}\nORDER BY o.placed_on'} />
@@ -821,6 +830,38 @@ export default function SetupForm({ state, dispatch, notify, onTemplates, refres
   const set = (patch) => dispatch({ type: 'REPORT', patch });
   const [folders, setFolders] = useState([]);
   useEffect(() => { api.workspace().then((r) => setFolders(r.folders || [])).catch(() => setFolders([])); }, []);
+  // Workspace folder: New folder / Rename / Delete from the folder picker. The open draft follows a folder that moved.
+  const [folderDelete, setFolderDelete] = useState(null);   // { path, contents }
+  const followFolder = (from, to) => {
+    const moved = (path) => (path === from || path.startsWith(`${from}/`) ? [to, path.slice(from.length + 1)].filter(Boolean).join('/') || 'General' : null);
+    const here = report.folder && report.folder !== 'General' ? moved(report.folder) : null;
+    if (here) set({ folder: here });
+    const saved = report.status?.folder && report.status.folder !== 'General' ? moved(report.status.folder) : null;
+    if (saved) dispatch({ type: 'STATUS', status: { ...report.status, folder: saved } });
+  };
+  const folderManage = {
+    create: async (path) => { const answer = await api.createWorkspaceFolder(path); setFolders(answer.folders || []); notify(`Folder /${path} made`, 'ok'); },
+    rename: async (path, newPath) => {
+      const answer = await api.renameWorkspaceFolder(path, newPath);
+      setFolders(answer.folders || []);
+      followFolder(path, newPath);
+      notify(`/${path} is now /${newPath}${answer.drafts ? ` (${answer.drafts} report${answer.drafts === 1 ? '' : 's'} moved with it)` : ''}`, 'ok');
+    },
+    remove: async (path) => {
+      try { setFolderDelete({ path, contents: await api.workspaceFolderContents(path) }); } catch (failure) { notify(failure.message, 'error'); }
+    },
+  };
+  const confirmFolderDelete = async (answer) => {
+    const { path } = folderDelete;
+    const result = await api.deleteWorkspaceFolder(path, answer);
+    setFolders(result.folders || []);
+    if (answer.moveTo !== undefined) followFolder(path, answer.moveTo);
+    else if (report.folder === path || String(report.folder || '').startsWith(`${path}/`)) {
+      set({ folder: 'General' });
+      notify('The folder of the open report was deleted: Save keeps the report again, at the top level.', 'ok');
+    }
+    if (answer.moveTo !== undefined || !(report.folder === path || String(report.folder || '').startsWith(`${path}/`))) notify(`Folder /${path} deleted`, 'ok');
+  };
   // The ID follows the name until somebody types an ID of their own (only while the report is new).
   const auto = report.isNew && !report.idManual;
 
@@ -932,7 +973,9 @@ export default function SetupForm({ state, dispatch, notify, onTemplates, refres
           </label>
           <div className="sg-field wide"><span>Workspace folder</span>
             <FolderPicker folders={folders.filter((f) => f !== 'General')} value={!report.folder || report.folder === 'General' ? '' : report.folder} allowNew storageKey="setup-pick-open"
-              onChange={(path) => { if (path) setFolders((list) => [...new Set([...list, path])]); set({ folder: path || 'General' }); }} />
+              manage={folderManage} onChange={(path) => { if (path) setFolders((list) => [...new Set([...list, path])]); set({ folder: path || 'General' }); }} />
+            {folderDelete && <FolderDeleteDialog path={folderDelete.path} contents={folderDelete.contents} folders={folders.filter((f) => f !== 'General')} place="workspace"
+              onConfirm={confirmFolderDelete} onClose={() => setFolderDelete(null)} />}
             <small>Where Save keeps it in the designer. The server folder is chosen when you publish.</small>
           </div>
           <label className="wide" data-guide="description">Description<input value={report.description} onChange={(e) => set({ description: e.target.value })} placeholder="What this report shows and who uses it (optional)" /></label>

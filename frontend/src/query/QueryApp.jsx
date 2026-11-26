@@ -1,6 +1,8 @@
 // /query — the Query workspace. Left: the data adapters as a tree (MongoDB: collections; SQL: schemas, tables,
 // columns). Right: tabs like DBeaver / Studio 3T — a collection (Documents, Aggregate, Fields), a SQL editor, or
 // the schema diagram. The tabs and what is typed in them are kept in this browser. Nothing here can change data.
+import SiteFooter from '../shared/SiteFooter.jsx';
+import Resizer, { useStoredWidth } from '../shared/Resizer.jsx';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import NavBar from '../shared/NavBar.jsx';
 import { api } from '../api.js';
@@ -11,8 +13,11 @@ import ContextMenu from '../ContextMenu.jsx';
 import DataSourcesPanel from '../shared/DataSourcesPanel.jsx';
 import { AdapterWizard } from '../shared/adapters.jsx';
 import { quoteName } from './queryHelper.js';
+import { SaveQueryDialog, SavedQueryList, deleteSavedQuery, useSavedQueries } from '../shared/SavedQueries.jsx';
+import { newStage } from './MongoView.jsx';
 
 const TABS_KEY = 'query-tabs';
+const SQL_PAGE = 60;            // tables shown per schema before "Show more"
 const isSql = (a) => a && a.type && a.type !== 'mongodb';
 const TYPE_LOOK = { mongodb: ['g', 'Mongo'], postgresql: ['b', 'Postgres'], mysql: ['a', 'MySQL'], sqlserver: ['v', 'SQL Server'], oracle: ['c', 'Oracle'] };
 let seq = 0;
@@ -32,8 +37,9 @@ function TypeChip({ type }) {
 }
 
 /** One adapter in the tree, with what is inside it once opened. */
-function AdapterNode({ adapter, open, onToggle, data, filter, onOpen, onMenu }) {
+function AdapterNode({ adapter, open, onToggle, data, filter, onOpen, onMenu, onMore }) {
   const [openTables, setOpenTables] = useState({});
+  const [shown, setShown] = useState({});          // schema -> how many tables are shown
   const toggleColumns = (key) => setOpenTables((o) => ({ ...o, [key]: !o[key] }));
   const sql = isSql(adapter);
   const q = filter.trim().toLowerCase();
@@ -43,13 +49,18 @@ function AdapterNode({ adapter, open, onToggle, data, filter, onOpen, onMenu }) 
     else if (data.error) body = <div className="qt-note err">{data.error}</div>;
     else if (!sql) {
       const items = data.collections.filter((c) => !q || c.name.toLowerCase().includes(q));
-      body = items.length ? items.map((c) => (
+      const more = data.more ? (
+        <button type="button" className="qt-more" disabled={data.loadingMore} onClick={() => onMore(adapter)}>
+          {data.loadingMore ? <><span className="q-spin" /> Loading…</> : <>＋ Show {Math.min(50, data.total - data.collections.length)} more <em>{data.collections.length} of {data.total.toLocaleString()}</em></>}
+        </button>
+      ) : null;
+      body = items.length ? [...items.map((c) => (
         <button key={c.name} type="button" className="qt-leaf" onClick={() => onOpen({ kind: 'mongo', connectionId: adapter.id, collection: c.name })} title={`Open ${c.name} (right-click for more)`}
           onContextMenu={(e) => { e.preventDefault(); onMenu(e, { type: 'collection', adapter, collection: c }); }}>
           <span className="qt-ico">{c.type === 'view' ? '◇' : '▤'}</span><span className="qt-name">{c.name}</span>
           {c.count != null && <span className="qt-count">{c.count.toLocaleString()}</span>}
         </button>
-      )) : <div className="qt-note">No collections{q ? ' match' : ''}</div>;
+      )), more] : <div className="qt-note">No collections{q ? ` match “${filter.trim()}”` : ''}</div>;
     } else {
       body = (
         <>
@@ -58,8 +69,10 @@ function AdapterNode({ adapter, open, onToggle, data, filter, onOpen, onMenu }) 
             <button type="button" className="btn sm" onClick={() => onOpen({ kind: 'diagram', connectionId: adapter.id })}>⧉ Diagram</button>
           </div>
           {data.schemas.map((s) => {
-            const tables = s.tables.filter((t) => !q || t.name.toLowerCase().includes(q));
-            if (!tables.length) return null;
+            const all = s.tables.filter((t) => !q || t.name.toLowerCase().includes(q));
+            if (!all.length) return null;
+            const limit = shown[s.name] || SQL_PAGE;
+            const tables = all.slice(0, limit);
             return (
               <div key={s.name} className="qt-schema">
                 {data.schemas.length > 1 && <div className="qt-schema-name">{s.name || '(default)'}</div>}
@@ -82,6 +95,11 @@ function AdapterNode({ adapter, open, onToggle, data, filter, onOpen, onMenu }) 
                     </div>
                   );
                 })}
+                {all.length > tables.length && (
+                  <button type="button" className="qt-more" onClick={() => setShown({ ...shown, [s.name]: limit + SQL_PAGE })}>
+                    ＋ Show {Math.min(SQL_PAGE, all.length - tables.length)} more <em>{tables.length} of {all.length.toLocaleString()}</em>
+                  </button>
+                )}
               </div>
             );
           })}
@@ -99,6 +117,14 @@ function AdapterNode({ adapter, open, onToggle, data, filter, onOpen, onMenu }) 
       {open && <div className="qt-body">{body}</div>}
     </div>
   );
+}
+
+/** The part of `name` that matches the search, in bold. */
+function highlight(name, filter) {
+  const q = filter.trim();
+  const at = name.toLowerCase().indexOf(q.toLowerCase());
+  if (!q || at < 0) return name;
+  return <>{name.slice(0, at)}<b>{name.slice(at, at + q.length)}</b>{name.slice(at + q.length)}</>;
 }
 
 function firstRowsSql(table, schemaName, dialect) {
@@ -143,7 +169,12 @@ export default function QueryApp() {
   const [state, setState] = useState(loadTabs);
   const [toast, setToast] = useState('');
   const [side, setSide] = useState(true);
+  const [sideWidth, setSideWidth] = useStoredWidth('q-side-width', 290, 200, 600);
   const [menu, setMenu] = useState(null);
+  const [sideView, setSideView] = useState(() => (window.location.hash === '#mine' ? 'mine' : 'sources'));   // sources | mine
+  const saved = useSavedQueries();
+  const [editing, setEditing] = useState(null);     // a saved query being renamed / shared
+  const [hintsOpen, setHintsOpen] = useState(false);
   const copy = (text, what) => { navigator.clipboard?.writeText(text); setToast(`Copied ${what}`); };
 
   /** Right-click on the tree: what can be done with that collection, table or data source. */
@@ -199,11 +230,13 @@ export default function QueryApp() {
   useEffect(() => { try { localStorage.setItem(TABS_KEY, JSON.stringify(state)); } catch { /* ignore */ } }, [state]);
   useEffect(() => { if (!toast) return undefined; const t = setTimeout(() => setToast(''), 2200); return () => clearTimeout(t); }, [toast]);
 
-  const load = async (adapter, force = false) => {
-    if (data[adapter.id] && !data[adapter.id].error && !force) return data[adapter.id];
+  const load = async (adapter, force = false, search = filter.trim()) => {
+    const known = data[adapter.id];
+    if (known && !known.error && !force && (isSql(adapter) || (known.search || '') === search)) return known;
     setData((d) => ({ ...d, [adapter.id]: { loading: true } }));
     try {
-      const value = isSql(adapter) ? await api.sqlSchema(adapter.id) : await api.mongoCollections(adapter.id);
+      // MongoDB: one page of collections (the server lists names only and counts just this page)
+      const value = isSql(adapter) ? await api.sqlSchema(adapter.id) : await api.mongoCollections(adapter.id, { search });
       setData((d) => ({ ...d, [adapter.id]: value }));
       return value;
     } catch (e) {
@@ -211,6 +244,22 @@ export default function QueryApp() {
       return null;
     }
   };
+  const loadMore = async (adapter) => {
+    const known = data[adapter.id];
+    if (!known?.more) return;
+    setData((d) => ({ ...d, [adapter.id]: { ...known, loadingMore: true } }));
+    try {
+      const page = await api.mongoCollections(adapter.id, { search: known.search || '', offset: known.collections.length });
+      setData((d) => ({ ...d, [adapter.id]: { ...page, collections: [...known.collections, ...page.collections] } }));
+    } catch (e) { setData((d) => ({ ...d, [adapter.id]: { ...known, loadingMore: false } })); setToast(e.message); }
+  };
+  // typing in the filter asks the server for the matching MongoDB collections (a short pause first)
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      adapters.filter((a) => open[a.id] && !isSql(a) && (data[a.id]?.search || '') !== filter.trim()).forEach((a) => load(a, true));
+    }, 350);
+    return () => clearTimeout(timer);
+  }, [filter]); // eslint-disable-line react-hooks/exhaustive-deps
   const toggle = (adapter) => {
     const next = !open[adapter.id];
     setOpen({ ...open, [adapter.id]: next });
@@ -218,11 +267,23 @@ export default function QueryApp() {
   };
   const adapterOf = (id) => adapters.find((a) => a.id === id);
 
+  /** Open a saved query: MongoDB in Aggregate with its steps, SQL in an editor. */
+  const openSaved = (item) => {
+    setManaging(false);
+    const already = tabs.find((t) => t.saved?.id === item.id);
+    if (already) { setState({ tabs, active: already.id }); return; }
+    const tab = { id: tabId(), connectionId: item.connectionId, title: item.name, saved: item };
+    if (item.kind === 'sql') Object.assign(tab, { kind: 'sql', sql: item.text, dialect: adapterOf(item.connectionId)?.type });
+    else Object.assign(tab, { kind: 'mongo', collection: item.collection, mode: 'aggregate',
+      stages: (item.stages || []).length ? item.stages.map((s) => ({ ...newStage(s.op, s.body), on: s.on !== false })) : undefined });
+    setState({ tabs: [...tabs, tab], active: tab.id });
+    if (!adapterOf(item.connectionId)) setToast(`The data source ${item.connectionId} is not in Query: ask an administrator, or connect it`);
+  };
   const openTab = ({ kind, connectionId, collection, table, schemaName, dialect, mode, run = true, fresh = false }) => {
     setManaging(false);
     const adapter = adapterOf(connectionId);
     if (kind === 'diagram') load(adapter);
-    const same = !fresh && tabs.find((t) => t.kind === kind && t.connectionId === connectionId && (kind === 'mongo' ? t.collection === collection : kind === 'diagram'));
+    const same = !fresh && tabs.find((t) => !t.saved && t.kind === kind && t.connectionId === connectionId && (kind === 'mongo' ? t.collection === collection : kind === 'diagram'));
     if (same) { setState({ tabs: mode ? tabs.map((t) => (t.id === same.id ? { ...t, mode } : t)) : tabs, active: same.id }); return; }
     const tab = { id: tabId(), kind, connectionId };
     if (kind === 'mongo') Object.assign(tab, { collection, title: collection, mode: mode || 'docs' });
@@ -247,13 +308,34 @@ export default function QueryApp() {
   // a diagram tab needs the schema of its adapter
   useEffect(() => { if (current?.kind === 'diagram' && currentAdapter && !data[currentAdapter.id]) load(currentAdapter); }, [current?.id, currentAdapter?.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // the search box suggests names while typing: collections, tables and saved queries that contain the text
+  const hints = useMemo(() => {
+    const q = filter.trim().toLowerCase();
+    if (!q) return [];
+    const out = [];
+    if (sideView === 'sources') {
+      adapters.forEach((a) => {
+        const d = data[a.id];
+        if (!d || d.loading || d.error) return;
+        if (!isSql(a)) d.collections.filter((c) => c.name.toLowerCase().includes(q)).forEach((c) => out.push({ key: `${a.id}/${c.name}`, icon: '▤', name: c.name, where: a.name || a.id,
+          open: () => openTab({ kind: 'mongo', connectionId: a.id, collection: c.name }) }));
+        else d.schemas.forEach((s) => s.tables.filter((t) => t.name.toLowerCase().includes(q)).forEach((t) => out.push({ key: `${a.id}/${s.name}.${t.name}`, icon: '▦', name: t.name,
+          where: `${a.name || a.id}${s.name ? ` · ${s.name}` : ''}`, open: () => openTab({ kind: 'sql', connectionId: a.id, table: t, schemaName: s.name, dialect: a.type }) })));
+      });
+    }
+    [...saved.mine, ...saved.shared].filter((item) => item.name.toLowerCase().includes(q))
+      .forEach((item) => out.push({ key: item.id, icon: '★', name: item.name, where: item.mine ? 'my query' : `shared by ${item.owner}`, open: () => openSaved(item) }));
+    return out.sort((a, b) => (a.name.toLowerCase().indexOf(q) - b.name.toLowerCase().indexOf(q)) || a.name.length - b.name.length).slice(0, 8);
+  }, [filter, data, adapters, saved, sideView]); // eslint-disable-line react-hooks/exhaustive-deps
+
   const grouped = useMemo(() => [...adapters].sort((a, b) => (isSql(a) - isSql(b)) || String(a.name).localeCompare(String(b.name))), [adapters]);
 
   return (
     <div className="q-page">
       <NavBar current="/query" />
-      <div className={`q-shell ${side ? '' : 'no-side'}`}>
+      <div className={`q-shell ${side ? '' : 'no-side'}`} style={{ '--q-side': `${sideWidth}px` }}>
         <aside className="q-side" aria-label="Data sources">
+          <Resizer width={sideWidth} onWidth={setSideWidth} normal={290} min={200} max={600} label="Data sources width" />
           <div className="q-side-head">
             <b>Data sources</b>
             <span className="grow" />
@@ -261,12 +343,39 @@ export default function QueryApp() {
             <button type="button" className="icon-btn" title="Manage data sources: edit, test, delete" onClick={() => setManaging(true)}>⚙</button>
             <button type="button" className="icon-btn" title="Hide the list" onClick={() => setSide(false)}>⟨</button>
           </div>
-          <input className="q-filter" type="search" placeholder="Filter collections, tables…" value={filter} onChange={(e) => setFilter(e.target.value)} />
-          <div className="q-tree">
+          <div className="q-side-seg" role="tablist" aria-label="Show">
+            <button type="button" role="tab" aria-selected={sideView === 'sources'} className={sideView === 'sources' ? 'on' : ''} onClick={() => setSideView('sources')}>▤ Sources</button>
+            <button type="button" role="tab" aria-selected={sideView === 'mine'} className={sideView === 'mine' ? 'on' : ''} onClick={() => setSideView('mine')}>
+              ★ My queries <em>{saved.mine.length + saved.shared.length}</em>
+            </button>
+          </div>
+          <div className="q-filter-wrap">
+            <input className="q-filter" type="search" value={filter} aria-label="Search" autoComplete="off"
+              placeholder={sideView === 'mine' ? 'Search my queries…' : 'Search collections, tables…'}
+              onChange={(e) => { setFilter(e.target.value); setHintsOpen(true); }} onFocus={() => setHintsOpen(true)} onBlur={() => setTimeout(() => setHintsOpen(false), 150)}
+              onKeyDown={(e) => { if (e.key === 'Escape') setHintsOpen(false); if (e.key === 'Enter' && hints[0]) { e.preventDefault(); hints[0].open(); setHintsOpen(false); } }} />
+            {hintsOpen && filter.trim() && hints.length > 0 && (
+              <ul className="q-hints" role="listbox" aria-label="Matches">
+                {hints.map((h) => (
+                  <li key={h.key}><button type="button" onMouseDown={(e) => e.preventDefault()} onClick={() => { h.open(); setHintsOpen(false); }}>
+                    <span className="q-hint-ico">{h.icon}</span><span className="q-hint-name">{highlight(h.name, filter)}</span><small>{h.where}</small>
+                  </button></li>
+                ))}
+              </ul>
+            )}
+          </div>
+          {sideView === 'mine' && (
+            <div className="q-tree q-mine">
+              <SavedQueryList saved={saved} filter={filter} onOpen={openSaved} onEdit={setEditing}
+                onDelete={async (item) => { try { if (await deleteSavedQuery(item)) { setToast(`Deleted “${item.name}”`); setState((s) => ({ ...s, tabs: s.tabs.map((t) => (t.saved?.id === item.id ? { ...t, saved: undefined } : t)) })); } } catch (e) { setToast(e.message); } }}
+                empty={<>Nothing saved yet. Open a collection → <b>Aggregate</b>, or a SQL editor, and press <b>💾 Save query</b>.</>} />
+            </div>
+          )}
+          <div className="q-tree" hidden={sideView !== 'sources'}>
             {loadError && <div className="qt-note err">{loadError}</div>}
             {!adapters.length && !loadError && <div className="qt-note">No data source yet. <button type="button" className="linkish" onClick={() => setConnecting(true)}>Connect one</button></div>}
             {grouped.map((a) => (
-              <AdapterNode key={a.id} adapter={a} open={!!open[a.id]} onToggle={() => toggle(a)} data={data[a.id]} filter={filter} onOpen={openTab} onMenu={showMenu} />
+              <AdapterNode key={a.id} adapter={a} open={!!open[a.id]} onToggle={() => toggle(a)} data={data[a.id]} filter={filter} onOpen={openTab} onMenu={showMenu} onMore={loadMore} />
             ))}
           </div>
         </aside>
@@ -307,7 +416,11 @@ export default function QueryApp() {
       {connecting && <AdapterWizard initial={{}} area="query" existingIds={adapters.map((a) => a.id)} notify={setToast} onClose={() => setConnecting(false)}
         onSaved={(saved) => { setConnecting(false); loadAdapters().then(() => { setSide(true); setOpen((o) => ({ ...o, [saved.id]: true })); load(saved); }); }} />}
       <ContextMenu menu={menu} onClose={() => setMenu(null)} />
+      {editing && <SaveQueryDialog query={{ kind: editing.kind, connectionId: editing.connectionId, collection: editing.collection, text: editing.text, stages: editing.stages }}
+        existing={editing} onClose={() => setEditing(null)}
+        onSaved={(item) => { setEditing(null); setToast(`Saved “${item.name}”`); setState((s) => ({ ...s, tabs: s.tabs.map((t) => (t.saved?.id === item.id ? { ...t, saved: item, title: item.name } : t)) })); }} />}
       {toast && <div className="q-toast" role="status">{toast}</div>}
+      <SiteFooter slim />
     </div>
   );
 }

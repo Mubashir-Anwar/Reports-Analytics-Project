@@ -1,6 +1,7 @@
 // The query helper panel on the right of a result: drop a column header on Filter, Columns or Sort.
 // Filter rows get an operator and a value; Apply writes the query (Mongo find or SQL) and runs it.
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
+import Resizer, { useStoredWidth } from '../shared/Resizer.jsx';
 import { FIELD_MIME, NO_VALUE, OPS, TYPES, newFilter, readDrag, withType } from './queryHelper.js';
 
 function Zone({ title, hint, icon, onDropField, empty, children, count }) {
@@ -30,8 +31,14 @@ export default function QueryHelper({ helper, onChange, onApply, onClear, column
     </select>
   );
   const busy = helper.filters.length + helper.fields.length + helper.sort.length;
+  const on = helper.filters.filter((f) => !f.off).length;
+  // the helper's width: dragged by its left edge, the same for MongoDB and SQL tabs
+  const [width, setWidth] = useStoredWidth('q-helper-width', 290, 240, 680);
+  useEffect(() => { document.documentElement.style.setProperty('--q-helper', `${width}px`); }, [width]);
 
   return (
+    <div className="qh-wrap">
+    <Resizer width={width} onWidth={setWidth} normal={290} min={240} max={680} edge="left" label="Query helper width" />
     <aside className="qh" aria-label="Query helper">
       <div className="qh-head">
         <b>🧩 Query helper</b>
@@ -40,8 +47,15 @@ export default function QueryHelper({ helper, onChange, onApply, onClear, column
       </div>
       <p className="qh-tip">Drag a column, or a value itself, from the result and drop it here. Its data type comes along.</p>
 
-      <Zone title={kind === 'sql' ? 'Where' : 'Filter'} icon="⚲" hint="Drop a column or a value to filter by it" empty={!helper.filters.length} onDropField={addFilter} count={helper.filters.length}>
+      <Zone title={kind === 'sql' ? 'Where' : 'Filter'} icon="⚲" hint="Drop a column or a value to filter by it" empty={!helper.filters.length} onDropField={addFilter} count={on}>
         {helper.filters.length > 1 && (
+          <div className="qh-all-on">
+            <button type="button" className="btn sm" onClick={() => set({ filters: helper.filters.map((f) => ({ ...f, off: false })) })} disabled={on === helper.filters.length}>All on</button>
+            <button type="button" className="btn sm" onClick={() => set({ filters: helper.filters.map((f) => ({ ...f, off: true })) })} disabled={on === 0}>All off</button>
+            <span className="muted">{on} of {helper.filters.length} used</span>
+          </div>
+        )}
+        {on > 1 && (
           <div className="qh-match">
             Rows that match
             <div className="seg-toggle">
@@ -51,8 +65,12 @@ export default function QueryHelper({ helper, onChange, onApply, onClear, column
           </div>
         )}
         {helper.filters.map((f) => (
-          <div key={f.id} className="qh-filter">
+          <div key={f.id} className={`qh-filter ${f.off ? 'off' : ''}`}>
             <div className="qh-row">
+              <label className="qh-on" title={f.off ? 'Off: this filter is not used. Tick to use it again' : 'On: untick to keep this filter but not use it'}>
+                <input type="checkbox" checked={!f.off} onChange={(e) => editFilter(f.id, { off: !e.target.checked })} aria-label={`Use the filter on ${f.field}`} />
+                <span aria-hidden="true" />
+              </label>
               <code title={f.field}>{f.field}</code>
               <select className={`qh-type t-${withType(f, types).type}`} aria-label={`Data type of ${f.field}`} title="Data type of the value" value={f.type || ''} onChange={(e) => editFilter(f.id, { type: e.target.value })}>
                 {TYPES.map(([key, label]) => <option key={key} value={key}>{key ? label : `${label}${withType({ ...f, type: '' }, types).type ? `: ${TYPES.find(([k]) => k === withType({ ...f, type: '' }, types).type)[1]}` : ''}`}</option>)}
@@ -104,5 +122,6 @@ export default function QueryHelper({ helper, onChange, onApply, onClear, column
         <button type="button" className="btn primary" onClick={onApply}>▶ Apply</button>
       </div>
     </aside>
+    </div>
   );
 }

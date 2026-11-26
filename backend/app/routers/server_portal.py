@@ -15,6 +15,7 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, JSONResponse, Response
 from starlette.background import BackgroundTask
 
+from backend.app import limits
 from backend.app.analytics import bundle as analytics_bundle, store as analytics_store
 from backend.app.connectors.profiles import profiles_in
 from backend.app.constants import OUTPUT_FORMATS, REPORT_ID_PATTERN, SESSION_COOKIE, WORKSPACE_META
@@ -71,8 +72,28 @@ def register(app: FastAPI, ctx: SimpleNamespace) -> None:
         username = str(payload.get("username", "")).strip()
         password = str(payload.get("password", ""))
         client = client_address(request)
-        if shared_state.recent_failures(client) >= 10:  # counted on every instance
-            raise HTTPException(status_code=429, detail="Too many failed sign-ins; wait a few minutes and try again")
+        # Admin → Limits → Sign-in: wrong passwords per account, and a wider limit per computer (many names tried).
+        # Counted in the store, so on every instance.
+        max_failures = int(limits.value("REPORTING_LOGIN_MAX_FAILURES"))
+        lock_minutes = int(limits.value("REPORTING_LOGIN_LOCK_MINUTES"))
+        window = lock_minutes * 60
+        account = shared_state.account_key(username) if username else ""
+        computer_limit = max(10, max_failures * 2)
+
+        def locked(message: str, key: str, limit: int, failed: int) -> HTTPException:
+            """429 with the seconds left, so the sign-in page can count down."""
+            seconds = shared_state.seconds_until_below(key, window, limit) or window
+            return HTTPException(status_code=429, headers={"Retry-After": str(seconds)},
+                                 detail={"message": message, "attemptsLeft": 0, "failed": failed, "maxFailures": max_failures,
+                                         "lockMinutes": lock_minutes, "retryAfter": seconds})
+
+        if shared_state.recent_failures(client, window) >= computer_limit:
+            raise locked("Too many failed sign-ins from this computer. Wait for the timer, then try again", client, computer_limit,
+                         computer_limit)
+        if account and shared_state.recent_failures(account, window) >= max_failures:
+            shared_state.record_failure(client, window)       # hammering a locked account still counts for the computer
+            raise locked(f"This account is locked after {max_failures} wrong passwords. Wait for the timer, or ask an administrator "
+                         "to set a new password", account, max_failures, max_failures)
         user = find_user(username) if username else None
         session_user, version = "", 0
         if user is not None and not user.get("disabled") and password and check_user_password(user, password):
@@ -83,15 +104,27 @@ def register(app: FastAPI, ctx: SimpleNamespace) -> None:
                                     "admin account, or run 'python -m backend.app.setup' on the server for a new 24 hours")
             session_user, version = user["username"], int(user.get("sessionVersion", 0))
         if not session_user:
-            shared_state.record_failure(client)
+            shared_state.record_failure(client, window)
+            if account:
+                shared_state.record_failure(account, window)
             LOG.warning("Failed /server sign-in for user %r from %s", username[:64], client)
             ctx.audit_event(request, "auth.login_failed", username[:64], {"reason": "wrong username or password"},
                             actor=username[:64] or "?", actor_type="anonymous")
             if not load_users():
                 raise HTTPException(status_code=401, detail="There are no accounts yet. On the server, in the project folder, run: "
                                     "python -m backend.app.setup")
-            raise HTTPException(status_code=401, detail="Wrong username or password")
+            failed = min(max_failures, shared_state.recent_failures(account, window)) if account else 0
+            left = max(0, max_failures - failed)
+            if left == 0:
+                raise locked(f"Wrong username or password ({failed} of {max_failures}). The account is now locked for {lock_minutes} "
+                             f"minute{'s' if lock_minutes != 1 else ''}", account, max_failures, failed)
+            # every wrong password says how many are used and how many are left (Admin → Limits → Sign-in sets both numbers)
+            raise HTTPException(status_code=401, detail={
+                "message": f"Wrong username or password. {failed} failed, {left} more attempt{'s' if left != 1 else ''} before a "
+                           f"{lock_minutes}-minute lock", "attemptsLeft": left, "failed": failed, "maxFailures": max_failures,
+                "lockMinutes": lock_minutes})
         shared_state.clear_failures(client)
+        shared_state.clear_failures(account)
         from backend.app.db.people import put_user  # noqa: PLC0415
         user["lastLoginAt"] = now_iso()
         if password_needs_upgrade(user):  # older, weaker hash: replace it now that we know the password

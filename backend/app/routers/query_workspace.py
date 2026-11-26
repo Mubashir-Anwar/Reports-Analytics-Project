@@ -1,6 +1,6 @@
 """The Query workspace (/query) API: browse a data adapter and run read-only queries. Needs the Designer right.
 
-    POST /api/query/mongo/collections   {connectionId}                                   -> {collections}
+    POST /api/query/mongo/collections   {connectionId, search, offset, limit}            -> {collections, total, more} (one page)
     POST /api/query/mongo/find          {connectionId, collection, filter, projection, sort, skip, limit}
     POST /api/query/mongo/aggregate     {connectionId, collection, stages: [text…], limit} (the first n stages: a preview)
     POST /api/query/mongo/fields        {connectionId, collection}                       -> fields in a sample
@@ -56,8 +56,14 @@ def register(app: FastAPI, ctx: SimpleNamespace) -> None:
 
     @app.post("/api/query/mongo/collections")
     async def query_mongo_collections(request: Request) -> dict[str, Any]:
-        db, _collection, _payload = await mongo(request, need_collection=False)
-        return {"collections": await call(lambda: explorer.mongo_collections(db)), "database": db.name}
+        db, _collection, payload = await mongo(request, need_collection=False)
+        search = str(payload.get("search") or "")[:120]
+        try:
+            offset, limit = int(payload.get("offset") or 0), int(payload.get("limit") or 50)
+        except (TypeError, ValueError):
+            raise HTTPException(status_code=422, detail="offset and limit are numbers") from None
+        page = await call(lambda: explorer.mongo_collections(db, search=search, offset=offset, limit=limit))
+        return {**page, "database": db.name, "search": search}
 
     @app.post("/api/query/mongo/find")
     async def query_mongo_find(request: Request) -> dict[str, Any]:

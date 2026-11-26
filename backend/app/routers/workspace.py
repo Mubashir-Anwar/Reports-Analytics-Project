@@ -189,6 +189,48 @@ def register(app: FastAPI, ctx: SimpleNamespace) -> None:
                 "published": sorted(str(data.get("title") or data["id"]) for _, data in drafts_in(folder) if workspace_summary(data)["onServer"]),
                 "dashboards": [], "adapters": []}
 
+    def move_contents(folder: str, move_to: str, drafts: list[tuple[str, dict[str, Any]]], subfolders: list[str]) -> None:
+        """Move the drafts and subfolders of `folder` into `move_to` ('' = top level); subfolders keep their names."""
+        store = get_store()
+
+        def moved(path: str) -> str:
+            return "/".join(part for part in (move_to, path[len(folder):].strip("/")) if part) or "General"
+        taken = {(clean_folder(data.get("folder")) or "General", data["id"]) for _, data in workspace_entries()}
+        clashes = [data["id"] for _, data in drafts if (moved(clean_folder(data.get("folder")) or "General"), data["id"]) in taken]
+        if clashes:
+            raise HTTPException(status_code=409, detail=f"The target folder already has: {', '.join(clashes[:5])}. Choose another folder")
+        for sub in subfolders:
+            store.make_dir("/".join(["workspace", *moved(sub).split("/")]))
+        for key, data in drafts:
+            data["folder"] = moved(clean_folder(data.get("folder")) or "General")
+            store.move_json(key, workspace_file(data["id"], data["folder"]), data)
+
+    @app.put("/api/admin/workspace-folders")
+    async def workspace_rename_folder(request: Request) -> dict[str, Any]:
+        """Rename or move a workspace folder: {path, newPath}. Its drafts and subfolders go with it."""
+        require_admin(request, "designer")
+        payload = await json_body(request)
+        folder = folder_path(payload.get("path", ""))
+        new_path = folder_path(payload.get("newPath", ""))
+        if new_path == folder:
+            return {"folder": folder, "folders": workspace_folders(workspace_entries()), "drafts": 0}
+        if new_path.startswith(f"{folder}/"):
+            raise HTTPException(status_code=400, detail="A folder cannot go inside itself")
+        existing = workspace_folders(workspace_entries())
+        if folder not in existing:
+            raise HTTPException(status_code=404, detail=f"There is no workspace folder {folder}")
+        if any(item.casefold() == new_path.casefold() for item in existing if item != folder):
+            raise HTTPException(status_code=409, detail=f"There is already a folder {new_path}; choose another name")
+        store = get_store()
+        drafts = drafts_in(folder)
+        subfolders = [item for item in existing if item.startswith(f"{folder}/")]
+        store.make_dir("/".join(["workspace", *new_path.split("/")]))
+        move_contents(folder, new_path, drafts, subfolders)
+        if folder.casefold() != new_path.casefold():    # Windows: only the case changed, the folder is already right
+            store.remove_dir("/".join(["workspace", *folder.split("/")]), recursive=True)
+        LOG.info("Workspace folder %s renamed to %s (%d drafts)", folder, new_path, len(drafts))
+        return {"folder": new_path, "folders": workspace_folders(workspace_entries()), "drafts": len(drafts)}
+
     @app.delete("/api/admin/workspace-folders")
     async def workspace_delete_folder(request: Request) -> dict[str, Any]:
         """Delete a workspace folder. moveTo (a folder, '' = top level) first moves its drafts and subfolders there;
@@ -204,18 +246,7 @@ def register(app: FastAPI, ctx: SimpleNamespace) -> None:
         if move_to is not None:
             if move_to == folder or move_to.startswith(f"{folder}/"):
                 raise HTTPException(status_code=400, detail="Choose a folder outside the one you delete")
-
-            def moved(path: str) -> str:
-                return "/".join(part for part in (move_to, path[len(folder):].strip("/")) if part) or "General"
-            taken = {(clean_folder(data.get("folder")) or "General", data["id"]) for _, data in workspace_entries()}
-            clashes = [data["id"] for _, data in drafts if (moved(clean_folder(data.get("folder")) or "General"), data["id"]) in taken]
-            if clashes:
-                raise HTTPException(status_code=409, detail=f"The target folder already has: {', '.join(clashes[:5])}. Choose another folder")
-            for sub in subfolders:
-                store.make_dir("/".join(["workspace", *moved(sub).split("/")]))
-            for key, data in drafts:
-                data["folder"] = moved(clean_folder(data.get("folder")) or "General")
-                store.move_json(key, workspace_file(data["id"], data["folder"]), data)
+            move_contents(folder, move_to, drafts, subfolders)
         elif drafts and payload.get("recursive") is not True:
             raise HTTPException(status_code=409, detail=f"The folder has {len(drafts)} report(s); confirm to delete them, or move them to another folder")
         else:

@@ -6,13 +6,13 @@ import * as echarts from 'echarts/core';
 import { BarChart, EffectScatterChart, HeatmapChart, LineChart, MapChart, PieChart, ScatterChart } from 'echarts/charts';
 import { GeoComponent, GridComponent, LegendComponent, TooltipComponent, VisualMapComponent } from 'echarts/components';
 import { CanvasRenderer } from 'echarts/renderers';
-import { LegacyGridContainLabel } from 'echarts/features';   // echarts 6: keeps grid.containLabel working
+import { LegacyGridContainLabel, UniversalTransition } from 'echarts/features';   // echarts 6: grid.containLabel; morphing between results
 import { useLook } from '../shared/ThemeMenu.jsx';
 import { formatNumber } from './api.js';
 import MlResult, { mlOption } from './MlResult.jsx';
 import { countryOf, loadWorld, placeOf } from './worldMap.js';
 
-echarts.use([BarChart, EffectScatterChart, HeatmapChart, LineChart, MapChart, PieChart, ScatterChart, GeoComponent, GridComponent, LegendComponent, TooltipComponent, VisualMapComponent, CanvasRenderer, LegacyGridContainLabel]);
+echarts.use([BarChart, EffectScatterChart, HeatmapChart, LineChart, MapChart, PieChart, ScatterChart, GeoComponent, GridComponent, LegendComponent, TooltipComponent, VisualMapComponent, CanvasRenderer, LegacyGridContainLabel, UniversalTransition]);
 
 const SERIES = {
   light: ['#2a78d6', '#eb6834', '#1baf7a', '#eda100', '#e87ba4', '#008300', '#6250d6', '#e34948'],
@@ -184,13 +184,33 @@ function chartOption(tile, result, colors, dark) {
   };
 }
 
+const calm = () => window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
+
+/** Motion for every chart: bars grow one after another, lines draw from the left, donuts sweep open, and a new
+ *  result morphs from the old one. Off when the computer asks for less motion. */
+function animated(option, type) {
+  if (calm()) return { ...option, animation: false };
+  const stagger = (index) => Math.min(index * 45, 700);
+  const series = (option.series || []).map((item, s) => ({
+    ...item,
+    universalTransition: true,
+    animationDelay: item.type === 'bar' ? (index) => stagger(index) + s * 120 : item.type === 'scatter' ? (index) => Math.min(index * 12, 500) : 0,
+    ...(item.type === 'pie' ? { animationType: 'expansion', animationTypeUpdate: 'transition', animationEasing: 'cubicOut' } : {}),
+    ...(item.type === 'line' ? { animationEasing: 'cubicInOut', animationDuration: 1100 } : {}),
+    emphasis: { focus: type === 'pie' || type === 'donut' ? 'self' : 'series', scale: true, ...(item.emphasis || {}),
+      itemStyle: { shadowBlur: 0, shadowOffsetX: 3, shadowOffsetY: 3, shadowColor: 'rgba(0,0,0,.28)', ...(item.emphasis?.itemStyle || {}) } },
+  }));
+  return { ...option, animation: true, animationDuration: 900, animationEasing: 'cubicOut', animationDurationUpdate: 650,
+    animationEasingUpdate: 'cubicInOut', animationThreshold: 4000, series };
+}
+
 function Chart({ tile, result, selected, onPick }) {
   const box = useRef(null);
   const chart = useRef(null);
   const [look] = useLook();
   const dark = look.mode === 'dark' || (look.mode === 'system' && window.ReportingLook.isDark());
   // eslint-disable-next-line react-hooks/exhaustive-deps -- look: the theme's CSS colours changed
-  const option = useMemo(() => chartOption(tile, result, themeColors(dark), dark), [tile, result, dark, look]);
+  const option = useMemo(() => animated(chartOption(tile, result, themeColors(dark), dark), tile.type), [tile, result, dark, look]);
 
   useEffect(() => {
     chart.current = echarts.init(box.current, null, { renderer: 'canvas' });
@@ -198,7 +218,13 @@ function Chart({ tile, result, selected, onPick }) {
     observer.observe(box.current);
     return () => { observer.disconnect(); chart.current?.dispose(); chart.current = null; };
   }, []);
-  useEffect(() => { chart.current?.setOption(option, true); }, [option]);
+  // the first time a full draw (with the grow-in); after that the old chart morphs into the new one
+  const drawn = useRef(false);
+  useEffect(() => {
+    if (!chart.current) return;
+    chart.current.setOption(option, { notMerge: !drawn.current || tile.type === 'map', lazyUpdate: false });
+    drawn.current = true;
+  }, [option]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => {
     const instance = chart.current;
     if (!instance) return undefined;
@@ -241,12 +267,36 @@ function MapVisual(props) {
   );
 }
 
+/** A number that counts up to its value (from the value before, after a filter). */
+function useCountUp(target) {
+  const [shown, setShown] = useState(typeof target === 'number' && !calm() ? 0 : target);
+  const from = useRef(typeof target === 'number' ? 0 : target);
+  useEffect(() => {
+    if (typeof target !== 'number' || !Number.isFinite(target) || calm()) { setShown(target); from.current = target; return undefined; }
+    const start = typeof from.current === 'number' ? from.current : 0;
+    const began = performance.now();
+    let frame;
+    const step = (now) => {
+      const t = Math.min(1, (now - began) / 900);
+      const eased = 1 - (1 - t) ** 3;
+      const value = start + (target - start) * eased;
+      setShown(t < 1 ? (Number.isInteger(target) ? Math.round(value) : value) : target);
+      if (t < 1) frame = requestAnimationFrame(step);
+    };
+    frame = requestAnimationFrame(step);
+    from.current = target;
+    return () => cancelAnimationFrame(frame);
+  }, [target]);
+  return shown;
+}
+
 function Kpi({ tile, result }) {
   const value = result.rows[0]?.[0];
   const second = result.columns[1] ? result.rows[0]?.[1] : undefined;
+  const counting = useCountUp(value);
   return (
     <div className="viz-kpi">
-      <strong>{formatNumber(value, tile.options?.format)}</strong>
+      <strong>{formatNumber(counting, tile.options?.format)}</strong>
       <span>{result.columns[0]?.label}</span>
       {second !== undefined && <small>{result.columns[1].label}: {formatNumber(second, tile.options?.format)}</small>}
     </div>

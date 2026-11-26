@@ -269,3 +269,70 @@ def test_workspace_folder_with_drafts_is_moved_or_deleted_after_asking(client):
     assert "General" not in listing["folders"] and not any(item.startswith("Letters") for item in listing["folders"])
     gone = client.request("DELETE", "/api/admin/workspace-folders", headers=token(), json={"path": "Archive", "recursive": True})
     assert gone.status_code == 200 and "D1" not in [item["id"] for item in client.get("/api/admin/workspace", headers=token()).json()["reports"]]
+
+
+def test_admin_sets_how_many_wrong_passwords_lock_an_account(client):
+    admin = token(ADMIN)
+    assert client.post("/api/admin/users", headers=admin, json={"username": "ali", "email": "ali@example.com", "password": "ali-pass-1", "role": "viewer"}).status_code == 200
+    saved = client.put("/api/admin/limits", headers=admin, json={"values": {"REPORTING_LOGIN_MAX_FAILURES": 5, "REPORTING_LOGIN_LOCK_MINUTES": 7}})
+    assert saved.status_code == 200
+    try:
+        first = login(client, "ali", "wrong-1")
+        assert first.status_code == 401 and first.json()["detail"]["attemptsLeft"] == 4                # every wrong password counts
+        assert "1 failed, 4 more attempts" in first.json()["detail"]["message"]
+        warned = login(client, "ALI", "wrong-2").json()["detail"]                                     # the same account, any case
+        assert warned["attemptsLeft"] == 3 and warned["failed"] == 2 and warned["maxFailures"] == 5
+        assert login(client, "ali", "wrong-3").json()["detail"]["attemptsLeft"] == 2
+        assert login(client, "ali", "wrong-4").json()["detail"]["attemptsLeft"] == 1
+        locked = login(client, "ali", "wrong-5")
+        assert locked.status_code == 429 and locked.json()["detail"]["lockMinutes"] == 7
+        assert 7 * 60 - 5 <= locked.json()["detail"]["retryAfter"] <= 7 * 60 and locked.headers["Retry-After"]   # for the timer
+        still = login(client, "ali", "ali-pass-1")
+        assert still.status_code == 429 and 0 < still.json()["detail"]["retryAfter"] <= 7 * 60          # locked: even the right password waits
+        # a new password from the admin unlocks the account
+        assert client.put("/api/admin/users/ali", headers=admin, json={"password": "ali-pass-2"}).status_code == 200
+        assert login(client, "ali", "ali-pass-2").status_code == 200
+    finally:
+        client.put("/api/admin/limits", headers=admin, json={"values": {"REPORTING_LOGIN_MAX_FAILURES": None, "REPORTING_LOGIN_LOCK_MINUTES": None}})
+
+
+def test_a_workspace_folder_can_be_renamed_with_its_drafts(client):
+    assert client.put("/api/admin/workspace/D1?create=true", headers=token(), json=draft(folder="Letters/Old")).status_code == 200
+    client.post("/api/admin/workspace-folders", headers=token(), json={"path": "Letters/Old/Empty"})
+    client.post("/api/admin/workspace-folders", headers=token(), json={"path": "Taken"})
+    rename = lambda path, new: client.put("/api/admin/workspace-folders", headers=token(), json={"path": path, "newPath": new})  # noqa: E731
+    assert rename("Letters", "Taken").status_code == 409                    # another folder has that name
+    assert rename("Letters", "Letters/Inside").status_code == 400          # not into itself
+    assert rename("Nope", "Other").status_code == 404
+    done = rename("Letters", "Mail")
+    assert done.status_code == 200 and done.json()["drafts"] == 1
+    folders = done.json()["folders"]
+    assert {"Mail", "Mail/Old", "Mail/Old/Empty"} <= set(folders) and not [f for f in folders if f.startswith("Letters")]
+    drafts = {item["id"]: item for item in client.get("/api/admin/workspace", headers=token()).json()["reports"]}
+    assert drafts["D1"]["folder"] == "Mail/Old"
+    assert client.get("/api/admin/workspace/D1?folder=Mail/Old", headers=token()).status_code == 200
+
+
+def test_my_queries_are_private_until_shared(client):
+    admin = token(ADMIN)
+    for name in ("ali", "sara"):
+        assert client.post("/api/admin/users", headers=admin, json={"username": name, "email": f"{name}@example.com", "password": f"{name}-pass-1",
+                                                                  "rights": ["query", "designer"]}).status_code == 200
+    ali, sara = TestClient(client.app), TestClient(client.app)
+    assert login(ali, "ali", "ali-pass-1").status_code == 200 and login(sara, "sara", "sara-pass-1").status_code == 200
+    body = {"name": "Big orders", "kind": "mongo", "connectionId": "default", "collection": "orders", "text": '[{"$match": {"Amount": {"$gt": 100}}}]'}
+    made = ali.post("/api/query/saved", json=body)
+    assert made.status_code == 200
+    qid = made.json()["query"]["id"]
+    assert [q["name"] for q in ali.get("/api/query/saved").json()["mine"]] == ["Big orders"]
+    assert sara.get("/api/query/saved").json() == {"mine": [], "shared": [], "me": "sara"}          # private
+    assert sara.put(f"/api/query/saved/{qid}", json={"name": "x"}).status_code == 404
+    assert ali.post("/api/query/saved", json={**body, "sharedWith": ["nobody"]}).status_code == 422
+    assert ali.put(f"/api/query/saved/{qid}", json={"sharedWith": ["SARA"], "name": "Big orders 2"}).status_code == 200
+    shared = sara.get("/api/query/saved").json()["shared"]
+    assert [(q["name"], q["owner"], q["mine"], q["sharedWith"]) for q in shared] == [("Big orders 2", "ali", False, [])]
+    assert sara.put(f"/api/query/saved/{qid}", json={"name": "mine now"}).status_code == 403     # use it, or save a copy
+    assert sara.request("DELETE", f"/api/query/saved/{qid}", json={}).status_code == 403
+    assert "sara" in ali.get("/api/query/saved/people").json()["people"]
+    assert ali.request("DELETE", f"/api/query/saved/{qid}", json={}).status_code == 200
+    assert sara.get("/api/query/saved").json()["shared"] == []

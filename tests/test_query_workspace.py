@@ -74,8 +74,13 @@ def mongo_db():
 
 
 def test_mongo_browse_find_aggregate_fields(mongo_db):
-    collections = {c["name"]: c for c in explorer.mongo_collections(mongo_db)}
+    listing = explorer.mongo_collections(mongo_db)
+    collections = {c["name"]: c for c in listing["collections"]}
     assert collections["orders"]["count"] == 30 and collections["orders_view"]["type"] == "view"
+    assert listing["total"] == 2 and listing["more"] is False
+    first = explorer.mongo_collections(mongo_db, limit=1)                       # one page at a time
+    assert [c["name"] for c in first["collections"]] == ["orders"] and first["more"] is True
+    assert [c["name"] for c in explorer.mongo_collections(mongo_db, search="VIEW")["collections"]] == ["orders_view"]
     page = explorer.mongo_find(mongo_db, "orders", {"filter": "{ Branch: 'KHI' }", "sort": "{ Amount: -1 }", "projection": "{ Amount: 1 }", "limit": 5, "skip": 1}, 5000)
     assert page["total"] == 15 and [d["Amount"] for d in page["documents"]] == [27, 25, 23, 21, 19]
     assert set(page["documents"][0]) == {"_id", "Amount"} and "$oid" in page["documents"][0]["_id"]
