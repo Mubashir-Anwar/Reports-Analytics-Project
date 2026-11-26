@@ -30,7 +30,7 @@ small, .muted { color: var(--muted); }
 .toolbar .btn.outline { border-color: var(--line-strong); }
 .toolbar .btn.primary { background: var(--accent); border-color: var(--accent); color: var(--on-accent); }
 .brand { display: flex; align-items: center; gap: 8px; font-weight: 700; color: #fff; text-decoration: none; }
-.brand-mark { display: grid; place-items: center; width: 26px; height: 26px; border-radius: 8px; background: linear-gradient(135deg, #6366f1, #22d3ee); color: #fff; font-weight: 800; }
+.brand-mark { display: grid; place-items: center; width: 26px; height: 26px; border-radius: 4px; background: var(--accent); color: var(--on-accent); font-weight: 800; }
 .doc-title { display: inline-flex; align-items: center; gap: 6px; margin-left: 2px; min-width: 0; max-width: 32vw; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 700; }
 .doc-title small { font-weight: 500; color: var(--muted); }
 .spacer { flex: 1; }
@@ -1302,9 +1302,8 @@ kbd { font: 11.5px ui-monospace, monospace; background: var(--bg); border: 1px s
 .ds-foot { display: flex; align-items: center; justify-content: flex-end; flex-wrap: wrap; gap: 10px; padding: 14px 28px; background: var(--panel); border-top: 1px solid var(--line); }
 .ds-foot > .btn:first-child { margin-right: auto; }
 .ds-go { height: 44px; padding: 0 24px; border: 0; border-radius: var(--radius-pill); color: #fff; font: inherit; font-weight: 800; cursor: pointer;
-  background: linear-gradient(100deg, var(--accent) 0%, var(--accent) 40%, color-mix(in srgb, var(--accent) 55%, #fff) 50%, var(--accent) 60%, var(--accent) 100%);
-  background-size: 200% 100%; animation: ds-shine 3.5s linear infinite; box-shadow: 0 8px 22px color-mix(in srgb, var(--accent) 35%, transparent); transition: transform .25s var(--spring); }
-.ds-go:hover:not(:disabled) { transform: translateY(-2px) scale(1.03); }
+  background: var(--accent); transition: transform .12s steps(3, end), box-shadow .12s steps(3, end); }
+.ds-go:hover:not(:disabled) { transform: translate(-2px, -2px); box-shadow: 4px 4px 0 0 var(--px-shadow); }
 .ds-go:disabled { animation: none; opacity: .45; cursor: default; box-shadow: none; }
 :root[data-theme="dark"] .ds-go { color: var(--on-accent); }
 @media (max-width: 900px) {

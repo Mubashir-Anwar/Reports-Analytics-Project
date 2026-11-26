@@ -167,7 +167,7 @@ def test_security_headers_ready_and_size_limit(client, monkeypatch):
     assert "script-src 'self'" in page.headers["content-security-policy"] and "frame-src 'self' blob:" in page.headers["content-security-policy"]
     assert "content-security-policy" not in client.get("/health").headers  # JSON, not a page
     assert "strict-transport-security" not in page.headers
-    ready = client.get("/ready")
+    ready = client.get("/ready", headers=token(ADMIN))
     assert ready.status_code == 200 and ready.json()["storage"] == "files" and ready.json()["scheduler"] in ("on", "off")
     monkeypatch.setenv("REPORTING_MAX_BODY_MB", "0.001")
     big = client.post("/api/admin/drafts/preview", headers={**token(), "Content-Type": "application/json"}, content=b"{" + b" " * 5000 + b"}")

@@ -1,0 +1,57 @@
+/* Sign-in page: an editorial split. Left: the brand, a big headline, a PixelFX chart and the apps as a numbered
+   list on a fine pixel grid. Right: a plain form with hard edges. No glass, no glow, no gradient text.
+   Theme variables only (light / dark / accent follow the theme). */
+
+.pxl { min-height: calc(100vh - 58px); min-height: calc(100dvh - 58px); display: grid; grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr); background: var(--bg); color: var(--text); }
+
+/* brand side */
+.pxl-brand { position: relative; display: flex; flex-direction: column; gap: 28px; padding: 32px clamp(20px, 5vw, 72px) 40px; border-right: 2px solid var(--text); min-width: 0; }
+.pxl-hero { margin-top: auto; display: grid; gap: 14px; }
+.pxl-hero h2 { margin: 0; font-family: var(--font-head); font-size: clamp(38px, 5.4vw, 76px); line-height: .98; font-weight: 800; letter-spacing: -.045em; }
+.pxl-chart { margin: 0; display: grid; gap: 8px; }
+.pxl-chart .px-field { height: clamp(150px, 26vh, 260px); }
+.pxl-apps { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); border-top: 2px solid var(--text); }
+.pxl-apps li { display: grid; grid-template-columns: auto 1fr; column-gap: 10px; padding: 12px 12px 12px 0; border-bottom: 1px dashed var(--line-strong); }
+.pxl-apps li:nth-child(odd) { border-right: 1px dashed var(--line-strong); }
+.pxl-apps li:nth-child(even) { padding-left: 14px; }
+.pxl-num { grid-row: span 2; font-family: var(--mono); font-size: 12px; font-weight: 700; color: var(--accent); padding-top: 2px; }
+.pxl-apps b { font-size: 14px; }
+.pxl-apps small { color: var(--muted); font-size: 12.5px; }
+
+/* form side */
+.pxl-side { display: flex; flex-direction: column; min-width: 0; padding: 32px clamp(20px, 5vw, 72px) 20px; }
+.pxl-form { width: min(100%, 400px); margin: auto 0; }
+.pxl-inner { max-width: none; width: 100%; margin: 0; padding: 0; border: 0; box-shadow: none; background: none; display: flex; flex-direction: column; gap: 16px; }
+.pxl-head h1 { margin: 10px 0 6px; font-family: var(--font-head); font-size: 36px; font-weight: 800; letter-spacing: -.035em; }
+.pxl-head .muted { margin: 0; font-size: 14px; }
+.pxl-field > span { font-family: var(--mono); font-size: 11.5px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); }
+.pxl-inner input:not([type=radio]):not([type=checkbox]) { width: 100%; height: 48px; padding: 0 14px; font-size: 16px; color: var(--text);
+  border: 2px solid var(--line-strong); border-radius: 4px; background: var(--panel); transition: border-color .12s, box-shadow .12s steps(2, end); }
+.pxl-inner input:not([type=radio]):not([type=checkbox]):hover { border-color: var(--muted); }
+.pxl-inner input:not([type=radio]):not([type=checkbox]):focus { outline: none; border-color: var(--text); box-shadow: 4px 4px 0 0 var(--accent); }
+.pxl-inner .pw-box { display: block; position: relative; }
+.pxl-inner .btn.primary { justify-content: center; gap: 10px; min-height: 50px; border: 2px solid var(--text); border-radius: 4px; font-size: 15px; font-weight: 700;
+  background: var(--text); color: var(--bg); }
+.pxl-inner .btn.primary:hover:not(:disabled) { background: var(--text); box-shadow: 4px 4px 0 0 var(--accent); }
+.pxl-inner .btn.primary span[aria-hidden] { transition: transform .15s steps(2, end); }
+.pxl-inner .btn.primary:hover span[aria-hidden] { transform: translateX(4px); }
+.pxl-forgot { align-self: flex-start; padding-left: 0; font-weight: 600; }
+.pxl-help { font-size: 13px; color: var(--muted); border-top: 1px dashed var(--line-strong); padding-top: 12px; }
+.pxl-help summary { cursor: pointer; font-weight: 600; color: var(--text); min-height: 32px; display: flex; align-items: center; }
+.pxl-help p { margin: 6px 0 0; line-height: 1.5; }
+.pxl-inner h2 { font-family: var(--font-head); letter-spacing: -.02em; }
+.pxl-foot { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 6px 16px; margin-top: 28px; padding-top: 14px; border-top: 1px dashed var(--line-strong);
+  font-family: var(--mono); font-size: 11.5px; color: var(--muted); }
+
+/* phones and small tablets: one column, the brand on top (short), no horizontal scroll */
+@media (max-width: 860px) {
+  .pxl { grid-template-columns: minmax(0, 1fr); }
+  .pxl-brand { gap: 16px; padding: 18px 16px 20px; border-right: 0; border-bottom: 2px solid var(--text); }
+  .pxl-hero { margin-top: 8px; }
+  .pxl-hero h2 { font-size: clamp(30px, 9vw, 44px); }
+  .pxl-chart .px-field { height: 96px; }
+  .pxl-chart figcaption, .pxl-apps { display: none; }
+  .pxl-side { padding: 24px 16px 16px; }
+  .pxl-form { margin: 0; width: 100%; }
+  .pxl-head h1 { font-size: 30px; }
+}

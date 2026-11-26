@@ -11,8 +11,8 @@ body:has(.srv-new) { background: var(--bg); }
 
 /* heading */
 .srv-new .page-head { align-items: center; padding: 22px 24px; margin-bottom: 14px; border-radius: var(--radius-lg); background: var(--panel); border: 1px solid var(--line); box-shadow: var(--shadow); position: relative; overflow: hidden; }
-.srv-new .page-head::after { content: ""; position: absolute; right: -60px; top: -80px; width: 260px; height: 260px; border-radius: 50%; pointer-events: none;
-  background: radial-gradient(circle, color-mix(in srgb, var(--accent) 16%, transparent), transparent 70%); }
+.srv-new .page-head::after { content: ""; position: absolute; right: 0; top: 0; width: 112px; height: 112px; pointer-events: none;
+  background: var(--accent); opacity: .16; border-radius: 0; clip-path: polygon(0 0, 100% 0, 100% 100%, 75% 100%, 75% 75%, 50% 75%, 50% 50%, 25% 50%, 25% 25%, 0 25%); }
 .srv-new .page-head > * { position: relative; z-index: 1; }
 .srv-new .page-head .eyebrow { display: inline-block; padding: 3px 10px; border-radius: var(--radius-pill); background: var(--tint-b); color: var(--tint-b-tx); font-weight: 800; letter-spacing: .06em; }
 .srv-new .page-head h1 { font-family: var(--font-head); font-size: 32px; letter-spacing: -.02em; margin: 8px 0 4px; }

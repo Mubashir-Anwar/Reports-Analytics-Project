@@ -4,7 +4,7 @@ import ContextMenu from '../ContextMenu.jsx';
 import { Notice, Topbar } from '../portal/Shell.jsx';
 import DataSourcesPanel from '../shared/DataSourcesPanel.jsx';
 import { useBrand } from '../shared/brand.js';
-import { Logo } from '../shared/NavBar.jsx';
+import PixelField from '../shared/PixelField.jsx';
 import { Breadcrumbs, FolderDeleteDialog, FolderTree, NewFolderDialog, SubfolderTiles } from '../shared/folders.jsx';
 import PermissionsDialog from './PermissionsDialog.jsx';
 import ServerGuide, { markPermissionsSet, readGuideHidden, showGuideAgain } from './ServerGuide.jsx';
@@ -97,41 +97,45 @@ function ResetPassword({ token, onDone }) {
 
 /* ---------------------------------------------------------------- sign in */
 const LOGIN_APPS = [
-  ['🎨', 'Designer', 'Build pixel-perfect reports'],
-  ['🔎', 'Query', 'Try MongoDB and SQL, read-only'],
-  ['🗄️', 'Server', 'Folders, schedules, deliveries'],
-  ['📊', 'Analytics', 'Dashboards people love'],
+  ['Designer', 'Lay out reports to the millimetre'],
+  ['Query', 'Read MongoDB and SQL, never write'],
+  ['Report Server', 'Folders, schedules, deliveries'],
+  ['Analytics', 'Dashboards from your datasets'],
 ];
 
-/** The sign-in page frame: an animated brand side and a glass card for the form. */
+/** The sign-in page frame: the brand, a PixelFX chart and the apps on one side, the form on the other. */
 function LoginShell({ children }) {
   const brand = useBrand();
-  const [shown, setShown] = useState(0);
   useEffect(() => {
-    const timer = setInterval(() => setShown((i) => (i + 1) % LOGIN_APPS.length), 2600);
-    return () => clearInterval(timer);
-  }, []);
+    const before = document.title;
+    document.title = `Sign in · ${brand.name}`;
+    return () => { document.title = before.startsWith('Sign in') ? `Report Server · ${brand.name}` : before; };
+  }, [brand.name]);
   return (
-    <div className="gz-login">
-      <div className="gz-aurora" aria-hidden="true"><i /><i /><i /><i /></div>
-      <section className="gz-brand">
-        <div className="gz-brand-top">
-          <span className="gz-logo"><Logo size={44} className="login-logo" /></span>
-          <span className="gz-name"><b>{brand.name}</b><small>{brand.tagline}</small></span>
+    <div className="pxl">
+      <section className="pxl-brand px-grid">
+        <div className="pxl-hero px-in">
+          <p className="px-kicker"><b>●</b> {brand.tagline || 'Reports · Queries · Dashboards'}</p>
+          <h2>Every number,<br />in its place<span className="px-caret" aria-hidden="true" /></h2>
         </div>
-        <h2 className="gz-hero">Reports that <span className="gz-grad">just work</span>.<br />Data that <span className="gz-grad alt">looks good</span>.</h2>
-        <ul className="gz-apps">
-          {LOGIN_APPS.map(([icon, name, text], index) => (
-            <li key={name} className={index === shown ? 'on' : ''} style={{ '--d': `${index * 90}ms` }}>
-              <span className="gz-app-ico" aria-hidden="true">{icon}</span>
-              <span><b>{name}</b><small>{text}</small></span>
+        <figure className="pxl-chart px-in-2">
+          <PixelField cell={12} gap={3} bars={14} label="An animated sample chart made of pixels" />
+          <figcaption className="px-kicker">Sample chart · not your data</figcaption>
+        </figure>
+        <ol className="pxl-apps">
+          {LOGIN_APPS.map(([name, text], index) => (
+            <li key={name} className="px-up" style={{ '--d': `${200 + index * 70}ms` }}>
+              <span className="pxl-num">{String(index + 1).padStart(2, '0')}</span><b>{name}</b><small>{text}</small>
             </li>
           ))}
-        </ul>
-        <p className="gz-foot">One sign-in · you see the apps your account has rights for</p>
+        </ol>
       </section>
-      <section className="gz-card-wrap">
-        <div className="gz-card">{children}</div>
+      <section className="pxl-side">
+        <div className="pxl-form">{children}</div>
+        <footer className="pxl-foot">
+          <span>© {new Date().getFullYear()} {brand.name}</span>
+          <span>One account · you see the parts it has rights for</span>
+        </footer>
       </section>
     </div>
   );
@@ -170,24 +174,22 @@ function LoginForm({ onSignedIn, message }) {
   if (mode !== 'signin') {
     return (
       <LoginShell>
-        <div className="login gz-form">
+        <div className="login pxl-inner">
           {mode === 'forgot' ? <ForgotPassword onBack={() => backToSignIn('')} /> : <ResetPassword token={resetToken} onDone={backToSignIn} />}
         </div>
       </LoginShell>
     );
   }
-  const hour = new Date().getHours();
-  const hello = hour < 5 ? 'Up late? 🌙' : hour < 12 ? 'Good morning ☀️' : hour < 17 ? 'Good afternoon 👋' : 'Good evening ✨';
   return (
     <LoginShell>
-      <form className="login gz-form" onSubmit={submit} autoComplete="on">
-        <div className="gz-head"><p className="gz-hello">{hello}</p><h1>Sign in</h1><p className="muted">Designer, Query, Report Server and Analytics: one account for all of them.</p></div>
-        <label className="field gz-field"><span>Username</span><input name="username" autoComplete="username" value={username} onChange={(e) => setUsername(e.target.value)} placeholder="your.name" required autoFocus /></label>
-        <label className="field gz-field"><span>Password</span><PasswordInput name="password" autoComplete="current-password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="••••••••" required /></label>
+      <form className="login pxl-inner" onSubmit={submit} autoComplete="on">
+        <div className="pxl-head"><p className="px-kicker"><b>01</b> — Sign in</p><h1>Welcome back</h1><p className="muted">One account for the Designer, Query, Report Server and Analytics.</p></div>
+        <label className="field pxl-field"><span>Username</span><input name="username" autoComplete="username" value={username} onChange={(e) => setUsername(e.target.value)} required autoFocus /></label>
+        <label className="field pxl-field"><span>Password</span><PasswordInput name="password" autoComplete="current-password" value={password} onChange={(e) => setPassword(e.target.value)} required /></label>
         <Notice message={error} />
-        <button className="btn primary gz-go" type="submit" disabled={busy}>{busy ? <><span className="gz-spin" aria-hidden="true" /> Signing in…</> : <>Sign in <span aria-hidden="true">→</span></>}</button>
-        <button type="button" className="btn quiet link-btn gz-forgot" onClick={() => setMode('forgot')}>Forgot your password?</button>
-        <details className="gz-help">
+        <button className="btn primary pxl-go" type="submit" disabled={busy}>{busy ? <><span className="px-loader" aria-hidden="true"><i /><i /><i /></span> Signing in…</> : <>Sign in <span aria-hidden="true">→</span></>}</button>
+        <button type="button" className="btn quiet link-btn pxl-forgot" onClick={() => setMode('forgot')}>Forgot your password?</button>
+        <details className="pxl-help">
           <summary>First time here?</summary>
           <p>Ask your administrator for an account. You will see the parts your account has rights for. New installation? Run <code>setup.ps1</code> (Windows) or <code>setup.sh</code> on the server: it prints the first sign-in.</p>
         </details>

@@ -1,4 +1,4 @@
-import{r as i,j as e,b as S}from"./theme-CPTOiJpV.js";import{D as M,h as b,b as D}from"./adapters-CFK5QsPx.js";function E(s,a){if(!s)return;const c=s.value.split(`
+import{r as i,j as e,b as S}from"./theme-Da85WHdl.js";import{D as M,h as b,b as D}from"./adapters-BaX7y4Hf.js";function E(s,a){if(!s)return;const c=s.value.split(`
 `),r=Math.min(Math.max(1,Number(a)||1),c.length),n=c.slice(0,r-1).reduce((u,d)=>u+d.length+1,0);s.focus({preventScroll:!0}),s.setSelectionRange(n,n+c[r-1].length);const l=parseFloat(getComputedStyle(s).lineHeight)||18;s.scrollTop=Math.max(0,(r-1)*l-s.clientHeight/2+l)}const I=i.forwardRef(function({value:a,onChange:c,rows:r=12,placeholder:n,markLine:l,markNote:u,markFixed:d,focusName:h,...f},v){const o=i.useRef(null),p=i.useRef(null),[y,T]=i.useState({line:1,column:1}),[j,k]=i.useState("");i.useImperativeHandle(v,()=>o.current);const w=Math.max(1,String(a||"").split(`
 `).length),g=()=>{p.current&&o.current&&(p.current.scrollTop=o.current.scrollTop)},m=()=>{const t=o.current;if(!t)return;const x=t.value.slice(0,t.selectionStart),A=x.split(`
 `).length;T({line:A,column:x.length-x.lastIndexOf(`

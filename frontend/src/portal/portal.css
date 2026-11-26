@@ -15,10 +15,10 @@ h1 { font-size: 26px; } h2 { font-size: 16px; } h3 { font-size: 14px; }
 .eyebrow { font-size: 10px; letter-spacing: 1.4px; font-weight: 700; color: var(--muted); margin: 0 0 6px; text-transform: uppercase; }
 
 /* top bar */
-.topbar { position: sticky; top: 0; z-index: 20; display: flex; align-items: center; gap: 18px; height: 58px; padding: 0 20px; background: linear-gradient(90deg, var(--nav), var(--nav-2)); color: var(--nav-text); box-shadow: 0 1px 0 rgb(255 255 255 / .04), var(--shadow-sm); }
+.topbar { position: sticky; top: 0; z-index: 20; display: flex; align-items: center; gap: 18px; height: 58px; padding: 0 20px; background: var(--nav); color: var(--nav-text); box-shadow: 0 1px 0 rgb(255 255 255 / .04), var(--shadow-sm); }
 .brand { display: flex; align-items: center; gap: 10px; color: #fff; text-decoration: none; font-weight: 700; }
 .brand small { display: block; font-weight: 500; font-size: 11px; color: var(--nav-muted); }
-.brand-mark { display: grid; place-items: center; width: 32px; height: 32px; border-radius: 9px; background: linear-gradient(135deg, #6366f1, #22d3ee); color: #fff; font-weight: 800; box-shadow: 0 4px 12px rgb(99 102 241 / .35); }
+.brand-mark { display: grid; place-items: center; width: 32px; height: 32px; border-radius: 4px; background: var(--accent); color: var(--on-accent); font-weight: 800; box-shadow: 3px 3px 0 0 rgb(0 0 0 / .35); }
 .nav { display: flex; gap: 4px; margin-right: auto; }
 .nav a { color: var(--nav-muted); text-decoration: none; padding: 8px 12px; border-radius: 8px; font-size: 13px; font-weight: 600; transition: background .15s var(--ease), color .15s; }
 .nav a:hover { background: #ffffff14; color: #fff; }
@@ -334,7 +334,7 @@ table.data tr.failed td { color: var(--danger); }
 .cap-table td:nth-child(2) { font-weight: 700; text-align: right; white-space: nowrap; }
 .capacity summary { cursor: pointer; color: var(--accent); font-weight: 600; font-size: 13px; }
 /* Admin → Name & look */
-.brand-preview { display: flex; align-items: center; gap: 10px; padding: 12px 14px; border-radius: 12px; background: linear-gradient(90deg, #0c1425, #131f3a); color: #e4e9f3; margin: 4px 0 12px; }
+.brand-preview { display: flex; align-items: center; gap: 10px; padding: 12px 14px; border-radius: 12px; background: #0c1425; color: #e4e9f3; margin: 4px 0 12px; }
 .brand-preview .fx-logo { background: #fff; border-radius: 9px; padding: 3px; }
 .brand-preview .fx-name { display: flex; flex-direction: column; line-height: 1.1; }
 .brand-preview .fx-name b { font-size: 16px; font-weight: 800; }

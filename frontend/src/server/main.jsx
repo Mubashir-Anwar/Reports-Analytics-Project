@@ -5,7 +5,7 @@ import ServerApp from './ServerApp.jsx';
 import '../shared/theme.css';
 import '../portal/portal.css';
 import './server-new.css';
-import './login-genz.css';
+import './login-px.css';
 
 createRoot(document.getElementById('root')).render(
   <StrictMode>

@@ -98,7 +98,9 @@ def test_rate_limit_per_key(site):
 
 
 def test_public_openapi(site):
-    spec = site.get("/api/v1/openapi.json").json()
+    site.cookies.clear()
+    assert site.get("/api/v1/openapi.json").status_code == 401                  # signed out, no key
+    spec = site.get("/api/v1/openapi.json", headers=site.key_headers).json()
     assert "/api/v1/reports/{report_id}/run" in spec["paths"] and "/generate/{report_file}" in spec["paths"]
     assert not any(path.startswith("/api/admin") for path in spec["paths"])
     assert spec["components"]["securitySchemes"]["ApiKey"]["name"] == "X-API-Key"

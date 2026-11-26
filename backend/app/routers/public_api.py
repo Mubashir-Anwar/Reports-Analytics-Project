@@ -231,8 +231,13 @@ def register(app: FastAPI, ctx: SimpleNamespace) -> None:
                         headers={"Content-Disposition": f'attachment; filename="{run["reportId"]}-{stamp}.{run["format"]}"'})
 
     @app.get("/api/v1/openapi.json", include_in_schema=False)
-    def v1_openapi() -> dict[str, Any]:
-        """The public part of the API as OpenAPI 3 (always available, also when /docs is switched off)."""
+    def v1_openapi(request: Request) -> dict[str, Any]:
+        """The public part of the API as OpenAPI 3 (also when /docs is switched off): for a signed-in user or an API key."""
+        from backend.app.security import api_keys as key_store  # noqa: PLC0415
+        from backend.app.security.access import client_address  # noqa: PLC0415
+        token = request.headers.get("X-API-Key", "")
+        if ctx.current_session(request) is None and not (token and key_store.key_from_token(token, client_address(request))):
+            raise HTTPException(status_code=401, detail="Sign in or send X-API-Key to read the API description")
         full = app.openapi()
         paths = {path: item for path, item in full.get("paths", {}).items() if path.startswith(PUBLIC_PREFIXES)}
         security = {"ApiKey": {"type": "apiKey", "in": "header", "name": "X-API-Key",

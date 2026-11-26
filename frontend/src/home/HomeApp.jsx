@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import { request } from '../api.js';
 import { Icon } from '../shared/NavBar.jsx';
+import PixelField from '../shared/PixelField.jsx';
 import { Topbar } from '../portal/Shell.jsx';
 import { AdapterWizard } from '../shared/adapters.jsx';
 import { SetupAdminBanner } from '../shared/SetupAdmin.jsx';
@@ -75,7 +76,7 @@ export default function HomeApp() {
       <main className="page hm">
         {me?.temporary && <SetupAdminBanner me={me} />}
         {me && (
-          <section className="hm-hero">
+          <section className="hm-hero px-in">
             <div>
               <p className="hm-hi">{greeting()}, <b>{me.username}</b></p>
               <h1>{next ? next.title : 'What would you like to do?'}</h1>
@@ -84,7 +85,7 @@ export default function HomeApp() {
               {next && !next.connect && <a className="btn primary hm-go" href={next.href}>{next.go} →</a>}
               {!next && parts[0] && <a className="btn primary hm-go" href={parts[0].href}>Open {parts[0].name} →</a>}
             </div>
-            <span className="hm-art" aria-hidden="true"><i /><i /><i /><i /><i /></span>
+            <span className="hm-art"><PixelField cell={10} gap={3} bars={8} /></span>
           </section>
         )}
         {problem && <div className="notice error">{problem}</div>}

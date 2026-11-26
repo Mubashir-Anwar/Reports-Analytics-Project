@@ -12,13 +12,13 @@ every one with a comment.
 | `/generate/<ID>.<pdf\|xlsx\|csv>` | Runs a report, returns the file | Your website / Java server (and users through it) | Signed link, `X-Report-Token`, or admin token |
 | `/reports` | List of reports and their questions | Your website / Java server, the `/ui` page | Same as `/generate` |
 | `/reports/connections/<id>/status` | Is a report's data adapter reachable (used by `/ui`) | The `/ui` page | Same as `/generate` |
-| `/health` | Liveness check for load balancers | Load balancer / monitoring | Open (shows only status and database name) |
+| `/health`, `/ready` | Liveness and readiness checks | Load balancer / monitoring | Open, but only `{"status": …}`; version, database name and error text need a sign-in or `X-Admin-Token` |
 | `/ui`, `/assets/*` | Report runner page | End users (usually through your app or proxy) | Page is open; its data calls need report access |
 | `/designer` | Report designer | Report designers only | `REPORTING_ADMIN_TOKEN` or `REPORTING_DESIGNER_TOKEN` |
 | `/admin` | Management page (data sources, logs) | Administrators only | `REPORTING_ADMIN_TOKEN` |
 | `/api/admin/*` | API behind `/admin` and `/designer` | Administrators and designers | Admin or designer token (per endpoint) |
 | `/analytics`, `/api/analytics/*` | Datasets, model and dashboards | Signed-in users with the Analytics right (datasets and the model: also Designer or Admin) | Sign-in session |
-| `/docs`, `/redoc`, `/openapi.json` | API documentation | Developers only | Switch off in production |
+| `/docs`, `/redoc`, `/openapi.json` | API documentation | Developers only | Signed-in users (or `X-Admin-Token`) only; switch off in production |
 
 ### Roles
 
@@ -269,7 +269,7 @@ webhook URL and requests per minute). The key stays on the website's server: `X-
 | `POST /api/v1/reports/{id}/jobs` | Runs in the background (202 + `Location`); at most 5 waiting/running per key |
 | `GET /api/v1/jobs/{id}`, `GET /api/v1/jobs/{id}/file` | Status, then the file |
 | `POST /api/v1/links` | A short-lived signed URL for a browser (parameters cannot be changed) |
-| `GET /api/v1/openapi.json` | This API as OpenAPI 3 (always on, no data) |
+| `GET /api/v1/openapi.json` | This API as OpenAPI 3 (always on; needs `X-API-Key` or a sign-in) |
 | `GET /api/v1/analytics/datasets` | Analytics datasets in the key's folders: columns, status, record count |
 | `GET /api/v1/analytics/dashboards`, `GET /api/v1/analytics/dashboards/{id}` | Dashboards in the key's folders, with their tiles (visual definitions) to draw them in your own page |
 | `POST /api/v1/analytics/query` | One visual: `{"dataset", "groupBy": [{"column", "bucket"}], "values": [{"column", "agg"}], "filters": […]}` → `{"columns", "rows"}` |

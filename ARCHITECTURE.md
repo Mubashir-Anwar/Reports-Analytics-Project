@@ -219,7 +219,7 @@ MongoDB query) and returns our report + design plus a list of warnings for what 
 | Data sources | `/api/data-sources…` (older: `/api/admin/connections…`) | The right of their part (`services/adapter_areas.py`); Admin: all |
 | `/server` portal | `/api/server/login`, `/repository`, `/reports/{id}` (details, edit, copy, move, file, run), `/upload`, `/folders…`, `/connections` | Session cookie; viewer < designer < admin |
 | Administration | `/api/admin/users…`, `/logs…`, `/audit`, `/whoami` | Admin token |
-| Health | `/health` | Open |
+| Health | `/health`, `/ready` | Open (status only; details after sign-in) |
 | Analytics | `/api/analytics/info`, `/datasets…` (test, import, refresh, rows, refreshes), `/relationships…`, `/dashboards…` (+ `/file`, `/import`), `/powerbi/inspect`, `/powerbi/import`, `/query`, `/query-batch` | Session: Analytics right (datasets and the model also Designer or Admin) |
 | Server dashboards | `/api/server/dashboards/{id}` (+ `/query-batch`, `/file`, `/move`), `/api/server/dashboards/upload` | Session with the Report Server right; folder permissions |
 | Analytics administration | `/api/admin/analytics` (+ `/datasets/{id}/refresh`, `/schedule`, `DELETE /datasets/{id}`, `/dashboards/{id}/owner`, `/cleanup`) | Admin right |

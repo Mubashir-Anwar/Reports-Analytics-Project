@@ -28,11 +28,12 @@ const FUNCTIONS = [
  * functions below; double-click (or Insert) puts the item at the cursor.
  * For a Static Text, inserting a field turns it into a Text Field (a static text cannot show data).
  */
-export default function ExpressionEditor({ element, report, design, onSave, onClose, onAddField }) {
-  const isStatic = element.type === 'staticText';
-  const [text, setText] = useState(isStatic ? element.text || '' : element.expression || '');
+export default function ExpressionEditor({ element, report, design, onSave, onClose, onAddField, field = null }) {
+  // field = { key, label }: edit that property only (e.g. printWhenExpression), as a plain expression
+  const isStatic = !field && element.type === 'staticText';
+  const [text, setText] = useState(field ? element[field.key] || '' : isStatic ? element.text || '' : element.expression || '');
   // Formatted text: some words bold / coloured, data as chips between the words (markup HTML)
-  const [formatted, setFormatted] = useState(element.markup === 'html' && !isJavaExpression(isStatic ? element.text : element.expression));
+  const [formatted, setFormatted] = useState(!field && element.markup === 'html' && !isJavaExpression(isStatic ? element.text : element.expression));
   const rich = useRef(null);
   const [category, setCategory] = useState('fields');
   const [filter, setFilter] = useState('');
@@ -93,6 +94,7 @@ export default function ExpressionEditor({ element, report, design, onSave, onCl
   };
 
   const save = () => {
+    if (field) { onSave({ [field.key]: text }); return; }
     const markup = formatted ? { markup: 'html' } : element.markup === 'html' ? { markup: 'none' } : {};
     if (isStatic && willConvert) onSave({ type: 'textField', expression: text, pattern: element.pattern || '', blankWhenNull: true, text: undefined, ...markup });
     else if (isStatic) onSave({ text, ...markup });
@@ -113,21 +115,22 @@ export default function ExpressionEditor({ element, report, design, onSave, onCl
     <div className="modal-back" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
       <div className="modal expr-editor" role="dialog" aria-label="Expression Editor" onKeyDown={(e) => { e.stopPropagation(); if (e.key === 'Escape') onClose(); if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) save(); }}>
         <div className="wizard-head">
-          <h3>{isStatic ? 'Static Text' : 'Expression Editor'}</h3>
+          <h3>{field ? field.label : isStatic ? 'Static Text' : 'Expression Editor'}</h3>
           <p className="muted">
-            {isStatic
+            {field ? 'Printed only when this is true, e.g. $F{Status}.equals("Approved") or $V{PAGE_NUMBER} == 1. Empty = always. Double-click a field on the left to insert it.'
+              : isStatic
               ? 'Type the text. Insert a field, parameter or variable to show data — the Static Text then becomes a Text Field.'
               : 'Text with $F{…} / $P{…} / $V{…} is filled in as written (e.g. “Branch: $F{Branch}”). Start with = for a Java-style expression (e.g. =$F{A} + " " + $F{B}).'}
           </p>
         </div>
-        <div className="expr-mode" role="tablist" aria-label="How the text is written">
+        {!field && <div className="expr-mode" role="tablist" aria-label="How the text is written">
           <button type="button" role="tab" aria-selected={!formatted} className={!formatted ? 'on' : ''} onClick={() => switchMode(false)}>
             {isStatic ? 'Plain text' : 'Text / expression'}
           </button>
           <button type="button" role="tab" aria-selected={formatted} className={formatted ? 'on' : ''} disabled={!formatted && javaMode}
             title={javaMode ? 'A Java expression (starting with =) makes its own text. Remove the = to format words, and put formulas in ƒx.' : 'Bold, italic, colour on some words; data between the words'}
             onClick={() => switchMode(true)}><b>B</b> <i>I</i> <u>U</u> Formatted text</button>
-        </div>
+        </div>}
         {formatted ? (
           <RichTextEditor ref={rich} value={text} onChange={setText} autoFocus rows={6} label="Formatted text" />
         ) : (
