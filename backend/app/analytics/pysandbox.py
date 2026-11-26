@@ -89,6 +89,10 @@ WRITE_FLAGS = os.O_WRONLY | os.O_RDWR | os.O_CREAT | os.O_APPEND | os.O_TRUNC
 WRITE_EVENTS = ("os.remove", "os.rename", "os.rmdir", "os.mkdir", "os.truncate", "os.utime", "os.chmod", "os.chown",
                 "shutil.copyfile", "shutil.copymode", "shutil.copystat", "shutil.copytree", "shutil.move", "shutil.rmtree",
                 "shutil.make_archive", "shutil.unpack_archive", "tempfile.mkstemp", "tempfile.mkdtemp")
+# Linux system files scikit-learn's helpers read (CPU count, loaded libraries): read-only, nothing secret in them
+SYSTEM_FILES = ("/sys/fs/cgroup/cpu.max", "/sys/fs/cgroup/cpu/cpu.cfs_quota_us", "/sys/fs/cgroup/cpu/cpu.cfs_period_us",
+                "/proc/self/maps", "/proc/self/status", "/proc/self/cgroup", "/proc/self/mountinfo", "/proc/cpuinfo",
+                "/proc/meminfo", "/proc/stat", "/sys/devices/system/cpu/online", "/sys/devices/system/cpu/possible")
 LIST_EVENTS = ("os.listdir", "os.scandir", "glob.glob", "glob.glob/2", "os.walk", "os.fwalk")
 
 
@@ -104,6 +108,7 @@ def install_guard(work: str) -> None:
     readable = tuple({norm(absolute(p)) for p in (sys.prefix, sys.base_prefix, sys.exec_prefix, *sys.path) if p and os.path.isdir(p)}
                      | {work_root})
     native_roots = tuple(root for root in readable if root != work_root)
+    system_files = frozenset(norm(name) for name in SYSTEM_FILES) if os.name != "nt" else frozenset()
 
     def text(value: object) -> str | None:
         if isinstance(value, int):
@@ -146,8 +151,8 @@ def install_guard(work: str) -> None:
             writing = any(ch in mode for ch in "wax+") or bool(flags & WRITE_FLAGS)
             if writing and not under(path, (work_root,)):
                 refuse("writing files outside the script's own folder")
-            if not writing and not under(path, readable):
-                refuse("reading files of the server (use the datasets in dfs)")
+            if not writing and not under(path, readable) and path not in system_files:
+                refuse(f"reading files of the server ({path}; use the datasets in dfs)")
         elif event in WRITE_EVENTS:
             for arg in args[:2]:
                 path = text(arg)
