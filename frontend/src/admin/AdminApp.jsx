@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
+import SiteFooter from '../shared/SiteFooter.jsx';
 import { api } from '../api.js';
 import AnalyticsTab from './AnalyticsTab.jsx';
 import ApiKeysTab from './ApiKeysTab.jsx';
@@ -111,6 +112,7 @@ export default function AdminApp() {
           </div>
         </main>
       )}
+      <SiteFooter />
     </>
   );
 }

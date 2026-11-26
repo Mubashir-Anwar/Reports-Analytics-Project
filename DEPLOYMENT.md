@@ -462,7 +462,7 @@ Checked in the security review (tests: `tests/test_security.py`, `tests/test_sto
 
 | Area | What the service does | What you do |
 |---|---|---|
-| Sign-in and roles | Every data API needs a token or a `/server` session (a test calls every route without credentials); constant-time token checks; PBKDF2-SHA256 with 600 000 iterations (older hashes are upgraded at the next sign-in); 10 failed sign-ins per address in 10 minutes, on all instances | Create named users in Admin → Users; give designer/admin roles only to people who build reports |
+| Sign-in and roles | Every data API needs a token or a `/server` session (a test calls every route without credentials); constant-time token checks; PBKDF2-SHA256 with 600 000 iterations (older hashes are upgraded at the next sign-in); an account is locked after 5 wrong passwords for 15 minutes (Admin → Limits → Sign-in, or `REPORTING_LOGIN_MAX_FAILURES` / `REPORTING_LOGIN_LOCK_MINUTES`; the sign-in page shows the last 3 tries; a new password unlocks it) and an address after twice that many, on all instances | Create named users in Admin → Users; give designer/admin roles only to people who build reports |
 | Secrets at rest | Adapter URLs/passwords and the admin token are in `private_secrets.json` (mode 0600). With **`REPORTING_SECRETS_KEY`** they are encrypted (Fernet: AES + HMAC); an existing plain file is encrypted at the next start | **Set `REPORTING_SECRETS_KEY`** (a Fernet key or a passphrase of 32+ characters) and keep it outside the data folder / database backups. Losing it means re-entering the adapter passwords |
 | Report databases | MongoDB pipelines: no writes (`$out`, `$merge`), no JavaScript, no server internals (`$currentOp`, `$indexStats`, …), no `system.*` collections or other databases. SQL: one read-only statement, bound values, read-only transaction (SQL Server: rolled back) | Give every adapter a **read-only database user** that can see only the reporting collections / tables |
 | Uploads | `.mrd` / `.jrxml` are parsed with defusedxml (no DTD, entities or external references); 12 MB file and 25 MB request limits | — |
@@ -628,7 +628,7 @@ Git, e-mail or chat. `docs/SETTINGS.md` lists every setting.
 | API keys: **name, owner, which website/IP, folders, created** (not the key itself, which is only on the website server) | To know whom to call when rotating | Create a new key for that website |
 | Super admin user names (2+) | Recovery | `reset_password` (above) |
 | Server: host names, ports, TLS certificate renewal date, reverse proxy config, service/Docker command | Restart and renewal | — |
-| Limits you chose: `REPORT_MAX_*`, `REPORT_EXPORT_*`, `REPORTING_JOB_WORKERS`, `REPORTING_OUTPUT_DAYS`, `ANALYTICS_*` | Capacity decisions | Defaults apply |
+| Limits you chose: `REPORT_MAX_*`, `REPORT_EXPORT_*`, `REPORTING_JOB_WORKERS`, `REPORTING_OUTPUT_DAYS`, `ANALYTICS_*`, `REPORTING_LOGIN_*` | Capacity decisions | Defaults apply |
 | Backups: what is backed up (storage database or data folder, **excluding** `data/exports`; `data/analytics` is optional: datasets can be imported again from their sources), how often, where, and the last restore test | Disaster recovery | — |
 
 Back up the secrets **separately** from the database backup: a stolen backup without `REPORTING_SECRETS_KEY` does

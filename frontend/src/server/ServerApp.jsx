@@ -1,4 +1,5 @@
 import PasswordInput from '../shared/PasswordInput.jsx';
+import SiteFooter from '../shared/SiteFooter.jsx';
 import { Suspense, lazy, useCallback, useEffect, useMemo, useState } from 'react';
 import ContextMenu from '../ContextMenu.jsx';
 import { Notice, Topbar } from '../portal/Shell.jsx';
@@ -148,6 +149,16 @@ function LoginForm({ onSignedIn, message }) {
   const [password, setPassword] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(message);
+  // { left, failed, max, lockMinutes, until } after a wrong password; until = when a lock ends (ms), for the timer
+  const [tries, setTries] = useState(null);
+  const remaining = useCountdown(tries?.until);
+  const lockedNow = Boolean(tries?.until) && remaining > 0;
+  useEffect(() => {
+    if (tries?.until && remaining === 0) {       // the lock is over: say so and let them try again
+      setTries(null);
+      setError({ kind: 'ok', text: 'The lock is over. You can sign in again.' });
+    }
+  }, [remaining]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const submit = async (event) => {
     event.preventDefault();
@@ -161,8 +172,16 @@ function LoginForm({ onSignedIn, message }) {
       if (user.mustChangePassword) {
         try { sessionStorage.setItem('must-change-password', '1'); } catch { /* private mode */ }
       }
+      setTries(null);
       onSignedIn(user);
-    } catch (failure) { setError({ text: failure.message, kind: 'error' }); }
+    } catch (failure) {
+      setError({ text: failure.message, kind: 'error' });
+      setPassword('');
+      setTries(typeof failure.attemptsLeft === 'number' ? {
+        left: failure.attemptsLeft, failed: failure.failed, max: failure.maxFailures, lockMinutes: failure.lockMinutes,
+        until: failure.status === 429 && failure.retryAfter ? Date.now() + failure.retryAfter * 1000 : 0,
+      } : null);
+    }
     finally { setBusy(false); }
   };
   const backToSignIn = (text) => {
@@ -187,7 +206,8 @@ function LoginForm({ onSignedIn, message }) {
         <label className="field pxl-field"><span>Username</span><input name="username" autoComplete="username" value={username} onChange={(e) => setUsername(e.target.value)} required autoFocus /></label>
         <label className="field pxl-field"><span>Password</span><PasswordInput name="password" autoComplete="current-password" value={password} onChange={(e) => setPassword(e.target.value)} required /></label>
         <Notice message={error} />
-        <button className="btn primary pxl-go" type="submit" disabled={busy}>{busy ? <><span className="px-loader" aria-hidden="true"><i /><i /><i /></span> Signing in…</> : <>Sign in <span aria-hidden="true">→</span></>}</button>
+        {tries ? <TriesMeter tries={tries} remaining={remaining} /> : null}
+        <button className="btn primary pxl-go" type="submit" disabled={busy || lockedNow}>{busy ? <><span className="px-loader" aria-hidden="true"><i /><i /><i /></span> Signing in…</> : <>Sign in <span aria-hidden="true">→</span></>}</button>
         <button type="button" className="btn quiet link-btn pxl-forgot" onClick={() => setMode('forgot')}>Forgot your password?</button>
         <details className="pxl-help">
           <summary>First time here?</summary>
@@ -195,6 +215,46 @@ function LoginForm({ onSignedIn, message }) {
         </details>
       </form>
     </LoginShell>
+  );
+}
+
+/** Seconds left until `until` (ms since 1970), ticking every second; 0 when there is none or it has passed. */
+function useCountdown(until) {
+  const left = () => (until ? Math.max(0, Math.ceil((until - Date.now()) / 1000)) : 0);
+  const [seconds, setSeconds] = useState(left);
+  useEffect(() => {
+    setSeconds(left());
+    if (!until) return undefined;
+    const timer = setInterval(() => setSeconds(left()), 250);
+    return () => clearInterval(timer);
+  }, [until]); // eslint-disable-line react-hooks/exhaustive-deps
+  return seconds;
+}
+
+const clock = (seconds) => `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`;
+
+/** Pixel blocks for the attempts (used ones crossed out) and, when locked, a countdown with a draining bar. */
+function TriesMeter({ tries, remaining }) {
+  const max = Math.max(1, Math.min(tries.max || 5, 12));
+  const used = Math.min(max, tries.failed ?? (max - tries.left));
+  const locked = tries.left === 0;
+  const total = (tries.lockMinutes || 1) * 60;
+  const warn = !locked && tries.left <= 2;
+  return (
+    <div className={`pxl-tries${locked ? ' locked' : warn ? ' warn' : ' calm'}`} role="status" aria-live="polite">
+      <div className="pxl-tries-row">
+        <span className="pxl-tries-blocks" aria-hidden="true">
+          {Array.from({ length: max }, (_, i) => <i key={i} className={i < used ? 'used' : 'on'} style={{ '--i': i }} />)}
+        </span>
+        {locked
+          ? <b>Locked <span className="pxl-clock">{remaining ? clock(remaining) : `${tries.lockMinutes}:00`}</span></b>
+          : <b>{used} failed · {tries.left} left</b>}
+      </div>
+      {locked && remaining > 0 && (
+        <span className="pxl-drain" aria-hidden="true"><i style={{ width: `${Math.min(100, (remaining / total) * 100)}%` }} /></span>
+      )}
+      {locked && <small>Sign-in opens again when the timer ends. An administrator can also set a new password.</small>}
+    </div>
   );
 }
 
@@ -349,11 +409,12 @@ function Repository({ user, onUser }) {
     if (!window.confirm(`Delete the dashboard “${d.name}” from the server and Analytics? Its datasets stay. This cannot be undone.`)) return;
     try { await serverApi.deleteDashboard(d.id); if (openDash?.id === d.id) setOpenDash(null); await done(`The dashboard “${d.name}” was deleted.`); } catch (error) { fail(error); }
   };
-  const downloadDashboard = async (d) => {
+  const downloadDashboard = async (d, withData = false) => {
     try {
       const { saveDashboardFile } = await import('../analytics/api.js');
-      saveDashboardFile(await serverApi.dashboardFile(d.id), d.name);
-      setMessage({ text: `Downloaded ${d.name}.mdash: the dashboard and its datasets' definitions (no data). Upload it on another server with Add Resource.`, kind: 'ok' });
+      saveDashboardFile(await serverApi.dashboardFile(d.id, withData), d.name);
+      setMessage({ text: withData ? `Downloaded “${d.name} (with data).mdash”: it opens on another server even without the database. Upload it there with Add Resource.`
+        : `Downloaded ${d.name}.mdash: the dashboard and its datasets' definitions (no data). Upload it on another server with Add Resource.`, kind: 'ok' });
     } catch (error) { fail(error); }
   };
   const canManageDash = (d) => designer && d.access === 'manage';
@@ -361,7 +422,8 @@ function Repository({ user, onUser }) {
     { header: `${d.name} (dashboard)` },
     { label: 'Open', icon: '📊', onClick: () => setOpenDash(d) },
     { label: 'Open in Analytics', icon: '✎', disabled: !user.rights?.includes('analytics'), hint: user.rights?.includes('analytics') ? 'Change it there' : 'Needs the Analytics right', onClick: () => window.open(`/analytics#dash/${encodeURIComponent(d.id)}`, '_blank', 'noopener') },
-    { label: 'Download (.mdash)', icon: '⤓', disabled: !canManageDash(d), hint: canManageDash(d) ? 'The dashboard and its datasets (no data)' : 'Needs the Manage permission on this folder', onClick: () => downloadDashboard(d) },
+    { label: 'Download with data (.mdash)', icon: '📦', disabled: !canManageDash(d), hint: canManageDash(d) ? 'With the records: opens without the database' : 'Needs the Manage permission on this folder', onClick: () => downloadDashboard(d, true) },
+    { label: 'Download definitions only', icon: '⤓', disabled: !canManageDash(d), hint: canManageDash(d) ? 'The dashboard and its datasets (no data)' : 'Needs the Manage permission on this folder', onClick: () => downloadDashboard(d) },
     '-',
     { label: 'Cut', icon: '✂', disabled: !canManageDash(d), onClick: () => { setClipboard({ mode: 'cut', id: d.id, title: d.name, kind: 'dashboard' }); setMessage({ text: `“${d.name}” cut — right-click a folder → Paste to move it.`, kind: 'ok' }); } },
     { label: 'Paste into this folder', icon: '📋', disabled: !canManageFolder(d.folder) || !clipboard, onClick: () => paste(d.folder) },
@@ -577,6 +639,7 @@ export default function ServerApp() {
       {user === undefined && <div className="login-wrap"><p className="muted">Checking your session…</p></div>}
       {user === null && <LoginForm key={loginMessage?.text || 'login'} message={loginMessage} onSignedIn={(u) => { setLoginMessage(null); if (!leaveLogin(u)) setUser(u); }} />}
       {user && <Repository user={user} onUser={keepUser} />}
+      {user && <SiteFooter />}
     </>
   );
 }

@@ -1,5 +1,6 @@
 """Analytics (Phase 4): datasets imported to Parquet, the model (relationships), the query engine, dashboards,
 rights, scheduled refresh and the public API v1."""
+import json
 import sys
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -515,3 +516,31 @@ def test_model_check_suggest_update_and_dax_across_related_tables(bi):
     suggested = bi.get("/api/analytics/relationships/suggest").json()["suggestions"]
     pair = [s for s in suggested if {s["fromName"], s["toName"]} == {"Branches", "Visits"}]
     assert pair and pair[0]["fromColumn"] == "Code" and pair[0]["matchedKeys"] == 2
+
+
+def test_dashboard_file_with_data_opens_without_the_database(bi):
+    dash, orders, branches = sales_dashboard(bi)
+    exported = bi.get(f"/api/analytics/dashboards/{dash['id']}/file?data=true")
+    assert exported.status_code == 200 and "with data" in exported.headers["content-disposition"]
+    content = exported.json()
+    assert content["withData"] is True and all(d["data"]["parquet"] and d["data"]["rowCount"] for d in content["datasets"])
+    # another server: the datasets are gone and their data adapter is unknown, yet the dashboard opens from the file
+    for ds in (orders, branches):
+        assert bi.request("DELETE", f"/api/analytics/datasets/{ds}?force=true", json={}).status_code == 200
+    moved = {**content, "datasets": [{**d, "connectionId": "elsewhere"} for d in content["datasets"]]}
+    make_user(bi, "omar", ["server", "designer", "analytics"])
+    sign_in(bi, "omar")
+    made = bi.post("/api/server/dashboards/upload", json={"content": json.dumps(moved), "folder": "Offline"})
+    assert made.status_code == 201, made.text
+    made = made.json()
+    assert len(made["withData"]) == 2 and made["created"] == made["withData"]
+    for ds in made["created"]:
+        record = store.dataset(ds)
+        assert record["status"] == "ready" and record["rowCount"] > 0 and record["connectionId"] == "elsewhere"
+    shown = bi.post(f"/api/server/dashboards/{made['dashboard']['id']}/query-batch",
+                    json={"queries": [{**t, "tileId": t["id"]} for t in made["dashboard"]["tiles"]]}).json()["results"]
+    assert shown[0]["rows"] == [["Sindh", 200], ["Punjab", 150.5], ["Capital", 25]]
+    # a damaged data part is refused and nothing is saved
+    broken = {**content, "datasets": [{**content["datasets"][0], "id": "ds_222222222222", "data": {"parquet": "bm90IHBhcnF1ZXQ="}}]}
+    refused = bi.post("/api/server/dashboards/upload", json={"content": broken, "folder": "Broken"})
+    assert refused.status_code == 422 and "Parquet" in refused.json()["detail"]

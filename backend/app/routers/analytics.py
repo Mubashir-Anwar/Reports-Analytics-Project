@@ -148,9 +148,14 @@ def register(app: FastAPI, ctx: SimpleNamespace) -> None:
             raise HTTPException(status_code=404, detail="Dashboard not found")
         return item
 
-    def file_response(item: dict[str, Any]) -> JSONResponse:
+    def file_response(item: dict[str, Any], with_data: bool = False) -> JSONResponse:
         name = "".join(ch if ch.isalnum() or ch in "-_ " else "_" for ch in item.get("name") or "dashboard").strip() or "dashboard"
-        return JSONResponse(bundle.export(item), headers={"Content-Disposition": f'attachment; filename="{name}.mdash"'})
+        try:
+            content = bundle.export(item, with_data=with_data)
+        except ValueError as exc:
+            raise bad(exc) from None
+        suffix = " (with data)" if with_data else ""
+        return JSONResponse(content, headers={"Content-Disposition": f'attachment; filename="{name}{suffix}.mdash"'})
 
     def install(request: Request, session: dict[str, Any], payload: dict[str, Any], default_folder: str) -> dict[str, Any]:
         try:
@@ -427,12 +432,13 @@ def register(app: FastAPI, ctx: SimpleNamespace) -> None:
         return {"deleted": dashboard_id}
 
     @app.get("/api/analytics/dashboards/{dashboard_id}/file")
-    def export_dashboard(request: Request, dashboard_id: str) -> JSONResponse:
+    def export_dashboard(request: Request, dashboard_id: str, data: bool = False) -> JSONResponse:
+        """?data=true: with the imported records of its datasets (opens on a server without the database)."""
         session = user(request)
         item = visible_dashboard(session, dashboard_id)
         if not (may_model(session) or may_change(session, item)):      # the file holds the datasets' queries
             raise HTTPException(status_code=403, detail="Downloading a dashboard needs the Designer or Admin right, or owning it")
-        return file_response(item)
+        return file_response(item, with_data=data)
 
     @app.post("/api/analytics/dashboards/import")
     async def import_dashboard(request: Request) -> JSONResponse:
@@ -507,9 +513,9 @@ def register(app: FastAPI, ctx: SimpleNamespace) -> None:
         return {"results": run_queries(queries, payload.get("filters"), caller_of("", user=session["username"]))}
 
     @app.get("/api/server/dashboards/{dashboard_id}/file")
-    def server_dashboard_file(request: Request, dashboard_id: str) -> JSONResponse:
+    def server_dashboard_file(request: Request, dashboard_id: str, data: bool = False) -> JSONResponse:
         _session, item = server_dashboard(request, dashboard_id, permissions.MANAGE, "designer")
-        return file_response(item)
+        return file_response(item, with_data=data)
 
     @app.post("/api/server/dashboards/{dashboard_id}/move")
     async def server_move_dashboard(request: Request, dashboard_id: str) -> dict[str, Any]:

@@ -16,10 +16,11 @@ export default function DashboardViewer({ entry, mayManage, onBack, onMessage })
     queryBatch: (queries, filters) => serverApi.dashboardQuery(entry.id, queries, filters),
   }), [entry.id]);
 
-  const download = async () => {
+  const download = async (withData = true) => {
     try {
-      saveDashboardFile(await serverApi.dashboardFile(entry.id), entry.name);
-      onMessage({ text: `Downloaded ${entry.name}.mdash: the dashboard and its datasets' definitions (no data). Upload it on another server with Add Resource.`, kind: 'ok' });
+      saveDashboardFile(await serverApi.dashboardFile(entry.id, withData), entry.name);
+      onMessage({ text: withData ? `Downloaded “${entry.name} (with data).mdash”: the dashboard with its data. Upload it on another server with Add Resource; it opens even without the database.`
+        : `Downloaded ${entry.name}.mdash: the dashboard and its datasets' definitions (no data). Upload it on another server with Add Resource.`, kind: 'ok' });
     } catch (error) { notify(error.message, 'error'); }
   };
 
@@ -27,7 +28,8 @@ export default function DashboardViewer({ entry, mayManage, onBack, onMessage })
     <>
       <button type="button" className="btn" onClick={onBack}>← Back</button>
       {meta?.mayOpenAnalytics && <a className="btn" href={`/analytics#dash/${encodeURIComponent(entry.id)}`} target="_blank" rel="noopener">Open in Analytics</a>}
-      {mayManage && <button type="button" className="btn" onClick={download}>⤓ Download (.mdash)</button>}
+      {mayManage && <button type="button" className="btn" onClick={() => download(true)} title="The dashboard with its data (opens without the database)">⤓ Download with data</button>}
+      {mayManage && <button type="button" className="btn" onClick={() => download(false)} title="Definitions only: the other server imports the data">⤓ Definitions only</button>}
     </>
   );
   return (

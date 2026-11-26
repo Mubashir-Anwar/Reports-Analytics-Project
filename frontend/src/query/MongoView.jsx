@@ -5,6 +5,7 @@ import { useEffect, useRef, useState } from 'react';
 import { api } from '../api.js';
 import Grid, { shellJson } from './Grid.jsx';
 import UseQuery from './UseQuery.jsx';
+import { SaveQueryButton } from '../shared/SavedQueries.jsx';
 import QueryHelper from './QueryHelper.jsx';
 import { FIELD_MIME, addToText, buildMongo, emptyHelper, fieldTypes, newFilter, readDrag } from './queryHelper.js';
 
@@ -54,7 +55,17 @@ function Field({ label, value, onChange, placeholder, onEnter, kind }) {
   );
 }
 
-function Documents({ tab, onChange }) {
+/** A find (filter, projection, sort, limit) as pipeline stages, so it saves and opens like any other MongoDB query. */
+function findAsStages(q) {
+  const stages = [];
+  if (q.filter?.trim()) stages.push({ op: '$match', body: q.filter.trim(), on: true });
+  if (q.sort?.trim()) stages.push({ op: '$sort', body: q.sort.trim(), on: true });
+  if (q.projection?.trim()) stages.push({ op: '$project', body: q.projection.trim(), on: true });
+  if (q.limit) stages.push({ op: '$limit', body: String(q.limit), on: true });
+  return stages.length ? stages : [{ op: '$match', body: '{}', on: true }];
+}
+
+function Documents({ tab, onChange, notify }) {
   const [result, setResult] = useState(null);
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
@@ -91,6 +102,14 @@ function Documents({ tab, onChange }) {
           <select value={q.limit} onChange={(e) => set({ limit: Number(e.target.value) })}>{[20, 50, 100, 500].map((n) => <option key={n}>{n}</option>)}</select>
         </label>
         <button type="button" className="btn primary qm-go" disabled={busy} onClick={() => run(0)}>{busy ? 'Finding…' : '▶ Find'}</button>
+        <span className="qm-save">
+          <SaveQueryButton saved={tab.saved} notify={notify} onSaved={(item) => onChange({ saved: item, title: item.name })}
+            query={() => {
+              const stages = findAsStages(q);
+              const text = `db.getCollection("${tab.collection}").aggregate([\n${stages.map((s) => `  { ${s.op}: ${s.body} }`).join(',\n')}\n])`;
+              return { kind: 'mongo', connectionId: tab.connectionId, collection: tab.collection, text, stages };
+            }} />
+        </span>
       </div>
       {error && <div className="q-error" role="alert">{error}</div>}
       {result && (
@@ -183,6 +202,8 @@ function Aggregate({ tab, onChange, notify }) {
         <div className="qm-stages-head">
           <b>Pipeline</b><span className="muted">{stages.filter((s) => s.on).length} stages</span>
           <span className="grow" />
+          <SaveQueryButton saved={tab.saved} notify={notify} onSaved={(item) => onChange({ saved: item, title: item.name })}
+            query={() => ({ kind: 'mongo', connectionId: tab.connectionId, collection: tab.collection, text: code, stages: stages.map(({ op, body, on }) => ({ op, body, on })) })} />
           <UseQuery query={() => ({ connectionId: tab.connectionId, collection: tab.collection, queryLanguage: 'mongosh', querySource: code })} />
           <button type="button" className="btn sm" onClick={() => setShowCode(!showCode)}>{showCode ? 'Stages' : '</> Code'}</button>
         </div>
@@ -274,7 +295,7 @@ export default function MongoView({ tab, onChange, notify }) {
         ))}
       </div>
       <div className="q-mode-body" key={mode}>
-        {mode === 'docs' && <Documents tab={tab} onChange={onChange} />}
+        {mode === 'docs' && <Documents tab={tab} onChange={onChange} notify={notify} />}
         {mode === 'aggregate' && <Aggregate tab={tab} onChange={onChange} notify={notify} />}
         {mode === 'fields' && <Fields tab={tab} onUse={(f) => { const helper = tab.helper || emptyHelper(); onChange({ mode: 'docs', helperOpen: true, helper: { ...helper, filters: [...helper.filters, newFilter({ field: f.path, type: FIELD_TYPE[Object.keys(f.types)[0]] && Object.keys(f.types).length === 1 ? FIELD_TYPE[Object.keys(f.types)[0]] : '' })] } }); }} />}
       </div>

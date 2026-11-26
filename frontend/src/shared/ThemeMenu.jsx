@@ -13,61 +13,95 @@ export function useLook() {
   return [look, (change) => setLook(LOOK.save(change))];
 }
 
-function Swatch({ look }) {
+function colours(look) {
   const dark = look.mode === 'dark' || (look.mode === 'system' && LOOK.isDark());
   const accent = look.contrast === 'high' && dark ? '#fde047' : (dark ? DARK_ACCENT : Object.fromEntries(LOOK.ACCENTS.map((a) => [a.id, a.color])))[look.accent];
   const bar = look.contrast === 'high' ? '#000' : look.bar === 'accent' ? BAR[look.accent] : '#0c1425';
   const bg = look.contrast === 'high' ? (dark ? '#000' : '#fff') : dark ? '#0f1117' : '#f6f7fb';
   const panel = dark ? (look.contrast === 'high' ? '#161616' : '#171a23') : '#ffffff';
+  const ink = dark ? '#e8ebf5' : '#0f172a';
+  return { dark, accent, bar, bg, panel, ink };
+}
+
+const MINI = [3, 5, 4, 7, 6];   // the little pixel chart in every swatch
+
+/** A tiny screen of the look: title bar, side list and a pixel bar chart in the accent colour. */
+function Swatch({ look, big = false }) {
+  const c = colours(look);
   return (
-    <span className="lk-swatch" style={{ background: bg }} aria-hidden="true">
-      <i style={{ background: bar }} />
-      <span><i style={{ background: panel }} /><i style={{ background: `linear-gradient(${panel} 0 55%, ${accent} 55% 75%, ${panel} 75%)` }} /></span>
+    <span className={`lk-swatch ${big ? 'big' : ''}`} style={{ background: c.bg, '--sw-accent': c.accent, '--sw-panel': c.panel, '--sw-ink': c.ink }} aria-hidden="true">
+      <i className="lk-sw-bar" style={{ background: c.bar }}><b /><b /><b /></i>
+      <span className="lk-sw-body">
+        <i className="lk-sw-side" />
+        <span className="lk-sw-chart">
+          {MINI.map((h, col) => (
+            <span key={col} className="lk-sw-col">
+              {Array.from({ length: 7 }, (_, row) => <i key={row} className={6 - row < h ? 'on' : ''} style={{ '--d': `${(col * 7 + row) * 12}ms` }} />)}
+            </span>
+          ))}
+        </span>
+      </span>
     </span>
+  );
+}
+
+function Seg({ label, value, options, onPick }) {
+  const at = Math.max(0, options.findIndex(([id]) => id === value));
+  return (
+    <div className="lk-seg" role="group" aria-label={label} style={{ '--n': options.length, '--at': at }}>
+      <span className="lk-seg-block" aria-hidden="true" />
+      {options.map(([id, text]) => (
+        <button key={id} type="button" className={value === id ? 'on' : ''} aria-pressed={value === id} onClick={() => onPick(id)}>{text}</button>
+      ))}
+    </div>
   );
 }
 
 export function LookPanel({ onDone, style }) {
   const [look, save] = useLook();
   const preset = LOOK.presetOf(look);
+  const [pop, setPop] = useState(0);        // replays the pixel flash on the preview after each change
+  const change = (value) => { save(value); setPop((n) => n + 1); };
+  const current = LOOK.PRESETS.find((item) => item.id === preset);
+  const accentName = LOOK.ACCENTS.find((item) => item.id === look.accent)?.label || look.accent;
   return (
-    <div className="lk-panel" role="dialog" aria-label="Theme" style={style}>
-      <h3>Themes</h3>
+    <div className="lk-panel px-in" role="dialog" aria-label="Theme" style={style}>
+      <div className="lk-head">
+        <p className="lk-kicker"><b>◆</b> Your vibe<span className="lk-caret" aria-hidden="true" /></p>
+        <div className="lk-now" key={pop}>
+          <Swatch look={look} big />
+          <div><b>{current ? current.label : 'Custom mix'}</b><small>{colours(look).dark ? '☾ dark' : '☀ light'} · {accentName.toLowerCase()} · {look.density}</small></div>
+        </div>
+      </div>
+      <h3><span>01</span> Themes</h3>
       <div className="lk-presets">
-        {LOOK.PRESETS.map((item) => (
+        {LOOK.PRESETS.map((item, i) => (
           <button key={item.id} type="button" className={`lk-preset ${preset === item.id ? 'on' : ''}`} aria-pressed={preset === item.id}
-            onClick={() => save(item.look)} title={item.text}>
+            onClick={() => change(item.look)} title={item.text} style={{ '--i': i }}>
             <Swatch look={{ ...look, ...item.look }} />
             <b>{item.label}</b><small>{item.text}</small>
+            {preset === item.id && <em className="lk-on-tag" aria-hidden="true">✓ on</em>}
           </button>
         ))}
       </div>
-      <h3>Mode</h3>
-      <div className="lk-seg" role="group" aria-label="Mode">
-        {[['system', '◐ Auto'], ['light', '☀ Light'], ['dark', '☾ Dark']].map(([id, label]) => (
-          <button key={id} type="button" className={look.mode === id ? 'on' : ''} aria-pressed={look.mode === id} onClick={() => save({ mode: id })}>{label}</button>
-        ))}
-      </div>
-      <h3>Accent colour</h3>
+      <h3><span>02</span> Mode</h3>
+      <Seg label="Mode" value={look.mode} onPick={(id) => change({ mode: id })} options={[['system', '◐ Auto'], ['light', '☀ Light'], ['dark', '☾ Dark']]} />
+      <h3><span>03</span> Accent</h3>
       <div className="lk-row" role="group" aria-label="Accent colour">
         {LOOK.ACCENTS.map((item) => (
-          <button key={item.id} type="button" className={`lk-dot ${look.accent === item.id ? 'on' : ''}`} style={{ background: item.color }}
-            title={item.label} aria-label={item.label} aria-pressed={look.accent === item.id} onClick={() => save({ accent: item.id })} />
+          <button key={item.id} type="button" className={`lk-dot ${look.accent === item.id ? 'on' : ''}`} style={{ '--dot': item.color }}
+            title={item.label} aria-label={item.label} aria-pressed={look.accent === item.id} onClick={() => change({ accent: item.id })} />
         ))}
       </div>
-      <h3>Title bar</h3>
-      <div className="lk-seg" role="group" aria-label="Title bar">
-        {[['dark', 'Dark'], ['accent', 'Accent colour']].map(([id, label]) => (
-          <button key={id} type="button" className={look.bar === id ? 'on' : ''} aria-pressed={look.bar === id} onClick={() => save({ bar: id })}>{label}</button>
-        ))}
-      </div>
-      <h3>Spacing</h3>
-      <div className="lk-seg" role="group" aria-label="Spacing">
-        {[['comfortable', 'Comfortable'], ['compact', 'Compact']].map(([id, label]) => (
-          <button key={id} type="button" className={look.density === id ? 'on' : ''} aria-pressed={look.density === id} onClick={() => save({ density: id })}>{label}</button>
-        ))}
-      </div>
-      <label className="lk-check"><input type="checkbox" checked={look.contrast === 'high'} onChange={(e) => save({ contrast: e.target.checked ? 'high' : 'normal' })} />High contrast (strongest text and lines)</label>
+      <h3><span>04</span> Title bar</h3>
+      <Seg label="Title bar" value={look.bar} onPick={(id) => change({ bar: id })} options={[['dark', 'Dark'], ['accent', 'Accent']]} />
+      <h3><span>05</span> Spacing</h3>
+      <Seg label="Spacing" value={look.density} onPick={(id) => change({ density: id })} options={[['comfortable', 'Comfy'], ['compact', 'Compact']]} />
+      <label className="lk-switch">
+        <input type="checkbox" checked={look.contrast === 'high'} onChange={(e) => change({ contrast: e.target.checked ? 'high' : 'normal' })} />
+        <span className="lk-switch-track" aria-hidden="true"><i /></span>
+        <span>High contrast <small>strongest text and lines</small></span>
+      </label>
       {onDone && <button type="button" className="btn" onClick={onDone}>Done</button>}
     </div>
   );

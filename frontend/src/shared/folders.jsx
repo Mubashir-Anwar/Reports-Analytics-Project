@@ -270,10 +270,14 @@ export function FolderDeleteDialog({ path, contents, folders, onConfirm, onClose
 /**
  * Choose a folder: a button that opens the tree right under it (with a search). With allowNew a folder that is not
  * there yet can be typed: it is made when the form is saved. '' = the top level.
+ * manage = { create(path), rename(path, newPath), remove(path) } adds a bar under the tree for the chosen folder (or the
+ * one whose ⋯ was clicked): New folder / Rename / Delete. Each may throw: the message is shown in the bar.
  */
-export function FolderPicker({ folders, value, onChange, rootLabel = 'Top level', rootHint = 'not in a folder', allowNew = false, disabled = false, label = 'Folder', storageKey = 'fd-pick-open' }) {
+export function FolderPicker({ folders, value, onChange, rootLabel = 'Top level', rootHint = 'not in a folder', allowNew = false, disabled = false, label = 'Folder', storageKey = 'fd-pick-open', manage = null }) {
   const [open, setOpen] = useState(false);
   const [find, setFind] = useState('');
+  // the folder the manage bar works on, and what it is doing: { path, mode: 'menu' | 'new' | 'rename', name, error, busy }
+  const [act, setAct] = useState(null);
   const box = useRef(null);
   const button = useRef(null);
   const all = useMemo(() => withParents(folders), [folders]);
@@ -284,7 +288,23 @@ export function FolderPicker({ folders, value, onChange, rootLabel = 'Top level'
     box.current?.querySelector('.fd-pick-panel')?.scrollIntoView({ block: 'nearest' });
     return () => document.removeEventListener('pointerdown', outside);
   }, [open]);
-  const close = () => { setOpen(false); setFind(''); button.current?.focus(); };
+  const close = () => { setOpen(false); setFind(''); setAct(null); button.current?.focus(); };
+  const target = act ? act.path : (all.includes(value) ? value : '');
+  const editing = act && act.mode !== 'menu';
+  const onMenu = manage ? (event, path) => { event.preventDefault(); event.stopPropagation(); setAct({ path, mode: 'menu' }); } : undefined;
+  const startEdit = (mode) => setAct({ path: target, mode, name: mode === 'rename' ? target.split('/').pop() : '', error: '' });
+  const saveEdit = async () => {
+    const parent = act.mode === 'new' ? act.path : act.path.split('/').slice(0, -1).join('/');
+    const siblings = childrenOf(all, parent).filter((path) => path !== act.path).map((path) => path.split('/').pop());
+    const reason = folderNameProblem(act.name || '', siblings);
+    if (reason) { setAct({ ...act, error: reason }); return; }
+    const next = [parent, act.name.trim()].filter(Boolean).join('/');
+    setAct({ ...act, busy: true, error: '' });
+    try {
+      if (act.mode === 'new') await manage.create(next); else await manage.rename(act.path, next);
+      setAct({ path: next, mode: 'menu' });
+    } catch (failure) { setAct({ ...act, busy: false, error: failure.message }); }
+  };
   const pick = (path) => { onChange(path); close(); };
   const typed = find.trim().split('/').map((part) => part.trim()).filter(Boolean).join('/');
   const known = all.find((path) => path.toLowerCase() === typed.toLowerCase());
@@ -292,7 +312,11 @@ export function FolderPicker({ folders, value, onChange, rootLabel = 'Top level'
   const parts = value ? value.split('/') : [];
   const isNew = allowNew && Boolean(value) && !all.includes(value);
   return (
-    <div className={`fd-pick ${open ? 'open' : ''}`} ref={box} onKeyDown={(event) => { if (event.key === 'Escape' && open) { event.stopPropagation(); close(); } }}>
+    <div className={`fd-pick ${open ? 'open' : ''}`} ref={box} onKeyDown={(event) => {
+      if (event.key !== 'Escape' || !open) return;
+      event.stopPropagation();
+      if (editing) setAct({ path: act.path, mode: 'menu' }); else close();
+    }}>
       <button type="button" className="fd-pick-button" ref={button} disabled={disabled} aria-haspopup="tree" aria-expanded={open} aria-label={`${label}: ${value || rootLabel}`}
         onClick={() => { setOpen(!open); setFind(''); }}>
         <FolderIcon open={open} size={22} tone={value ? 'tile' : 'root'} />
@@ -308,10 +332,30 @@ export function FolderPicker({ folders, value, onChange, rootLabel = 'Top level'
               event.preventDefault();
               if (known) pick(known); else if (allowNew && typed && !problem) pick(typed);
             }} />
-          <div className="fd-pick-list"><FolderTree folders={folders} selected={value} onSelect={pick} storageKey={storageKey} filter={find} rootLabel={rootLabel} /></div>
+          <div className="fd-pick-list"><FolderTree folders={folders} selected={act ? act.path : value} onSelect={pick} storageKey={storageKey} filter={find} rootLabel={rootLabel} onMenu={onMenu} /></div>
           {allowNew && typed && !known && (problem
             ? <p className="fd-error">{problem}</p>
             : <button type="button" className="fd-pick-new" onClick={() => pick(typed)}>＋ New folder <b>/{typed}</b></button>)}
+          {manage && (editing ? (
+            <div className="fd-pick-manage editing">
+              <span className="fd-pick-on">{act.mode === 'new' ? <>New folder in <b>{act.path ? `/${act.path}` : rootLabel}</b></> : <>Rename <b>/{act.path}</b></>}</span>
+              <div className="fd-pick-edit">
+                <input autoFocus value={act.name} maxLength={60} aria-label="Folder name" placeholder="Folder name" aria-invalid={Boolean(act.error)}
+                  onChange={(event) => setAct({ ...act, name: event.target.value, error: '' })}
+                  onKeyDown={(event) => { if (event.key === 'Enter') { event.preventDefault(); saveEdit(); } }} />
+                <button type="button" className="btn primary sm" disabled={act.busy || !act.name.trim()} onClick={saveEdit}>{act.busy ? 'Saving…' : act.mode === 'new' ? 'Create' : 'Save'}</button>
+                <button type="button" className="btn sm" disabled={act.busy} onClick={() => setAct({ path: act.path, mode: 'menu' })}>Cancel</button>
+              </div>
+              {act.error && <p className="fd-error" role="alert">{act.error}</p>}
+            </div>
+          ) : (
+            <div className="fd-pick-manage">
+              <span className="fd-pick-on" title={target ? `/${target}` : rootLabel}><FolderIcon size={14} /> {target ? `/${target}` : rootLabel}</span>
+              <button type="button" className="btn sm" onClick={() => startEdit('new')}>＋ {target ? 'Subfolder' : 'New folder'}</button>
+              {target && <button type="button" className="btn sm" onClick={() => startEdit('rename')}>Rename</button>}
+              {target && <button type="button" className="btn sm danger-text" onClick={() => { const path = target; close(); manage.remove(path); }}>Delete</button>}
+            </div>
+          ))}
         </div>
       )}
     </div>

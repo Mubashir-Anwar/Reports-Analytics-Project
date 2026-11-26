@@ -55,3 +55,32 @@
   .pxl-form { margin: 0; width: 100%; }
   .pxl-head h1 { font-size: 30px; }
 }
+
+/* wrong passwords: 3 or fewer tries left (Admin -> Limits -> Sign-in) */
+.pxl-tries { display: flex; align-items: center; gap: 10px; padding: 8px 10px; border: 2px solid var(--danger, #d64545);
+  box-shadow: 3px 3px 0 var(--danger, #d64545); font-family: var(--mono, ui-monospace, monospace); font-size: 12px;
+  text-transform: uppercase; letter-spacing: .06em; color: var(--danger, #d64545); }
+.pxl-tries-blocks { display: inline-flex; gap: 3px; }
+.pxl-tries-blocks i { width: 10px; height: 10px; border: 2px solid currentColor; }
+.pxl-tries-blocks i.on { background: currentColor; }
+.pxl-tries.locked .pxl-tries-blocks i { opacity: .35; }
+
+/* attempts meter: one block per allowed try (Admin → Limits → Sign-in), the used ones crossed out; a timer when locked */
+.pxl-tries { display: grid; gap: 6px; }
+.pxl-tries.calm { color: var(--text); border-color: var(--text); box-shadow: 3px 3px 0 var(--accent); }
+.pxl-tries.warn { color: #c77700; border-color: #c77700; box-shadow: 3px 3px 0 #c77700; }
+.pxl-tries-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.pxl-tries-blocks { flex-wrap: wrap; }
+.pxl-tries-blocks i { position: relative; animation: pxl-block-in .25s steps(3, end) backwards; animation-delay: calc(var(--i) * 40ms); }
+.pxl-tries-blocks i.used { background: transparent; opacity: .55; }
+.pxl-tries-blocks i.used::after { content: ""; position: absolute; inset: 3px -1px auto; height: 2px; background: currentColor; transform: rotate(-45deg); }
+.pxl-tries.locked .pxl-tries-blocks i { opacity: .45; }
+.pxl-clock { display: inline-block; min-width: 4.2ch; margin-left: 4px; padding: 1px 6px; background: currentColor; font-variant-numeric: tabular-nums; }
+.pxl-clock { color: var(--panel, #fff); }
+.pxl-tries.locked .pxl-clock { background: var(--danger, #d64545); animation: pxl-tick 1s steps(2, end) infinite; }
+.pxl-drain { display: block; height: 6px; border: 2px solid currentColor; }
+.pxl-drain i { display: block; height: 100%; background: currentColor; transition: width .25s linear; }
+.pxl-tries small { text-transform: none; letter-spacing: 0; font-family: inherit; opacity: .85; }
+@keyframes pxl-block-in { from { transform: scale(0); } }
+@keyframes pxl-tick { 50% { opacity: .75; } }
+@media (prefers-reduced-motion: reduce) { .pxl-tries-blocks i, .pxl-tries.locked .pxl-clock { animation: none; } }

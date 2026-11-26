@@ -8,6 +8,7 @@ import AccountDialog from './AccountDialog.jsx';
 import ThemeMenu from './ThemeMenu.jsx';
 import TeamBar from './TeamBar.jsx';
 import { SetupAdminChip } from './SetupAdmin.jsx';
+import { copyrightLine } from './SiteFooter.jsx';
 
 const ICONS = {
   home: 'M3 11l9-8 9 8M5.5 9.5V20h13V9.5M10 20v-6h4v6',
@@ -31,18 +32,16 @@ export function Icon({ name, size = 16 }) {
   );
 }
 
-/** The product mark (same drawing as /assets/brand/logo.svg): a circle, a bar and a tall bar whose overlaps multiply. */
+/** The product mark (same drawing as /assets/brand/logo.svg): PixelFX rising pixel bars on a dark tile. */
+const MARK_CELLS = [[5,5,'#222842'], [5,12,'#222842'], [5,19,'#222842'], [5,26,'#222842'], [5,33,'#222842'], [5,40,'#7b8cff'], [5,47,'#7b8cff'], [5,54,'#7b8cff'], [12,5,'#222842'], [12,12,'#222842'], [12,19,'#222842'], [12,26,'#222842'], [12,33,'#222842'], [12,40,'#7b8cff'], [12,47,'#7b8cff'], [12,54,'#7b8cff'], [19,5,'#222842'], [19,12,'#222842'], [19,19,'#222842'], [19,26,'#222842'], [19,33,'#222842'], [19,40,'#222842'], [19,47,'#222842'], [19,54,'#222842'], [26,5,'#222842'], [26,12,'#222842'], [26,19,'#222842'], [26,26,'#7b8cff'], [26,33,'#7b8cff'], [26,40,'#7b8cff'], [26,47,'#7b8cff'], [26,54,'#7b8cff'], [33,5,'#222842'], [33,12,'#ffd84d'], [33,19,'#222842'], [33,26,'#7b8cff'], [33,33,'#7b8cff'], [33,40,'#7b8cff'], [33,47,'#7b8cff'], [33,54,'#7b8cff'], [40,5,'#222842'], [40,12,'#222842'], [40,19,'#222842'], [40,26,'#222842'], [40,33,'#222842'], [40,40,'#222842'], [40,47,'#222842'], [40,54,'#222842'], [47,5,'#222842'], [47,12,'#ff4f9a'], [47,19,'#7b8cff'], [47,26,'#7b8cff'], [47,33,'#7b8cff'], [47,40,'#7b8cff'], [47,47,'#7b8cff'], [47,54,'#7b8cff'], [54,5,'#222842'], [54,12,'#ff4f9a'], [54,19,'#7b8cff'], [54,26,'#7b8cff'], [54,33,'#7b8cff'], [54,40,'#7b8cff'], [54,47,'#7b8cff'], [54,54,'#7b8cff']];
 export function Logo({ size = 30, className = 'fx-logo', src }) {
   const brand = useBrand();
   const own = src === undefined ? brand.logo : src;
   if (own) return <img className={`${className} fx-logo-own`} src={own} width={size} height={size} alt="" aria-hidden="true" style={{ objectFit: 'contain' }} />;
   return (
-    <svg className={className} width={size} height={size} viewBox="0 0 64 64" aria-hidden="true">
-      <g style={{ isolation: 'isolate' }}>
-        <circle cx="21" cy="45" r="13" fill="#e23c8f" />
-        <rect x="28" y="22" width="16" height="36" rx="8" fill="#2ea3dd" style={{ mixBlendMode: 'multiply' }} />
-        <rect x="40" y="6" width="16" height="52" rx="8" fill="#f6a11a" style={{ mixBlendMode: 'multiply' }} />
-      </g>
+    <svg className={`${className} fx-logo-px`} width={size} height={size} viewBox="0 0 64 64" aria-hidden="true">
+      <rect width="64" height="64" rx="14" fill="#0d1020" />
+      {MARK_CELLS.map(([x, y, fill], i) => <rect key={i} x={x} y={y} width="6" height="6" fill={fill} style={fill === '#222842' ? undefined : { '--i': i % 8 }} />)}
     </svg>
   );
 }
@@ -56,9 +55,15 @@ export const NAV_APPS = [
   { href: '/admin', right: 'admin', label: 'Admin', icon: 'admin', text: 'Users, API keys, data sources, system DB' },
 ];
 
+// Slim bar: icons only and a lower bar, so the Designer canvas gets more room. Kept per browser.
+const readSlim = () => { try { return localStorage.getItem('nav-slim') === '1'; } catch { return false; } };
+const showSlim = (slim) => { document.documentElement.dataset.nav = slim ? 'slim' : ''; };
+showSlim(readSlim());
+
 const initials = (name = '') => name.split(/[\s._-]+/).filter(Boolean).slice(0, 2).map((part) => part[0]).join('').toUpperCase() || '?';
 
 function UserMenu({ me }) {
+  const brand = useBrand();
   const [open, setOpen] = useState(false);
   const box = useRef(null);
   useEffect(() => {
@@ -95,6 +100,7 @@ function UserMenu({ me }) {
           {me.superAdmin && <a role="menuitem" href="/admin#branding"><Icon name="brand" />Name and logo</a>}
           {isAdmin && <div className="fx-sep" />}
           <button type="button" role="menuitem" className="fx-danger" onClick={signOut}><Icon name="out" />Sign out</button>
+          <div className="fx-menu-copy">{copyrightLine(brand.name)}</div>
         </div>
       )}
       {account && <AccountDialog forced={account === 'forced'} onClose={() => setAccount(null)} />}
@@ -112,12 +118,17 @@ export default function NavBar({ current, context, children }) {
     try { localStorage.setItem('last-part', current.slice(1)); } catch { /* storage off */ }
   }, [current]);
   const [open, setOpen] = useState(false);
+  const [slim, setSlim] = useState(readSlim);
+  useEffect(() => {
+    showSlim(slim);
+    try { localStorage.setItem('nav-slim', slim ? '1' : '0'); } catch { /* storage off */ }
+  }, [slim]);
   const me = useMe();
   const brand = useBrand();
   const apps = me ? [HOME, ...NAV_APPS.filter((app) => me.rights?.includes(app.right))] : [];
   const here = [HOME, ...NAV_APPS].find((app) => app.href === current);
   return (
-    <header className={`fx-nav ${open ? 'open' : ''}`}>
+    <header className={`fx-nav ${open ? 'open' : ''} ${slim ? 'slim' : ''}`}>
       <a className="fx-brand" href="/" title={`${brand.name} — home`}>
         <Logo />
         <span className="fx-name"><b>{brand.first}{brand.second && <span>{brand.second}</span>}</b><small>{here ? here.label : brand.tagline}</small></span>
@@ -126,7 +137,7 @@ export default function NavBar({ current, context, children }) {
       {apps.length > 0 && <span className="fx-divider" aria-hidden="true" />}
       <nav className="fx-links" id="fx-links" aria-label="Main navigation">
         {apps.map((app) => (
-          <a key={app.href} href={app.href} className={`fx-link ${app.href === current ? 'on' : ''}`} aria-current={app.href === current ? 'page' : undefined} title={app.text}>
+          <a key={app.href} href={app.href} className={`fx-link ${app.href === current ? 'on' : ''}`} aria-current={app.href === current ? 'page' : undefined} title={slim ? `${app.label}: ${app.text}` : app.text}>
             <Icon name={app.icon} /><span>{app.label}</span>
           </a>
         ))}
@@ -137,6 +148,12 @@ export default function NavBar({ current, context, children }) {
         {me?.temporary && <SetupAdminChip me={me} />}
         {me && <TeamBar app={here?.icon || 'server'} />}
         <ThemeMenu />
+        <button type="button" className="fx-icon-btn fx-slim-btn" aria-pressed={slim} onClick={() => setSlim(!slim)}
+          title={slim ? 'Full bar: names next to the icons' : 'Slim bar: icons only, more room for the page'} aria-label={slim ? 'Full navigation bar' : 'Slim navigation bar'}>
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+            <path d={slim ? 'M7 10l5 5 5-5' : 'M7 14l5-5 5 5'} />
+          </svg>
+        </button>
         <UserMenu me={me} />
       </div>
     </header>

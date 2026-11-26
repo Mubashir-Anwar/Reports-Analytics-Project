@@ -6,19 +6,28 @@
                    "querySource", "columns", "refreshEveryMinutes"}],        the datasets its visuals use
      "relationships": [{"fromDataset", "fromColumn", "toDataset", "toColumn"}]}   between those datasets
 
-The file holds definitions only: no imported records, no data adapter addresses or passwords (a dataset names its
-data adapter by ID; on upload another adapter can be chosen). Uploading creates the datasets (or reuses one with the
-same ID and the same query), their relationships and the dashboard; the new datasets are then imported."""
+The file holds definitions, no data adapter addresses or passwords (a dataset names its data adapter by ID; on upload
+another adapter can be chosen). Uploading creates the datasets (or reuses one with the same ID and the same query),
+their relationships and the dashboard; the new datasets are then imported.
+
+"With data" files also carry each dataset's imported records ("data": {"parquet": base64 of the Parquet file,
+"rowCount"}), like a Power BI file carries its data: the dashboard opens on another server at once, even one without
+the database. Such a dataset is not imported on upload; when its data adapter is missing it keeps the file's data
+(refreshing it needs a data adapter of that ID, or edit the dataset and choose one)."""
 from __future__ import annotations
 
+import base64
 import json
+import secrets
 from typing import Any
 
-from backend.app.analytics import store
+from backend.app.analytics import importer, settings, store
 
 FORMAT = "analysis-dashboard"
 VERSION = 1
-MAX_FILE = 2_000_000
+MAX_FILE = 2_000_000                 # a file without data
+MAX_DATA_BYTES = 15_000_000          # the Parquet files in a file "with data", together (about 20 MB as base64)
+MAX_FILE_WITH_DATA = 22_000_000
 SOURCE_FIELDS = ("connectionId", "queryLanguage", "collection", "querySource")
 FIELD_LISTS = ("groupBy", "values", "filters", "columns")
 
@@ -42,11 +51,24 @@ def used_datasets(dashboard: dict[str, Any]) -> list[str]:
     return seen
 
 
-def export(dashboard: dict[str, Any]) -> dict[str, Any]:
+def export(dashboard: dict[str, Any], with_data: bool = False) -> dict[str, Any]:
     ids = used_datasets(dashboard)
     datasets = [item for item in (store.dataset(i) for i in ids) if item is not None]
     inside = {item["id"] for item in datasets}
-    return {
+    data: dict[str, dict[str, Any]] = {}
+    if with_data:
+        total = 0
+        for item in datasets:
+            path = importer.file_path(item.get("file") or "") if item.get("file") else None
+            if path is None or not path.exists():
+                continue
+            raw = path.read_bytes()
+            total += len(raw)
+            if total > MAX_DATA_BYTES:
+                raise ValueError(f"The data of this dashboard is more than {MAX_DATA_BYTES // 1_000_000} MB: download the file without data "
+                                 "(the other server imports it from the database), or summarise the datasets")
+            data[item["id"]] = {"parquet": base64.b64encode(raw).decode("ascii"), "rowCount": int(item.get("rowCount") or 0)}
+    out = {
         "format": FORMAT, "version": VERSION, "exportedAt": store.now(),
         "dashboard": {name: dashboard.get(name) for name in ("id", "name", "folder", "description", "tiles", "filters")},
         "datasets": [{name: item.get(name) for name in ("id", "name", "folder", "description", *SOURCE_FIELDS, "columns", "refreshEveryMinutes")}
@@ -54,6 +76,12 @@ def export(dashboard: dict[str, Any]) -> dict[str, Any]:
         "relationships": [{name: rel.get(name) for name in ("fromDataset", "fromColumn", "toDataset", "toColumn")}
                           for rel in store.relationships() if rel["fromDataset"] in inside and rel["toDataset"] in inside],
     }
+    if with_data:
+        out["withData"] = True
+        for item in out["datasets"]:
+            if item["id"] in data:
+                item["data"] = data[item["id"]]
+    return out
 
 
 def read(content: Any) -> dict[str, Any]:
@@ -62,8 +90,8 @@ def read(content: Any) -> dict[str, Any]:
         if content.startswith("PK"):                    # a ZIP package, as .pbix / .pbit files are
             raise ValueError("This is a ZIP package (a Power BI .pbix or .pbit file?), not a dashboard file (.mdash): "
                              "Power BI files cannot be opened here")
-        if len(content) > MAX_FILE:
-            raise ValueError("The dashboard file is too big (at most 2 MB)")
+        if len(content) > MAX_FILE_WITH_DATA or (len(content) > MAX_FILE and '"parquet"' not in content[:MAX_FILE]):
+            raise ValueError("The dashboard file is too big (at most 2 MB, or 20 MB with data)")
         try:
             content = json.loads(content)
         except json.JSONDecodeError:
@@ -108,16 +136,20 @@ def install(bundle: dict[str, Any], *, folder: str, actor: str, adapters: dict[s
     when = store.now()
     ids: dict[str, str] = {}
     new_records, reused, warnings = [], [], []
+    files: list[tuple[dict[str, Any], dict[str, Any]]] = []          # datasets whose records come with the file
     missing = sorted({str(item.get("connectionId")) for item in bundle.get("datasets") or []
-                      if isinstance(item, dict) and not connection_id and item.get("connectionId") not in adapters})
+                      if isinstance(item, dict) and not connection_id and item.get("connectionId") not in adapters and not _has_data(item)})
     if missing:
         raise ValueError(f"This server has no data adapter {', '.join(missing)}: choose one of its data adapters for the datasets")
     for index, raw in enumerate(bundle.get("datasets") or []):
         if not isinstance(raw, dict):
             raise ValueError(f"datasets[{index}] must be an object")
         source = {**raw, "folder": folder, "connectionId": connection_id or raw.get("connectionId")}
+        known = adapters
+        if _has_data(raw) and source["connectionId"] not in adapters:      # its data comes with the file: no adapter needed now
+            known = {**adapters, str(source["connectionId"]): "postgresql" if str(raw.get("queryLanguage")) == "sql" else "mongodb"}
         try:
-            clean = store.clean_dataset(source, adapters)
+            clean = store.clean_dataset(source, known)
         except ValueError as exc:
             raise ValueError(f"Dataset '{raw.get('name', index)}': {exc}") from None
         old_id = str(raw.get("id") or "")
@@ -128,9 +160,12 @@ def install(bundle: dict[str, Any], *, folder: str, actor: str, adapters: dict[s
             continue
         record = {"id": store.new_id("ds"), **clean, "columns": _columns(raw.get("columns")), "status": "new", "rowCount": 0,
                   "sizeBytes": 0, "createdBy": actor, "createdAt": when, "updatedBy": actor, "updatedAt": when}
+        if _has_data(raw):
+            files.append((record, raw["data"]))
+        else:
+            new_records.append(record)                 # imported from its data adapter after the upload
         if old_id:
             ids[old_id] = record["id"]
-        new_records.append(record)
 
     raw_board = bundle["dashboard"]
     board = _remap({name: raw_board.get(name) for name in ("name", "description", "tiles", "filters")}, ids)
@@ -140,7 +175,10 @@ def install(bundle: dict[str, Any], *, folder: str, actor: str, adapters: dict[s
     if unknown:
         warnings.append(f"{len(unknown)} visual dataset(s) are not in the file; those visuals show an error until fixed")
 
+    written = [_write_data(record, data) for record, data in files]   # checked (a real Parquet file) before anything is saved
     for record in new_records:
+        store.save_dataset(record)
+    for record in written:
         store.save_dataset(record)
     relationships = 0
     for raw in bundle.get("relationships") or []:
@@ -160,6 +198,36 @@ def install(bundle: dict[str, Any], *, folder: str, actor: str, adapters: dict[s
               "owner": (current or {}).get("owner") or actor, "createdAt": (current or {}).get("createdAt") or when,
               "updatedBy": actor, "updatedAt": when}
     store.save_dashboard(record)
-    return {"dashboard": record, "created": [item["id"] for item in new_records], "reused": reused,
+    return {"dashboard": record, "created": [item["id"] for item in [*new_records, *written]], "reused": reused,
             "relationships": relationships, "replaced": current is not None, "warnings": warnings,
-            "newDatasets": new_records, "ids": ids}
+            "newDatasets": new_records, "ids": ids, "withData": [item["id"] for item in written]}
+
+
+def _has_data(raw: Any) -> bool:
+    return isinstance(raw, dict) and isinstance(raw.get("data"), dict) and isinstance(raw["data"].get("parquet"), str)
+
+
+def _write_data(record: dict[str, Any], data: dict[str, Any]) -> dict[str, Any]:
+    """Write a dataset's records from the file as its Parquet file; the dataset is then ready, no import needed."""
+    try:
+        raw = base64.b64decode(data["parquet"], validate=True)
+    except (ValueError, TypeError):
+        raise ValueError(f"Dataset '{record['name']}': its data in the file is damaged") from None
+    if not raw.startswith(b"PAR1") or len(raw) > MAX_DATA_BYTES:
+        raise ValueError(f"Dataset '{record['name']}': its data in the file is not a Parquet file")
+    name = f"{record['id']}-{secrets.token_hex(4)}.parquet"
+    target = settings.directory() / name
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_bytes(raw)
+    try:
+        found = importer.describe(target)
+        con = importer.connect()
+        try:
+            count = int(con.execute(f"SELECT COUNT(*) FROM read_parquet({importer.quote_path(target)})").fetchone()[0])
+        finally:
+            con.close()
+    except Exception:  # noqa: BLE001 - not readable: nothing of it is kept
+        target.unlink(missing_ok=True)
+        raise ValueError(f"Dataset '{record['name']}': its data in the file could not be read") from None
+    return {**record, "status": "ready", "file": name, "rowCount": count, "sizeBytes": len(raw),
+            "columns": importer.merge_columns(found, record.get("columns") or []), "refreshedAt": record["createdAt"]}

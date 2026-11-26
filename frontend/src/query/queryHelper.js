@@ -10,7 +10,8 @@ export const NO_VALUE = new Set(['exists', 'missing']);
 export const emptyHelper = () => ({ match: 'and', filters: [], fields: [], sort: [] });
 let seq = 0;
 /** A filter row counts once it has a field and, unless the operator needs none, a value. */
-export const ready = (f) => !!f.field && (NO_VALUE.has(f.op) || String(f.value ?? "").trim() !== "");
+// a filter row counts when it is switched on (its checkbox), has a field, and has a value when its operator needs one
+export const ready = (f) => !f.off && !!f.field && (NO_VALUE.has(f.op) || String(f.value ?? "").trim() !== "");
 /** `what`: a field name, or what was dragged: {field, type, value, op}. */
 export const newFilter = (what) => {
   const { field, type = '', value = '', op = 'eq' } = typeof what === 'string' ? { field: what } : what;

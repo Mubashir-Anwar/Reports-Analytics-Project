@@ -54,6 +54,15 @@ def recent_failures(client: str, window_seconds: float = 600) -> int:
     return sum(1 for stamp in failures if stamp > _now() - window_seconds)
 
 
+def seconds_until_below(client: str, window_seconds: float, limit: int) -> int:
+    """How long until fewer than `limit` failures are left in the window (0: not over the limit now)."""
+    now = _now()
+    stamps = sorted(stamp for stamp in (get_store().read_json(FAILURES_KEY) or {}).get(client, []) if stamp > now - window_seconds)
+    if len(stamps) < limit:
+        return 0
+    return max(1, int(stamps[len(stamps) - limit] + window_seconds - now + 0.999))
+
+
 def record_failure(client: str, window_seconds: float = 600) -> None:
     with _LOCK:
         store = get_store()
@@ -61,6 +70,11 @@ def record_failure(client: str, window_seconds: float = 600) -> None:
         data = {c: stamps for c, stamps in data.items() if stamps}
         data.setdefault(client, []).append(_now())
         store.write_json(FAILURES_KEY, data)
+
+
+def account_key(username: str) -> str:
+    """The failed sign-in counter of one account (by name, also for names that do not exist)."""
+    return "user:" + username.strip().casefold()[:64]
 
 
 def clear_failures(client: str) -> None:

@@ -1469,3 +1469,8 @@ div.pat-empty b { color: var(--text); }
   .pat-input, .pat-form { flex-wrap: wrap; }
   .pat-input input, .pat-form input { flex-basis: 100%; }
 }
+
+/* Long dialogs on short screens (laptops, zoomed browsers): the dialog scrolls, its buttons stay in view at the bottom */
+.modal { max-height: min(88vh, 88dvh); }
+.modal > .row:last-child:not(.wizard-buttons) { position: sticky; bottom: -18px; z-index: 2; margin: 8px -22px -18px; padding: 10px 22px 14px;
+  background: var(--panel); border-top: 1px solid var(--line); }

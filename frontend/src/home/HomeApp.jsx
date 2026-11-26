@@ -1,5 +1,6 @@
 // /home: where everyone lands after signing in. What this account can do (by its rights), the next step, and a way
 // into each part. Administration is one small line, and only for administrators.
+import SiteFooter from '../shared/SiteFooter.jsx';
 import { useEffect, useState } from 'react';
 import { request } from '../api.js';
 import { Icon } from '../shared/NavBar.jsx';
@@ -138,6 +139,7 @@ export default function HomeApp() {
           </section>
         )}
       </main>
+      <SiteFooter />
     </>
   );
 }

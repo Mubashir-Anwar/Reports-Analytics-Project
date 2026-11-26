@@ -45,6 +45,7 @@ export const api = {
   workspaceEditing: (id, folder, open = true) =>
     request(withQuery(`/api/admin/workspace/${encodeURIComponent(id)}/editing`, inFolder(folder)), { method: 'POST', body: { open } }),
   deleteWorkspace: (id, folder) => request(withQuery(`/api/admin/workspace/${encodeURIComponent(id)}`, inFolder(folder)), { method: 'DELETE' }),
+  renameWorkspaceFolder: (path, newPath) => request('/api/admin/workspace-folders', { method: 'PUT', body: { path, newPath } }),
   createWorkspaceFolder: (path) => request('/api/admin/workspace-folders', { method: 'POST', body: { path } }),
   /** answer: { recursive } or { moveTo } ('' = top level), from the Delete folder dialog */
   deleteWorkspaceFolder: (path, answer = {}) => request('/api/admin/workspace-folders', { method: 'DELETE', body: { path, ...answer } }),
@@ -102,7 +103,14 @@ export const api = {
   deletePattern: (id) => request(`/api/admin/patterns/${encodeURIComponent(id)}`, { method: 'DELETE', body: {} }),
   deleteFont: (id) => request(`/api/admin/fonts/${encodeURIComponent(id)}`, { method: 'DELETE', body: {} }),
   /** Query workspace (/query): browse a data adapter and run read-only queries. */
-  mongoCollections: (connectionId) => request('/api/query/mongo/collections', { method: 'POST', body: { connectionId } }),
+  /** one page of the collections: { collections, total, more }; search = part of the name */
+  mongoCollections: (connectionId, { search = '', offset = 0, limit = 50 } = {}) =>
+    request('/api/query/mongo/collections', { method: 'POST', body: { connectionId, search, offset, limit } }),
+  savedQueries: () => request('/api/query/saved'),
+  saveQuery: (query) => request('/api/query/saved', { method: 'POST', body: query }),
+  updateQuery: (id, query) => request(`/api/query/saved/${encodeURIComponent(id)}`, { method: 'PUT', body: query }),
+  deleteQuery: (id) => request(`/api/query/saved/${encodeURIComponent(id)}`, { method: 'DELETE' }),
+  queryPeople: () => request('/api/query/saved/people'),
   mongoFind: (body) => request('/api/query/mongo/find', { method: 'POST', body }),
   mongoAggregate: (body) => request('/api/query/mongo/aggregate', { method: 'POST', body }),
   mongoFields: (connectionId, collection) => request('/api/query/mongo/fields', { method: 'POST', body: { connectionId, collection } }),

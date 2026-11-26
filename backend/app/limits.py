@@ -53,6 +53,11 @@ LIMITS: tuple[Limit, ...] = (
           "Big CSV / Excel files made in the background may have up to this many records.", 1_000_000, 1000, 50_000_000, "records"),
     Limit("REPORT_EXPORT_MAX_TIME_MS", "reports", "Background export time limit",
           "A background export is stopped after this.", 600_000, 10_000, 86_400_000, "ms"),
+    Limit("REPORTING_LOGIN_MAX_FAILURES", "signin", "Wrong passwords before a lock",
+          "After this many wrong passwords in a row an account cannot sign in for the lock time. The sign-in page "
+          "warns when 3 or fewer tries are left. A new password (Admin → Users or Forgot password) unlocks it.", 5, 1, 100, "tries"),
+    Limit("REPORTING_LOGIN_LOCK_MINUTES", "signin", "Lock time",
+          "How long a locked account (or a computer trying many accounts) has to wait.", 15, 1, 1440, "minutes"),
     Limit("REPORTING_DELIVERY_KEEP_MINUTES", "downloads", "Keep finished downloads",
           "Files asked for with X-Deliver: later are kept this long for collecting.", 60, 5, 10080, "minutes"),
     Limit("REPORTING_API_RATE_PER_MINUTE", "api", "Calls per minute per API key",
@@ -76,7 +81,7 @@ LIMITS: tuple[Limit, ...] = (
           "A dataset cannot be scheduled to import more often than this.", 15, 1, 1440, "minutes"),
 )
 BY_ENV = {item.env: item for item in LIMITS}
-GROUPS = (("reports", "Reports"), ("downloads", "Downloads"), ("analytics", "Analytics"), ("api", "API and uploads"))
+GROUPS = (("signin", "Sign-in"), ("reports", "Reports"), ("downloads", "Downloads"), ("analytics", "Analytics"), ("api", "API and uploads"))
 
 
 def _store() -> Any:
