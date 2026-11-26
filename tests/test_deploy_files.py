@@ -56,3 +56,17 @@ def test_a_font_path_that_is_not_a_font_is_skipped(monkeypatch, tmp_path):
     monkeypatch.setattr(fonts, "_SYSTEM_FILES", ())
     monkeypatch.setenv("REPORT_RTL_FONT_PATH", str(broken))
     assert fonts.right_to_left_family() is None
+
+
+def test_no_env_file_is_committed_and_gitignore_covers_it():
+    """.env holds the secrets of one installation: never in git (setup makes a new one on every computer)."""
+    import shutil
+    import subprocess
+    root = Path(__file__).resolve().parents[1]
+    git = shutil.which("git")
+    if not git or not (root / ".git").exists():
+        pytest.skip("not a git checkout")
+    tracked = subprocess.run([git, "ls-files"], cwd=root, capture_output=True, text=True, check=True).stdout.splitlines()
+    assert [name for name in tracked if Path(name).name == ".env" or Path(name).name.startswith(".env.")] == []
+    for name in (".env", "deploy/.env", ".env.local"):
+        assert subprocess.run([git, "check-ignore", "-q", name], cwd=root, check=False).returncode == 0, name

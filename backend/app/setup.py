@@ -59,6 +59,23 @@ def check_environment(root: Path) -> list[tuple[str, bool, str]]:
     return out
 
 
+def env_in_git(root: Path) -> str:
+    """'' when .env is safe from git; otherwise what is wrong. Skipped (safe) without git or a .git folder."""
+    import shutil  # noqa: PLC0415
+    import subprocess  # noqa: PLC0415
+    git = shutil.which("git")
+    if not git or not (root / ".git").exists():
+        return ""
+    def run(*args: str) -> subprocess.CompletedProcess:
+        return subprocess.run([git, *args], cwd=root, capture_output=True, text=True, timeout=20, check=False)  # noqa: S603
+    tracked = [name for name in run("ls-files").stdout.splitlines() if Path(name).name == ".env" or Path(name).name.startswith(".env.")]
+    if tracked:
+        return f"{', '.join(tracked)} is in git: run  git rm --cached {tracked[0]}  and make new secrets (they were shared)"
+    if run("check-ignore", "-q", ".env").returncode != 0:
+        return ".gitignore does not keep .env out of git: add the line  .env"
+    return ""
+
+
 def make_env_file(path: Path) -> bool:
     """A new .env with random secrets, unless there is one or the environment already gives both."""
     if path.exists() or os.getenv("REPORTING_SKIP_ENV_FILE", "").strip() == "1":
@@ -129,6 +146,8 @@ def main(argv: list[str] | None = None) -> int:
     if not args.check:
         made = make_env_file(root / ".env")
         print(f"   OK  Settings: {'.env made with new random secrets' if made else 'kept as they are'}")
+    leak = env_in_git(root)
+    print(f"   {'NO ' if leak else 'OK '} Secrets out of git: {leak or '.env is ignored by git and not committed'}")
     from backend.app.security.secrets import load_local_env_file  # noqa: PLC0415
     load_local_env_file()
     from backend.app.db.urls import redact  # noqa: PLC0415
@@ -148,7 +167,7 @@ def main(argv: list[str] | None = None) -> int:
         return 1
     print(f"   OK  System database: {where}")
     if args.check:
-        return 0 if all(ok for _, ok, _ in checks) else 1
+        return 0 if all(ok for _, ok, _ in checks) and not leak else 1
 
     print("\n2. Setup admin")
     from backend.app.reset_password import _problem, _strong_password  # noqa: PLC0415
