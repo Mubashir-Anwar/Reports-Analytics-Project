@@ -159,7 +159,7 @@ def test_only_super_admin_manages_administrators(client):
     assert make_user(client, "boss2", [], super_admin=True, headers={}).status_code == 200  # several super admins
     assert client.put("/api/admin/users/adam", json={"rights": ["admin", "designer"]}).status_code == 200
     users = {item["username"]: item for item in client.get("/api/admin/users").json()["users"]}
-    assert users["boss"]["superAdmin"] and users["boss"]["rights"] == ["admin", "analytics", "designer", "query", "runner", "server"]
+    assert users["boss"]["superAdmin"] and users["boss"]["rights"] == ["admin", "analytics", "designer", "python", "query", "runner", "server"]
     assert users["adam"]["rights"] == ["admin", "designer"]
 
 

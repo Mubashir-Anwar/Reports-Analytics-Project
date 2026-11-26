@@ -117,6 +117,10 @@ ANALYTICS_THREADS=2
 # Imports running at the same time in this process, and the shortest scheduled refresh interval.
 ANALYTICS_REFRESH_WORKERS=1
 ANALYTICS_MIN_REFRESH_MINUTES=15
+# Python scripts (the "Python scripts" right): time and memory of one script, and rows it reads per dataset / returns.
+ANALYTICS_PYTHON_TIMEOUT_SECONDS=120
+ANALYTICS_PYTHON_MEMORY_MB=2048
+ANALYTICS_PYTHON_MAX_ROWS=1000000
 
 # ------------------------------------------------------------------ where the service keeps its own data (DEPLOYMENT.md)
 # files (default) | sql | mongodb | postgresql, and the database's URL. Admin → System database can write these two.

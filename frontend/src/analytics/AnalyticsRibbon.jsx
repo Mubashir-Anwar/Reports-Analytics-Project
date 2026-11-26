@@ -79,6 +79,7 @@ export default function AnalyticsRibbon({ info, view, go, onNewDashboard, onImpo
           <Big icon="newDoc" label="Dashboard" onClick={onNewDashboard} title="A new, empty dashboard" />
           {model && <Big icon="datasets" label="Dataset" onClick={() => go('ds/new')} title="Import data from a data adapter" />}
           {model && <Big icon="code" label="Query" onClick={() => go('q/new')} title="Write a DAX or SQL query over the datasets" />}
+          {info.mayPython && <Big icon="code" label="Python" onClick={() => go('py/new')} title="Clean or model datasets with a Python script (pandas, scikit-learn, scipy)" />}
         </Group>
         {model && (
           <Group label="Files">
@@ -151,6 +152,11 @@ export default function AnalyticsRibbon({ info, view, go, onNewDashboard, onImpo
             <Big icon="reset" label="Import all again" onClick={onRefreshAll} disabled={!readyCount} title="Read every dataset again from its data adapter (in the background)" />
           </Group>
         )}
+        {info.mayPython && (
+          <Group label="Python">
+            <Big icon="code" label="Python script" onClick={() => go('py/new')} title="A dataset made by a Python script from other datasets" />
+          </Group>
+        )}
         <Group label="Model">
           <Big icon="plug" label="Relationships" onClick={() => go('model')} title="Relate datasets on a shared column" />
         </Group>
@@ -190,6 +196,7 @@ export default function AnalyticsRibbon({ info, view, go, onNewDashboard, onImpo
               <button type="button" role="menuitem" onClick={onNewDashboard} title="A new, empty dashboard"><RIcon name="newDoc" /><span>New dashboard</span></button>
               {model && <button type="button" role="menuitem" onClick={() => go('ds/new')} title="Import data from a data adapter"><RIcon name="datasets" /><span>New dataset</span></button>}
               {model && <button type="button" role="menuitem" onClick={() => go('q/new')} title="Write a DAX or SQL query over the datasets"><RIcon name="code" /><span>New query</span></button>}
+              {info.mayPython && <button type="button" role="menuitem" onClick={() => go('py/new')} title="Clean or model datasets with pandas, scikit-learn and scipy"><RIcon name="code" /><span>New Python script</span></button>}
               {model && <button type="button" role="menuitem" onClick={onImport} title="Open a dashboard file (.mdash), or a Power BI report (.pbix) or template (.pbit)"><RIcon name="open" /><span>Open file (.mdash, .pbix, .pbit)</span></button>}
               <hr />
               <button type="button" role="menuitem" disabled={!onDash || !dash.editing} onClick={() => send('bi-command', { cmd: 'save' })} title="Save the changes to this dashboard"><RIcon name="save" /><span>Save</span><kbd>Ctrl S</kbd></button>

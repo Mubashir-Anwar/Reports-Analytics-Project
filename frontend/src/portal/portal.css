@@ -439,3 +439,4 @@ table.data tr.failed td { color: var(--danger); }
 .choose-hint h2 { text-align: center; }
 .choose-hint ul { margin: 8px 0 0; padding-left: 18px; display: grid; gap: 6px; font-size: 13px; }
 .choose-hint small { color: var(--muted); }
+input[type="radio"] { width: auto; }

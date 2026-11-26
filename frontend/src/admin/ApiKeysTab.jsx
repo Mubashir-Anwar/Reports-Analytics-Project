@@ -5,8 +5,22 @@ import { Notice, formatWhen } from '../portal/Shell.jsx';
 const splitList = (text) => text.split(/[,\n]/).map((item) => item.trim()).filter(Boolean);
 
 /** API keys: one per client website or system that runs reports by URL. */
+const DAY = 86_400_000;
+/** How a key is doing: disabled, expired, never used, not used for 30 days, or in use. */
+function keyState(key, now = Date.now()) {
+  if (key.disabled) return { id: 'disabled', label: 'Disabled', tone: 'muted' };
+  if (key.expiresAt && Date.parse(key.expiresAt) < now) return { id: 'expired', label: 'Expired', tone: 'bad' };
+  if (!key.lastUsedAt) return { id: 'never', label: 'Never used', tone: 'warn' };
+  const days = Math.floor((now - Date.parse(key.lastUsedAt)) / DAY);
+  if (days >= 30) return { id: 'idle', label: `Not used for ${days} days`, tone: 'warn' };
+  return { id: 'active', label: days === 0 ? 'Used today' : `Used ${days} day${days === 1 ? '' : 's'} ago`, tone: 'ok' };
+}
+const KEY_FILTERS = [['all', 'All'], ['unused', 'Not in use'], ['active', 'In use'], ['disabled', 'Disabled'], ['expired', 'Expired']];
+
 export default function ApiKeysTab({ notify }) {
   const [keys, setKeys] = useState([]);
+  const [show, setShow] = useState('all');
+  const [find, setFind] = useState('');
   const [form, setForm] = useState({ name: '', folders: '', allowedIps: '', expiresInDays: '' });
   const [created, setCreated] = useState(null); // { name, secret } shown once
   const [message, setMessage] = useState(null);
@@ -73,12 +87,30 @@ export default function ApiKeysTab({ notify }) {
             <div className="row"><button type="button" className="btn sm" onClick={() => copy(created.secret)}>Copy key</button><button type="button" className="btn sm quiet" onClick={() => setCreated(null)}>I saved it</button></div>
           </div>
         )}
+        {keys.length > 0 && (() => {
+          const count = (id) => keys.filter((key) => (id === 'all' ? true : id === 'unused' ? ['never', 'idle'].includes(keyState(key).id) : keyState(key).id === id)).length;
+          return (
+            <div className="ak-tools">
+              <div className="ak-filters" role="group" aria-label="Show">
+                {KEY_FILTERS.map(([id, label]) => (
+                  <button key={id} type="button" className={show === id ? 'on' : ''} aria-pressed={show === id} onClick={() => setShow(id)}>{label}<em>{count(id)}</em></button>
+                ))}
+              </div>
+              {keys.length > 5 && <input type="search" value={find} onChange={(e) => setFind(e.target.value)} placeholder="Find a key by name or prefix…" aria-label="Find a key" />}
+            </div>
+          );
+        })()}
         <div className="stack">
           {!keys.length && <div className="empty">No API keys yet.</div>}
-          {keys.map((key) => (
-            <div key={key.id} className="item">
+          {keys
+            .filter((key) => { const state = keyState(key).id; return show === 'all' || (show === 'unused' ? ['never', 'idle'].includes(state) : state === show); })
+            .filter((key) => !find.trim() || `${key.name} ${key.prefix}`.toLowerCase().includes(find.trim().toLowerCase()))
+            .sort((a, b) => String(b.lastUsedAt || '').localeCompare(String(a.lastUsedAt || '')))
+            .map((key) => { const state = keyState(key); return (
+            <div key={key.id} className={`item ak-item ak-${state.id}`}>
               <div>
-                <strong>{key.name}{key.disabled ? ' (disabled)' : ''}</strong>
+                <strong>{key.name}<span className={`ak-state ${state.tone}`}>{state.label}</span>
+                  {typeof key.calls30 === 'number' && <span className="ak-calls" title="Reports this key ran (data it took) in the last 30 days">{key.calls30 >= 10000 ? '10,000+' : key.calls30.toLocaleString()} report runs / 30 days</span>}</strong>
                 <small><code>{key.prefix}</code> · folders: {key.folders?.length ? key.folders.join(', ') : 'all'} · addresses: {key.allowedIps?.length ? key.allowedIps.join(', ') : 'any'}</small>
                 <small>Expires: {key.expiresAt ? formatWhen(key.expiresAt) : 'never'} · last used: {formatWhen(key.lastUsedAt)} · by {key.createdBy || '?'}</small>
                 <small>Webhook: {key.webhookUrl || 'none'} · {key.rateLimit ? `${key.rateLimit} requests/minute` : 'no rate limit'}</small>
@@ -92,7 +124,8 @@ export default function ApiKeysTab({ notify }) {
                 <button className="btn sm danger" onClick={() => remove(key)}>Delete</button>
               </div>
             </div>
-          ))}
+          ); })}
+          {keys.length > 0 && show === 'unused' && !keys.some((key) => ['never', 'idle'].includes(keyState(key).id)) && <div className="empty">Every key was used in the last 30 days.</div>}
         </div>
         <details className="howto">
           <summary>How a website uses a key</summary>

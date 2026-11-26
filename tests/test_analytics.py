@@ -270,13 +270,18 @@ def sales_dashboard(client, folder="Analytics"):
 
 def test_dashboards_on_the_server(bi):
     dash, orders, branches = sales_dashboard(bi, "Sales")
-    make_user(bi, "sam", ["server"])                               # Report Server only: sees and opens dashboards there
+    make_user(bi, "ray", ["server"])                               # Report Server without Analytics: reports only
+    sign_in(bi, "ray")
+    hidden = bi.get("/api/server/repository").json()
+    assert hidden["dashboards"] == [] and hidden["shows"] == {"reports": True, "dashboards": False}
+    assert bi.get(f"/api/server/dashboards/{dash['id']}").status_code == 403
+    make_user(bi, "sam", ["server", "analytics"])                  # with the Analytics right: sees and opens dashboards there
     sign_in(bi, "sam")
     repo = bi.get("/api/server/repository").json()
     assert [d["name"] for d in repo["dashboards"]] == ["Sales"] and "Sales" in repo["folders"]
     opened = bi.get(f"/api/server/dashboards/{dash['id']}").json()
     assert {d["id"] for d in opened["datasets"]} == {orders, branches} and "querySource" not in opened["datasets"][0]
-    assert opened["dashboard"]["mayChange"] is False and opened["mayOpenAnalytics"] is False and len(opened["relationships"]) == 1
+    assert opened["dashboard"]["mayChange"] is False and opened["mayOpenAnalytics"] is True and len(opened["relationships"]) == 1
     queries = [{**t, "tileId": t["id"]} for t in opened["dashboard"]["tiles"]]
     results = bi.post(f"/api/server/dashboards/{dash['id']}/query-batch",
                       json={"queries": queries, "filters": [{"dataset": branches, "column": "Region", "op": "in", "values": ["Punjab"], "fromTile": "t1"}]}).json()["results"]

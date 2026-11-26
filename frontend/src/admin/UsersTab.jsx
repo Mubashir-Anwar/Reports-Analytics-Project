@@ -9,10 +9,11 @@ const RIGHT_HELP = {
   query: 'Query workspace: browse data sources and try MongoDB / SQL queries (read-only)',
   server: 'Report Server: folders, run, schedules (folder permissions apply)',
   analytics: 'Dashboards and models',
+  python: 'Python scripts in Analytics: clean and model data with pandas, scikit-learn, scipy (needs Analytics too)',
   runner: 'Running reports by URL (/generate, /reports, collections)',
 };
 const DEFAULT_RIGHTS = [{ id: 'admin', label: 'Admin' }, { id: 'designer', label: 'Designer' }, { id: 'query', label: 'Query' }, { id: 'server', label: 'Report Server' },
-  { id: 'analytics', label: 'Analytics' }, { id: 'runner', label: 'Run reports by URL' }];
+  { id: 'analytics', label: 'Analytics' }, { id: 'python', label: 'Python scripts' }, { id: 'runner', label: 'Run reports by URL' }];
 const LEVEL_LABEL = { none: 'None', run: 'Run', manage: 'Manage' };
 const EMPTY_FORM = { username: '', fullName: '', email: '', phone: '', password: '', rights: ['runner'], superAdmin: false };
 
@@ -76,8 +77,11 @@ function ContactEditor({ user, onSave, onClose }) {
 }
 
 /** Teams (user groups): folder permissions can be given to a whole team. */
-function TeamsCard({ users, notify }) {
+function TeamsCard({ notify }) {
   const [groups, setGroups] = useState([]);
+  const [users, setUsers] = useState([]);
+  const [find, setFind] = useState('');
+  useEffect(() => { api.users().then((data) => setUsers(data.users)).catch(() => setUsers([])); }, []);
   const [editing, setEditing] = useState(null);     // { groupId?, name, description, members }
   const load = useCallback(() => api.userGroups().then((data) => setGroups(data.groups)).catch((error) => notify(error.message, 'error')), [notify]);
   useEffect(() => { load(); }, [load]);
@@ -110,7 +114,11 @@ function TeamsCard({ users, notify }) {
             <label className="field"><span>Description</span><input value={editing.description || ''} onChange={(e) => setEditing({ ...editing, description: e.target.value })} maxLength={300} /></label>
           </div>
           <div className="field"><span>Members</span>
-            <div className="rights">{users.map((user) => (
+            <input type="search" className="team-find" value={find} onChange={(e) => setFind(e.target.value)} placeholder={`Find among ${users.length} users…`} aria-label="Find a user" />
+            <div className="rights team-members">{users
+              .filter((user) => editing.members.includes(user.username) || !find.trim() || `${user.username} ${user.fullName || ''} ${user.email || ''}`.toLowerCase().includes(find.trim().toLowerCase()))
+              .sort((a, b) => Number(editing.members.includes(b.username)) - Number(editing.members.includes(a.username)))
+              .slice(0, 120).map((user) => (
               <label key={user.username} className={`right-chip ${editing.members.includes(user.username) ? 'on' : ''}`}>
                 <input type="checkbox" checked={editing.members.includes(user.username)} onChange={() => toggle(user.username)} />{user.fullName || user.username}
               </label>
@@ -217,18 +225,35 @@ function AccessReportCard({ notify }) {
   );
 }
 
+const PAGE = 20;
+const SECTIONS = [['accounts', '👤', 'Accounts'], ['teams', '👥', 'Teams'], ['requests', '🔑', 'Password requests'], ['access', '🛡', 'Who can open what']];
+
 export default function UsersTab({ notify }) {
-  const [data, setData] = useState({ users: [], rights: DEFAULT_RIGHTS, youAreSuperAdmin: false });
+  const [section, setSection] = useState(() => { try { return localStorage.getItem('admin-users-section') || 'accounts'; } catch { return 'accounts'; } });
+  useEffect(() => { try { localStorage.setItem('admin-users-section', section); } catch { /* private mode */ } }, [section]);
+  const [query, setQuery] = useState({ search: '', right: '', status: '', offset: 0 });
+  const [typed, setTyped] = useState('');
+  useEffect(() => { const timer = setTimeout(() => setQuery((q) => (q.search === typed.trim() ? q : { ...q, search: typed.trim(), offset: 0 })), 250); return () => clearTimeout(timer); }, [typed]);
+  const [loading, setLoading] = useState(true);
+  const [showForm, setShowForm] = useState(false);
+  const [data, setData] = useState({ users: [], total: 0, rights: DEFAULT_RIGHTS, youAreSuperAdmin: false });
   const [wantsAdmin] = useState(() => new URLSearchParams(window.location.search).get('new') === 'admin');   // Create new admin (setup admin banner)
   const [form, setForm] = useState(() => (wantsAdmin ? { ...EMPTY_FORM, superAdmin: true } : EMPTY_FORM));
   const newUser = useRef(null);
-  useEffect(() => { if (wantsAdmin) { newUser.current?.scrollIntoView({ block: 'start' }); newUser.current?.querySelector('input')?.focus(); } }, [wantsAdmin]);
+  useEffect(() => { if (wantsAdmin) { setSection('accounts'); setShowForm(true); } }, [wantsAdmin]);
+  useEffect(() => { if (wantsAdmin && showForm) { newUser.current?.scrollIntoView({ block: 'start' }); newUser.current?.querySelector('input')?.focus(); } }, [wantsAdmin, showForm]);
   const [formMessage, setFormMessage] = useState(null);
   const [busy, setBusy] = useState(false);
   const [contact, setContact] = useState('');      // username whose name / e-mail / phone is being edited
 
-  const load = useCallback(() => api.users().then(setData).catch((error) => notify(error.message, 'error')), [notify]);
+  const load = useCallback(() => {
+    setLoading(true);
+    return api.users({ ...query, limit: PAGE }).then(setData).catch((error) => notify(error.message, 'error')).finally(() => setLoading(false));
+  }, [notify, query]);
   useEffect(() => { load(); }, [load]);
+  const pages = Math.max(1, Math.ceil((data.total || 0) / PAGE));
+  const page = Math.floor((data.offset || 0) / PAGE) + 1;
+  const filtered = Boolean(query.search || query.right || query.status);
   const allRights = data.rights?.length ? data.rights : DEFAULT_RIGHTS;
   const isSuper = data.youAreSuperAdmin;
   // Only a super admin may change administrators (Admin right or super admin).
@@ -271,15 +296,43 @@ export default function UsersTab({ notify }) {
   };
 
   return (
-    <div className="grid-2">
+    <div className="ut">
+      <div className="ut-tabs" role="tablist" aria-label="Users and rights">
+        {SECTIONS.map(([id, icon, label]) => (
+          <button key={id} type="button" role="tab" aria-selected={section === id} className={section === id ? 'on' : ''} onClick={() => setSection(id)}>
+            <span aria-hidden="true">{icon}</span>{label}{id === 'accounts' && <em>{data.total ?? data.users.length}</em>}
+          </button>
+        ))}
+      </div>
+      {section === 'teams' && <TeamsCard notify={notify} />}
+      {section === 'requests' && <ResetRequestsCard notify={notify} />}
+      {section === 'access' && <AccessReportCard notify={notify} />}
+      {section === 'accounts' && (
+    <div className={showForm ? 'grid-2' : 'ut-one'}>
       <section className="card">
         <div className="card-head">
           <div><p className="eyebrow">Accounts</p><h2>Users and rights</h2>
             <p className="muted">Each account sees only the parts it has a right for. A super admin has every right and is the only one who may manage administrators; there can be several. Changing rights signs that user out.</p></div>
-          <button className="btn" onClick={load}>Refresh</button>
+          <div className="row">
+            <button className="btn" onClick={load}>Refresh</button>
+            {!showForm && <button className="btn primary" onClick={() => setShowForm(true)}>＋ New user</button>}
+          </div>
         </div>
+        <div className="ut-find">
+          <input type="search" value={typed} onChange={(e) => setTyped(e.target.value)} placeholder="Find a user: name, username, e-mail or phone…" aria-label="Find a user" />
+          <select value={query.right} onChange={(e) => setQuery({ ...query, right: e.target.value, offset: 0 })} aria-label="With the right">
+            <option value="">Any right</option>
+            {allRights.map((right) => <option key={right.id} value={right.id}>{right.label}</option>)}
+          </select>
+          <select value={query.status} onChange={(e) => setQuery({ ...query, status: e.target.value, offset: 0 })} aria-label="Status">
+            <option value="">Everyone</option><option value="active">Active</option><option value="disabled">Disabled</option>
+            <option value="never">Never signed in</option><option value="super">Super admins</option>
+          </select>
+        </div>
+        <p className="ut-count">{loading ? 'Loading…' : `${data.total || 0} ${filtered ? 'found' : 'accounts'}${pages > 1 ? ` · page ${page} of ${pages}` : ''}`}
+          {filtered && <button type="button" className="btn sm quiet" onClick={() => { setTyped(''); setQuery({ search: '', right: '', status: '', offset: 0 }); }}>Clear</button>}</p>
         <div className="stack">
-          {!data.users.length && <div className="empty">No users yet. Create the first one on the right.</div>}
+          {!loading && !data.users.length && <div className="empty">{filtered ? 'Nobody matches. Try another name or filter.' : 'No users yet. Create the first one with ＋ New user.'}</div>}
           {data.users.map((user) => (
             <div key={user.username} className="item user-item">
               <div>
@@ -307,9 +360,18 @@ export default function UsersTab({ notify }) {
             </div>
           ))}
         </div>
+        {pages > 1 && (
+          <div className="ut-pager">
+            <button type="button" className="btn sm" disabled={page <= 1} onClick={() => setQuery({ ...query, offset: (page - 2) * PAGE })}>‹ Previous</button>
+            <span>{(data.offset || 0) + 1}–{(data.offset || 0) + data.users.length} of {data.total}</span>
+            <button type="button" className="btn sm" disabled={page >= pages} onClick={() => setQuery({ ...query, offset: page * PAGE })}>Next ›</button>
+          </div>
+        )}
       </section>
+      {showForm && (
       <form className={`card stack ${wantsAdmin ? 'new-admin' : ''}`} onSubmit={create} ref={newUser}>
-        <div><p className="eyebrow">Add</p><h2>{wantsAdmin && form.superAdmin ? 'New admin' : 'New user'}</h2>{wantsAdmin && form.superAdmin && <p className="muted">Your own super admin. Sign in with it afterwards; the setup account then ends by itself.</p>}</div>
+        <div className="card-head"><div><p className="eyebrow">Add</p><h2>{wantsAdmin && form.superAdmin ? 'New admin' : 'New user'}</h2>{wantsAdmin && form.superAdmin && <p className="muted">Your own super admin. Sign in with it afterwards; the setup account then ends by itself.</p>}</div>
+          <button type="button" className="fd-x" aria-label="Close the form" onClick={() => setShowForm(false)}>✕</button></div>
         <label className="field"><span>Username (to sign in)</span><input value={form.username} onChange={(e) => setForm({ ...form, username: e.target.value })} maxLength={64} autoComplete="off" placeholder="e.g. ali.khan" required />
           <FieldNote check={check.username} takenText="this username is already taken" /></label>
         <label className="field"><span>Full name</span><input value={form.fullName} onChange={(e) => setForm({ ...form, fullName: e.target.value })} maxLength={120} autoComplete="off" placeholder="e.g. Ali Khan" /></label>
@@ -329,9 +391,9 @@ export default function UsersTab({ notify }) {
         <div className="row"><button className="btn primary" type="submit" disabled={busy || blocked}>{busy ? 'Creating…' : 'Create user'}</button></div>
         <Notice message={formMessage} />
       </form>
-      <TeamsCard users={data.users} notify={notify} />
-      <ResetRequestsCard notify={notify} />
-      <AccessReportCard notify={notify} />
+      )}
+    </div>
+      )}
     </div>
   );
 }

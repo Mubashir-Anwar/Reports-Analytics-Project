@@ -475,3 +475,53 @@ a.btn.primary, a.btn.primary:hover { color: var(--on-accent); }
 .bi-resizer { position: absolute; }
 .bi-resizer .fx-resizer-grip { position: sticky; top: 45vh; }
 .bi-resizer { place-items: start center; }
+
+/* Python scripts (#py): datasets on the left, the code and its result on the right, PixelFX edges */
+.py-mark { font: 800 9.5px/1 var(--mono, ui-monospace, monospace); letter-spacing: -.02em; }
+.py-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; flex-wrap: wrap; }
+.py-head code { font-size: .92em; }
+.py-state { display: grid; gap: 4px; justify-items: end; max-width: 360px; font-size: 12px; }
+.py-pill { padding: 2px 9px; border: 2px solid currentColor; font: 800 11px/1.6 var(--mono, ui-monospace, monospace); text-transform: uppercase; color: var(--muted); }
+.py-pill.ready { color: var(--ok, #15803d); }
+.py-pill.failed { color: var(--danger, #d64545); }
+.py-pill.queued, .py-pill.refreshing { color: #c77700; animation: py-blink 1s steps(2) infinite; }
+@keyframes py-blink { 50% { opacity: .45; } }
+.py-last-error { color: var(--danger, #d64545); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%; }
+.py-split { display: grid; grid-template-columns: minmax(220px, 290px) minmax(0, 1fr); gap: 16px; align-items: start; }
+.py-inputs { position: sticky; top: 12px; max-height: calc(100vh - 140px); overflow: auto; }
+.py-choices { display: grid; gap: 6px; }
+.py-choice { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 4px 8px; align-items: center; padding: 7px 9px; border: 2px solid var(--line); cursor: pointer; transition: transform .12s, box-shadow .12s, border-color .12s; }
+.py-choice:hover { border-color: var(--text); }
+.py-choice.on { border-color: var(--text); box-shadow: 3px 3px 0 var(--accent); transform: translate(-1px, -1px); }
+.py-choice input { width: 16px; height: 16px; margin: 0; }
+.py-choice span { display: grid; min-width: 0; }
+.py-choice b { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; }
+.py-choice small { color: var(--muted); font-size: 11px; }
+.py-choice code { grid-column: 2; justify-self: start; padding: 0 5px; background: var(--text); color: var(--panel); font-size: 11px; }
+.py-snippets { gap: 6px; }
+.py-snippet { display: grid; gap: 1px; text-align: left; padding: 7px 9px; border: 1.5px dashed var(--line); background: transparent; color: var(--text); font: inherit; cursor: pointer; }
+.py-snippet:hover { border-style: solid; border-color: var(--text); background: var(--soft); }
+.py-snippet span { font-weight: 700; font-size: 12.5px; }
+.py-snippet small { color: var(--muted); font-size: 11px; }
+.py-editor { min-width: 0; }
+.py-bar { align-items: center; gap: 10px; }
+.py-bar b { font-family: var(--mono, ui-monospace, monospace); }
+.py-bar .spacer { flex: 1; }
+.py-code { display: grid; grid-template-columns: auto minmax(0, 1fr); border: 2px solid var(--text); background: #0d1117; box-shadow: 5px 5px 0 var(--accent); min-height: 320px; height: 46vh; resize: vertical; overflow: hidden; }
+.py-gutter { margin: 0; padding: 12px 8px 12px 12px; color: #5b6575; text-align: right; user-select: none; overflow: hidden; font: 13px/1.55 var(--mono, ui-monospace, monospace); border-right: 1px solid #222a35; }
+.py-code textarea { width: 100%; height: 100%; margin: 0; padding: 12px; border: 0; border-radius: 0; outline: none; resize: none; background: transparent; color: #e6edf3; caret-color: #7ee787; font: 13px/1.55 var(--mono, ui-monospace, monospace); tab-size: 4; white-space: pre; overflow: auto; box-shadow: none; }
+.py-code textarea:focus { box-shadow: none; }
+.py-code:focus-within { box-shadow: 5px 5px 0 var(--accent), 0 0 0 3px color-mix(in srgb, var(--accent) 35%, transparent); }
+.py-limits { margin: 0; }
+.py-status { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; padding: 6px 10px; border: 2px solid currentColor; font: 700 12px/1.4 var(--mono, ui-monospace, monospace); }
+.py-status.ok { color: var(--ok, #15803d); }
+.py-status.bad { color: var(--danger, #d64545); }
+.py-status span { color: var(--muted); }
+.py-error, .py-output { margin: 0; padding: 10px 12px; max-height: 260px; overflow: auto; white-space: pre-wrap; word-break: break-word; font: 12.5px/1.5 var(--mono, ui-monospace, monospace); border: 1.5px solid var(--line); background: var(--soft); }
+.py-error { color: var(--danger, #d64545); border-color: currentColor; }
+.py-label { color: var(--muted); font: 700 11px var(--mono, ui-monospace, monospace); text-transform: uppercase; letter-spacing: .05em; }
+.py-table { max-height: 360px; overflow: auto; }
+.py-save { display: grid; grid-template-columns: auto repeat(3, minmax(140px, 1fr)) auto; gap: 12px; align-items: end; }
+.py-save > b { align-self: center; }
+@media (max-width: 980px) { .py-split { grid-template-columns: 1fr; } .py-inputs { position: static; max-height: none; } .py-save { grid-template-columns: 1fr; } }
+@media (prefers-reduced-motion: reduce) { .py-pill { animation: none; } .py-choice { transition: none; } }

@@ -79,9 +79,31 @@ def register(app: FastAPI, ctx: SimpleNamespace) -> None:
         return gone
 
     @app.get("/api/admin/users")
-    def admin_list_users(request: Request) -> dict[str, Any]:
+    def admin_list_users(request: Request, search: str = "", right: str = "", status: str = "", offset: int = 0,
+                         limit: int = 0) -> dict[str, Any]:
+        """All accounts, or (with limit) one page of them: search in username, name, e-mail and phone; filter by a
+        right or a status (admin, disabled, never, locked-out names are not shown here). total = matches before paging."""
         require_admin(request)
-        return {"users": [user_view(item) for item in load_users()], "needsFirstAdmin": needs_first_admin(),
+        views = [user_view(item) for item in load_users()]
+        needle = search.strip().casefold()
+        if needle:
+            views = [v for v in views if any(needle in str(v.get(f) or "").casefold() for f in ("username", "fullName", "email", "phone"))]
+        if right:
+            views = [v for v in views if right in v["rights"] or (right == "admin" and v["superAdmin"])]
+        if status == "disabled":
+            views = [v for v in views if v["disabled"]]
+        elif status == "active":
+            views = [v for v in views if not v["disabled"]]
+        elif status == "never":
+            views = [v for v in views if not v.get("lastLoginAt")]
+        elif status == "super":
+            views = [v for v in views if v["superAdmin"]]
+        views.sort(key=lambda v: (not v["superAdmin"], str(v["username"]).casefold()))
+        total = len(views)
+        if limit > 0:
+            offset = max(0, offset)
+            views = views[offset:offset + min(limit, 200)]
+        return {"users": views, "total": total, "offset": max(0, offset), "needsFirstAdmin": needs_first_admin(),
                 "roles": list(USER_ROLES), "rights": [{"id": right, "label": RIGHT_LABELS[right]} for right in USER_RIGHTS],
                 "youAreSuperAdmin": caller_is_super(request)}
 

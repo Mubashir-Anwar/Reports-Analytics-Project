@@ -113,9 +113,17 @@ def clean_dataset(payload: dict[str, Any], adapters: dict[str, str], current: di
         raise ValueError(f"A scheduled refresh runs at most every {settings.min_refresh_minutes()} minutes (or 0 = only by hand)")
     if every > 7 * 24 * 60:
         raise ValueError("Refresh at least once a week, or set 0 (only by hand)")
+    if merged.get("sourceKind") == "python":            # made by a Python script from other datasets (pyscript.py)
+        from backend.app.analytics import pyscript  # noqa: PLC0415
+        clean = pyscript.clean_source({**merged, "script": merged.get("script", merged.get("querySource"))}, dataset,
+                                      (current or {}).get("id", ""))
+        # the script is kept as the dataset's query (querySource); "python" / "pandas" mark it in the required columns
+        source = {"sourceKind": "python", "inputs": clean["inputs"], "connectionId": pyscript.CONNECTION,
+                  "queryLanguage": pyscript.LANGUAGE, "querySource": clean["script"], "collection": ""}
+    else:
+        source = {**clean_source(merged, adapters), "sourceKind": "", "inputs": []}
     out = {"name": _text(merged.get("name"), "Name", 120, True), "folder": _folder(merged.get("folder")),
-           "description": _text(merged.get("description"), "Description", 500), "refreshEveryMinutes": every,
-           **clean_source(merged, adapters)}
+           "description": _text(merged.get("description"), "Description", 500), "refreshEveryMinutes": every, **source}
     if current is not None:
         out["columns"] = clean_columns(payload.get("columns"), current.get("columns") or []) if "columns" in payload else current.get("columns") or []
     return out
