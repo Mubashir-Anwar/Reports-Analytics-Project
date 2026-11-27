@@ -43,7 +43,7 @@ jobs:
       MONGO_TEST_URL: mongodb://127.0.0.1:27017
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
           cache: pip
@@ -91,7 +91,7 @@ jobs:
       ORACLE_TEST_URL: oracle://reporting_test:reporting_test@127.0.0.1:1521/?service_name=FREEPDB1
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
           cache: pip
