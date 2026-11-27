@@ -15,6 +15,7 @@ upgrade_people() copies what the previous version kept in rs_users / rs_api_keys
 """
 from __future__ import annotations
 
+import threading
 from typing import Any
 
 from backend.app.db import entities as ent, model
@@ -70,28 +71,67 @@ def _user_row(record: dict[str, Any], user_id: str) -> dict[str, Any]:
     return row
 
 
+# One lock for every change to accounts in this process: two admins adding users at the same moment must not
+# overwrite each other (found by tools/sanity_test.py: 7 of 1000 users made 8 at a time lost their rights).
+WRITE_LOCK = threading.RLock()
+
+
 def save_users(users: list[dict[str, Any]], *, by: str = "") -> None:
-    """Make the users table equal to this list (matched by user id, else by username); rights follow."""
+    """Make the users table equal to this list (matched by user id, else by username); rights follow.
+    For bulk changes (upgrade, server console); a single account is saved with save_user / delete_user instead."""
+    with WRITE_LOCK:
+        db = _db()
+        current = db.find(ent.USERS_V2)
+        by_id = {row["userId"]: row for row in current}
+        kept: set[str] = set()
+        for record in users:
+            found = by_id.get(str(record.get("userId") or "")) or next((row for row in current if _same(row["username"], record["username"])), None)
+            kept.add(_write_user(record, found, by))
+        for user_id in set(by_id) - kept:
+            _forget_user(user_id)
+
+
+def _write_user(record: dict[str, Any], found: dict[str, Any] | None, by: str) -> str:
+    """Write one account and make its rights rows match; the user id."""
     from backend.app.security.users import user_rights  # noqa: PLC0415
     db = _db()
-    current = db.find(ent.USERS_V2)
-    by_id = {row["userId"]: row for row in current}
-    kept: set[str] = set()
-    for record in users:
-        found = by_id.get(str(record.get("userId") or "")) or next((row for row in current if _same(row["username"], record["username"])), None)
-        user_id = found["userId"] if found else str(record.get("userId") or model.new_id())
-        record["userId"] = user_id
-        kept.add(user_id)
-        row = _user_row(record, user_id)
-        db.put(ent.USERS_V2, row)
-        wanted = set(user_rights(record))
-        have = {item["rightName"] for item in db.find(ent.USER_RIGHTS, {"userId": user_id})}
-        for name in have - wanted:
-            db.delete(ent.USER_RIGHTS, user_id, name)
-        for name in wanted - have:
-            db.put(ent.USER_RIGHTS, {"userId": user_id, "rightName": name, "grantedBy": by or None, "grantedAt": model.now()})
-    for user_id in set(by_id) - kept:
-        _forget_user(user_id)
+    user_id = found["userId"] if found else str(record.get("userId") or model.new_id())
+    record["userId"] = user_id
+    db.put(ent.USERS_V2, _user_row(record, user_id))
+    wanted = set(user_rights(record))
+    have = {item["rightName"] for item in db.find(ent.USER_RIGHTS, {"userId": user_id})}
+    for name in have - wanted:
+        db.delete(ent.USER_RIGHTS, user_id, name)
+    for name in wanted - have:
+        db.put(ent.USER_RIGHTS, {"userId": user_id, "rightName": name, "grantedBy": by or None, "grantedAt": model.now()})
+    return user_id
+
+
+def save_user(record: dict[str, Any], *, by: str = "") -> None:
+    """Add one account or change it (matched by user id, else by username). Other accounts are not touched."""
+    with WRITE_LOCK:
+        found = None
+        if record.get("userId"):
+            found = next(iter(_db().find(ent.USERS_V2, {"userId": str(record["userId"])}, limit=1)), None)
+        _write_user(record, found or find_user_row(record["username"]), by)
+
+
+def delete_user(username: str) -> bool:
+    """Remove one account with its rights, team places, folder rules and reset requests."""
+    with WRITE_LOCK:
+        found = find_user_row(username)
+        if found is None:
+            return False
+        _forget_user(found["userId"])
+        return True
+
+
+def find_user(username: str) -> dict[str, Any] | None:
+    """One account with its rights (two small reads, not every account: this runs on every signed-in request)."""
+    row = find_user_row(username)
+    if row is None:
+        return None
+    return _user_record(row, [item["rightName"] for item in _db().find(ent.USER_RIGHTS, {"userId": row["userId"]})])
 
 
 def _forget_user(user_id: str) -> None:
@@ -108,7 +148,7 @@ def put_user(record: dict[str, Any]) -> None:
     """Save one user that already exists (e.g. last sign-in time), without touching the others."""
     found = find_user_row(record["username"])
     if found is None:
-        save_users([*load_users(), record])
+        save_user(record)
         return
     _db().put(ent.USERS_V2, _user_row(record, found["userId"]))
 

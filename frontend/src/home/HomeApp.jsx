@@ -37,10 +37,10 @@ function stepsFor(rights, data, lastPart) {
   const out = [];
   const part = PARTS.find((p) => p.right === lastPart && mayConnect(p.right, rights)) || PARTS.find((p) => mayConnect(p.right, rights));
   if (part) {   // the part this person works in; the other parts connect theirs on their own card
-    out.push({ done: data[part.right]?.dataSources > 0, title: `Connect data for ${part.name}`, text: `MongoDB, PostgreSQL, MySQL, SQL Server or Oracle. Only for ${part.name}.`,
-      connect: part.right, href: CONNECT[part.right], go: 'Connect a database' });
+    out.push({ done: data[part.right]?.dataSources > 0, title: `Add your data to ${part.name}`, text: `Connect a database, upload an Excel, CSV or JSON file, or link a Google Sheet. It stays in ${part.name}: each part keeps its own data sources.`,
+      connect: part.right, href: CONNECT[part.right], go: 'Add a data source' });
   }
-  if (has('query')) out.push({ optional: true, title: 'Look at it', text: 'Browse tables and try a query.', href: '/query' });
+  if (has('query')) out.push({ optional: true, title: 'Explore it', text: 'Browse tables and collections, and try a query.', href: '/query' });
   if (has('designer')) out.push({ done: data.designer?.reports > 0, title: 'Make a report', text: 'Design it and publish it to the Server.', href: '/designer', go: 'Open Designer' });
   if (has('analytics')) out.push({ done: data.analytics?.dashboards > 0, title: 'Make a dashboard', text: 'Charts, maps and predictions.', href: '/analytics', go: 'Open Analytics' });
   if (has('server')) out.push({ optional: true, title: 'Run and share', text: 'Run reports, or let them run on a schedule.', href: '/server' });

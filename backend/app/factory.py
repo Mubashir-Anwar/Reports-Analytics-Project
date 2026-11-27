@@ -10,6 +10,7 @@ from urllib.parse import quote
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
+from starlette.concurrency import run_in_threadpool
 
 from backend.app.constants import SERVICE_VERSION
 from backend.app.context import create_context
@@ -42,6 +43,7 @@ from backend.app.routers import (
 from backend.app.security import audit_trail
 from backend.app.security.access import client_address, enabled_areas, management_ip_allowed, path_area
 from backend.app.security.headers import add_security_headers, too_large
+from backend.app.services import versions
 from backend.app.services.request_log import RequestLog
 
 
@@ -100,8 +102,12 @@ def make_app() -> FastAPI:
                        RedirectResponse(url=f"/login?next={quote(path, safe='')}", status_code=303))
         if blocked is None:
             blocked = too_large(request)
-        if blocked is None and not path.startswith("/assets/"):
-            ctx.refresh_if_changed()  # another instance may have published or deleted reports
+        # This middleware runs on the event loop, which every request shares: storage reads and writes (the revision
+        # check, the audit event) go to a worker thread. Found by tools/sanity_test.py load: done here, each one
+        # stopped every other request for its database round trip, and 100 users got ~10 answers a second.
+        if (blocked is None and not path.startswith("/assets/")
+                and time.monotonic() - ctx.state.get("revision_checked", 0.0) >= versions.REFRESH_EVERY_SECONDS):
+            await run_in_threadpool(ctx.refresh_if_changed)  # another instance may have published or deleted reports
         audited_body = b""
         if blocked is None and request.method in ("POST", "PUT", "DELETE") and path.startswith("/api/"):
             audited_body = await request.body()      # kept for the audit target (folder path, report id); never stored whole
@@ -114,7 +120,7 @@ def make_app() -> FastAPI:
                 HTTP_LOG.exception("Unhandled error on %s %s", request.method, path)
                 raise
             if response.status_code < 400 and request.method in ("POST", "PUT", "DELETE"):
-                _audit_change(request, audited_body)
+                await run_in_threadpool(_audit_change, request, audited_body)
         add_security_headers(request, response)
         duration = int((time.monotonic() - started) * 1000)
         if not path.startswith("/assets/") or response.status_code >= 400:

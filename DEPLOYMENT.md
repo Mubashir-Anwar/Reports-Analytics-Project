@@ -87,6 +87,13 @@ server {
 5. **Secrets** in the server's environment (not in files in the code folder):
    `REPORTING_ADMIN_TOKEN`, `REPORTING_DESIGNER_TOKEN` (optional), `REPORTING_ACCESS_SECRET`.
    Generate each with `python -c "import secrets; print(secrets.token_urlsafe(48))"`.
+   **The Admin checklist in one step:** `python tools/harden_env.py --https` adds whatever is missing to `.env`:
+   `REPORTING_SECRETS_KEY` (data source passwords are encrypted at the next start; keep a copy of the key),
+   `REPORTING_SESSION_SECRET`, `REPORTING_ENABLED_AREAS` without `docs`, and with `--https` secure cookies + HSTS.
+   It never changes a value that is there, never prints a secret, and keeps the old file as `.env.before-harden-<time>`.
+   `--check` only lists what is missing. Storage is switched in **Admin → System database** (it copies the data
+   first). For e-mail, use your mail server's `SMTP_*`; to try schedules without one, `--test-mailbox` points them at
+   `python tools/test_mailbox.py`, which saves every mail as an `.eml` file on this PC. Restart the service afterwards.
 6. **Accounts and rights**: run `python -m backend.app.setup` on the server (an admin for 24 hours), sign in at `/login` with it, then create
    one or more **super admins** in Admin → Users & rights (the first one removes the setup admin at once). Give every other account only the rights it needs:
    Admin, Designer, Report Server, Analytics, Run reports. Pages and APIs check these rights; the admin token is
@@ -106,7 +113,7 @@ A `Dockerfile` is included: mount a volume at `/data` and pass the secrets as en
 
 ```bash
 docker build -t analysis .
-docker run -d -p 8000:8000 -v analysis-data:/data -e REPORTING_ADMIN_TOKEN=... -e REPORTING_SECRETS_KEY=... -e REPORTING_ENABLED_AREAS=runner,admin,designer analysis
+docker run -d -p 8000:8000 -v analysis-data:/data -e REPORTING_ADMIN_TOKEN=... -e REPORTING_SECRETS_KEY=... -e REPORTING_ENABLED_AREAS=runner,admin,designer,server,analytics analysis
 ```
 
 
@@ -462,13 +469,14 @@ Checked in the security review (tests: `tests/test_security.py`, `tests/test_sto
 
 | Area | What the service does | What you do |
 |---|---|---|
-| Sign-in and roles | Every data API needs a token or a `/server` session (a test calls every route without credentials); constant-time token checks; PBKDF2-SHA256 with 600 000 iterations (older hashes are upgraded at the next sign-in); an account is locked after 5 wrong passwords for 15 minutes (Admin → Limits → Sign-in, or `REPORTING_LOGIN_MAX_FAILURES` / `REPORTING_LOGIN_LOCK_MINUTES`; the sign-in page shows the last 3 tries; a new password unlocks it) and an address after twice that many, on all instances | Create named users in Admin → Users; give designer/admin roles only to people who build reports |
+| Sign-in and roles | Every data API needs a token or a `/server` session (a test calls every route without credentials); constant-time token checks; PBKDF2-SHA256 with 600 000 iterations (older hashes are upgraded at the next sign-in; a name that does not exist costs the same check, so the answer time does not reveal real usernames); an account is locked after 5 wrong passwords for 15 minutes (Admin → Limits → Sign-in, or `REPORTING_LOGIN_MAX_FAILURES` / `REPORTING_LOGIN_LOCK_MINUTES`; the sign-in page shows the last 3 tries; a new password unlocks it) and an address after twice that many, on all instances | Create named users in Admin → Users; give designer/admin roles only to people who build reports |
 | Secrets at rest | Adapter URLs/passwords and the admin token are in `private_secrets.json` (mode 0600). With **`REPORTING_SECRETS_KEY`** they are encrypted (Fernet: AES + HMAC); an existing plain file is encrypted at the next start | **Set `REPORTING_SECRETS_KEY`** (a Fernet key or a passphrase of 32+ characters) and keep it outside the data folder / database backups. Losing it means re-entering the adapter passwords |
 | Report databases | MongoDB pipelines: no writes (`$out`, `$merge`), no JavaScript, no server internals (`$currentOp`, `$indexStats`, …), no `system.*` collections or other databases. SQL: one read-only statement, bound values, read-only transaction (SQL Server: rolled back) | Give every adapter a **read-only database user** that can see only the reporting collections / tables |
 | Uploads | `.mrd` / `.jrxml` are parsed with defusedxml (no DTD, entities or external references); 12 MB file and 25 MB request limits | — |
 | Browser | CSP, `X-Frame-Options`, `nosniff`, HttpOnly + SameSite=Strict session cookie, JSON-only writes (no cross-site forms), HSTS when enabled | HTTPS in front (`deploy/nginx.conf`), `REPORTING_SECURE_COOKIES=true`, `REPORTING_HSTS=true` |
 | Report files | Background/scheduled outputs are visible only to their owner (and admins) and are deleted after **`REPORTING_OUTPUT_DAYS`** (default 30) | Lower it if the reports hold sensitive data |
 | API docs | `/docs` and `/openapi.json` are off in the Docker image | Keep them off in production |
+| Tested | `tools/sanity_test.py security`: every route anonymously and without rights, raising one's own rights, API keys outside their folders / changed / in the URL, NoSQL and SQL injection, `$out` / `$merge` / `$function` / `system.users` / `$currentOp`, path traversal, a 60 MB body, cookie flags, security headers, a session after sign-out, sign-in timing (an unknown name takes as long as a real one), and every page, JavaScript file and answer scanned for passwords, keys and database URLs. Last run: 0 FAIL | Run it on a test server after every upgrade |
 | Exports | Excel/CSV cells that start with `=`, `+`, `-`, `@` are neutralised (no formula injection) | — |
 | Backups | — | Back up the storage database (or the data folder) and keep `REPORTING_SECRETS_KEY`, `REPORTING_SESSION_SECRET` and the admin token in a password manager, separately |
 
@@ -598,6 +606,26 @@ The service protects itself in four layers:
 | **4. Big exports stream to disk** | A **background** CSV/Excel run (Run in background, schedules, `POST /api/v1/reports/{id}/jobs`) reads the database in batches of 2 000 with a cursor (MongoDB batch cursor, PostgreSQL server-side cursor, MySQL unbuffered cursor, Oracle array fetch) and writes each batch straight into the file. Memory stays a few MB whether the result is 10 000 or 1 000 000 rows / several GB. The file is downloaded from disk (`GET /api/v1/jobs/{id}/file`), and files over 15 MB are not e-mailed (the e-mail gets the link). | `REPORT_EXPORT_MAX_ROWS` (1 000 000), `REPORT_EXPORT_MAX_TIME_MS` (10 min), `REPORTING_JOB_WORKERS` (2), `REPORTING_EXPORT_DIR` |
 
 Watch it in **Admin → Overview → Capacity**: places in use, waiting, turned away, background queue, and the limits.
+
+**What one instance carries (measured with `tools/sanity_test.py load`, TESTING.md → 12).** On one PC (the client,
+MongoDB and the service together), with a mix of sign-ins, Designer previews, Report Server runs (CSV, Excel, PDF,
+a 9 000-row CSV), dashboards, Query and API-key calls by URL, each person clicking every ~3 s:
+
+| People at once | Answers / s | Typical wait (p50) | Errors |
+|---|---|---|---|
+| 10 | 3 | 0.02–0.2 s | 0 |
+| 50 | 9 | 0.03–1.9 s | 0 |
+| 100 | 10–11 | 1–6 s | 0 |
+| 250 (1 instance → 3 instances) | 9.6 → 13.6 | 1.2–7.7 s → 0.8–2.5 s | 0 wrong answers |
+| 1000 | 20 | 35–50 s | 5 % of sign-ins timed out on the client |
+
+Nothing crashed and memory stayed under 600 MB, but one process does about **10 report-sized requests a second**.
+Each one costs 30–170 ms of Python work (PDF / Excel / CSV), and Python runs one thread at a time, so more threads
+do not help. Plan about **1 instance per 50–100 active people**, and add instances behind the load balancer
+(`deploy/docker-compose.yml`) rather than threads. `deploy/nginx.conf` sends each caller (session cookie or API
+key) to the same instance, because a "deliver later" ticket lives in the instance that made it. A sign-in costs
+~0.25 s of CPU on purpose (PBKDF2, 600 000 rounds), so 1000 people signing in within one minute need a few cores.
+`REPORTING_WORKER_THREADS` (default 200) sets how many requests may wait inside the service at once.
 
 **Sizing** (rule of thumb): one place needs about *rows × columns × 200 bytes* of RAM while it renders (10 000 × 20
 columns ≈ 40 MB, a PDF a little more). With 8 places, keep ~1 GB per worker process free for reports. If people get

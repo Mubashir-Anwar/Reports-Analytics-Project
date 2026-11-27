@@ -37,6 +37,7 @@ from backend.app.security.users import (
     role_at_least,
     session_lifetime_seconds,
     set_user_password,
+    spend_password_check,
     user_rights,
 )
 from backend.app.services import access
@@ -97,7 +98,9 @@ def register(app: FastAPI, ctx: SimpleNamespace) -> None:
                          "to set a new password", account, max_failures, max_failures)
         user = find_user(username) if username else None
         session_user, version = "", 0
-        if user is not None and not user.get("disabled") and password and check_user_password(user, password):
+        if user is None or user.get("disabled") or not password:
+            spend_password_check(password)     # an unknown name takes as long as a real one: the time tells nothing
+        elif check_user_password(user, password):
             if is_expired(user):
                 ctx.audit_event(request, "auth.login_failed", username[:64], {"reason": "the setup admin's time is over"},
                                 actor=user["username"], actor_type="user")

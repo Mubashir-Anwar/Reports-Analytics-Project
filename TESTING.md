@@ -166,3 +166,29 @@ Needs the **Analytics** right; making datasets and relationships also needs **De
    browser's network tab the request carries only `parts` (`Report/…`), never the data.
 11. With an API key whose folders include the dataset's folder: `GET /api/v1/analytics/datasets` lists it and
    `POST /api/v1/analytics/query` returns rows; a dataset in another folder answers 404.
+
+## 12. Sanity, load and security test (`tools/sanity_test.py`)
+
+Only on a **test server** with its own data folder and storage database: the tool creates 1000 users, 21 API keys, a
+data source, two reports and a dashboard (all named `sanity_*` / `SANITY_*`) and then puts the server under load.
+
+1. Start a test server with every checklist item on (HTTPS, `REPORTING_SECRETS_KEY`, `REPORTING_SESSION_SECRET`,
+   MongoDB / SQL storage, docs off, e-mail to `python tools/test_mailbox.py`), and a read-only database user for the data.
+2. **setup**: `SANITY_ADMIN_PASSWORD=… python tools/sanity_test.py setup --base https://host:port --admin setup_admin --mongo-uri mongodb://reader:…@host/db --insecure`
+   (`--insecure` only for a self-signed test certificate). It writes `sanity_state.json` (users, keys, IDs).
+3. **load**: `python tools/sanity_test.py load --base … --stages 10,50,100,250,500,1000 --seconds 60 --think 3 --pid <server pid>`.
+   Virtual users join stage by stage; each signs in and repeats Designer previews, Report Server runs (CSV, Excel,
+   PDF, a 9 000-row CSV), dashboard queries, Query aggregates and API-key calls by URL, some with
+   `X-Deliver: later` (answered at once with a status URL, collected when ready). Per stage it prints requests per
+   second, p50 / p95 / p99 / max, `429` / `503` (the server protecting itself), the delivery queue wait, and the
+   server's memory and CPU. Results also go to `--out` as JSON.
+4. **security**: `python tools/sanity_test.py security --base … --secret <db password> --secret <secrets key> …`.
+   It calls every route anonymously and as a user without rights, tries to raise its own rights, uses API keys outside
+   their folders / changed by one letter / in the URL, sends NoSQL and SQL injection in parameters, dangerous MongoDB
+   stages (`$out`, `$merge`, `$function`, `system.users`, `$currentOp`) in Query and in report previews, path
+   traversal, a 60 MB body, checks cookie flags and security headers, a session after sign-out, and scans every
+   answer, page and JavaScript file for the `--secret` texts and for database URLs with a password.
+   Expected: no **FAIL** lines.
+5. Afterwards drop the test storage database and the data user, or throw the test server away.
+
+What it found and what was fixed is in ARCHITECTURE.md, "Many admins at once".

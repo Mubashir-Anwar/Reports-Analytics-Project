@@ -70,3 +70,6 @@ From the command line, many at the same time with timings per format:
 python tools/load_test.py --key <API key> --report PM_ORDERS --param Branch=KHI --formats csv,xlsx,pdf --hits 20 --concurrency 10
 python tools/load_test.py --key <API key> --report PM_ORDERS --param Branch=KHI --hits 50 --concurrency 25 --later
 ```
+
+Many people and many keys at once (users signing in, Designer previews, Report Server runs, dashboards, Query and
+API-key calls by URL, growing from 10 to 1000 users) plus a security scan: `tools/sanity_test.py`, see TESTING.md → 12.

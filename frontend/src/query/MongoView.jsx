@@ -200,12 +200,20 @@ function Aggregate({ tab, onChange, notify }) {
     <div className="qm-agg">
       <div className="qm-stages">
         <div className="qm-stages-head">
-          <b>Pipeline</b><span className="muted">{stages.filter((s) => s.on).length} stages</span>
-          <span className="grow" />
+          <div className="qm-stages-title">
+            <b>Pipeline</b>
+            <span className="qm-count">{stages.filter((s) => s.on).length} of {stages.length} on</span>
+            <span className="grow" />
+            <div className="qm-view" role="group" aria-label="Show the pipeline as">
+              <button type="button" className={showCode ? '' : 'on'} onClick={() => setShowCode(false)}>Stages</button>
+              <button type="button" className={showCode ? 'on' : ''} onClick={() => setShowCode(true)}>{'</>'} Code</button>
+            </div>
+          </div>
+          <div className="qm-stages-actions">
           <SaveQueryButton saved={tab.saved} notify={notify} onSaved={(item) => onChange({ saved: item, title: item.name })}
             query={() => ({ kind: 'mongo', connectionId: tab.connectionId, collection: tab.collection, text: code, stages: stages.map(({ op, body, on }) => ({ op, body, on })) })} />
           <UseQuery query={() => ({ connectionId: tab.connectionId, collection: tab.collection, queryLanguage: 'mongosh', querySource: code })} />
-          <button type="button" className="btn sm" onClick={() => setShowCode(!showCode)}>{showCode ? 'Stages' : '</> Code'}</button>
+          </div>
         </div>
         {showCode ? (
           <div className="qm-code">

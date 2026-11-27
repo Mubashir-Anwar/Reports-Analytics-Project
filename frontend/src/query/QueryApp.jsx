@@ -18,6 +18,7 @@ import { newStage } from './MongoView.jsx';
 import ObjectIcon, { ObjectLegend } from './ObjectIcon.jsx';
 import SqlBuilder from './SqlBuilder.jsx';
 import { limitRows } from './snippets.js';
+import PixelField from '../shared/PixelField.jsx';
 
 const TABS_KEY = 'query-tabs';
 const SQL_PAGE = 60;            // tables shown per schema before "Show more"
@@ -144,11 +145,19 @@ function firstRowsSql(table, schemaName, dialect) {
 function Home({ adapters, onOpen, onPick, onConnect }) {
   return (
     <div className="q-home">
-      <div className="q-hero">
-        <span className="q-hero-badge">Read-only · safe to explore</span>
-        <h1>Look inside your data <span className="q-wave">✦</span></h1>
-        <p>Open a collection to browse documents or build an aggregation step by step, or write SQL against a database and see its tables as a diagram.</p>
-      </div>
+      <section className="q-hero px-grid">
+        <div className="q-hero-text">
+          <p className="px-kicker"><b>03</b> — Query · read-only</p>
+          <h1>Look inside your data<span className="px-caret" aria-hidden="true" /></h1>
+          <p>Pick a data source below. MongoDB: browse documents or build an aggregation step by step. SQL: write a query, use the builder, or see the tables as a diagram.</p>
+          <ul className="q-hero-facts">
+            <li><b>{adapters.length}</b> data source{adapters.length === 1 ? '' : 's'}</li>
+            <li><b>0</b> writes · nothing is changed</li>
+            <li><b>Ctrl+Enter</b> runs</li>
+          </ul>
+        </div>
+        <span className="q-hero-art" aria-hidden="true"><PixelField cell={9} gap={3} bars={8} /></span>
+      </section>
       <div className="q-home-grid">
         {adapters.map((a, i) => (
           <button key={a.id} type="button" className="q-home-card" style={{ '--i': i }} onClick={() => onPick(a)}>
@@ -159,7 +168,7 @@ function Home({ adapters, onOpen, onPick, onConnect }) {
           </button>
         ))}
         <button type="button" className="q-home-card add" style={{ '--i': adapters.length }} onClick={onConnect}>
-          <b>＋ Connect a database</b><span className="muted">MongoDB, PostgreSQL, MySQL, SQL Server or Oracle. It is only for Query.</span>
+          <b>＋ Connect a database</b><span className="muted">A database, a file (Excel, CSV, JSON) or a Google Sheet. Used only in Query.</span>
           <span className="q-home-go">Connect →</span>
         </button>
       </div>

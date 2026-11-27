@@ -21,6 +21,16 @@ def _hash_password(password: str, salt: str | None = None, iterations: int = PAS
     return salt, digest.hex()
 
 
+_DUMMY_SALT = secrets.token_hex(16)
+
+
+def spend_password_check(password: str) -> None:
+    """The same work as checking a real password, for a name that does not exist (or is switched off), so the time
+    of the answer does not tell which usernames are real. Found by tools/sanity_test.py security: a wrong password
+    for a real account took ~240 ms, for an unknown name a few ms."""
+    _hash_password(password or "-", _DUMMY_SALT)
+
+
 def set_user_password(user: dict[str, Any], password: str) -> None:
     """Store a new salted hash (current iteration count) on the user record."""
     user["salt"], user["hash"] = _hash_password(password)
@@ -48,9 +58,26 @@ def save_users(users: list[dict[str, Any]], *, by: str = "") -> None:
     save(users, by=by)
 
 
+def save_user(user: dict[str, Any], *, by: str = "") -> None:
+    """Add or change one account without touching the others."""
+    from backend.app.db.people import save_user as save  # noqa: PLC0415
+    save(user, by=by)
+
+
+def delete_user(username: str) -> bool:
+    from backend.app.db.people import delete_user as delete  # noqa: PLC0415
+    return delete(username)
+
+
+def users_lock():
+    """Hold it around a read-check-write of accounts (e.g. 'is this name free?' then add)."""
+    from backend.app.db.people import WRITE_LOCK  # noqa: PLC0415
+    return WRITE_LOCK
+
+
 def find_user(username: str) -> dict[str, Any] | None:
-    wanted = username.strip().casefold()
-    return next((item for item in load_users() if str(item["username"]).casefold() == wanted), None)
+    from backend.app.db.people import find_user as find  # noqa: PLC0415
+    return find(username.strip())
 
 
 def check_user_password(user: dict[str, Any], password: str) -> bool:

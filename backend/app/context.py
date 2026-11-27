@@ -27,6 +27,24 @@ from backend.app.storage.files import (
 )
 
 
+def set_worker_threads() -> int:
+    """How many requests can be inside a handler at once (REPORTING_WORKER_THREADS, default 200).
+
+    Every handler runs in a worker thread (offload.ThreadedRoute). AnyIO's default is 40, and a report waiting
+    for a place in the RunGate (up to 15 s) or a sign-in hashing its password holds one of them. Found by
+    tools/sanity_test.py load: with 250+ users the 40 threads were all taken and even /ready waited 6-38 s in line.
+    Most of those threads only wait, so more of them cost little; how much real work runs at once is still set by
+    REPORT_MAX_CONCURRENT (reports) and the sign-in limit."""
+    import anyio.to_thread  # noqa: PLC0415
+    try:
+        wanted = int(os.getenv("REPORTING_WORKER_THREADS", "200"))
+    except ValueError:
+        wanted = 200
+    wanted = max(40, min(wanted, 2000))
+    anyio.to_thread.current_default_thread_limiter().total_tokens = wanted
+    return wanted
+
+
 def create_context() -> SimpleNamespace:
     """Start-up work and the state shared by every endpoint: settings, the repository cache, connection
     clients, and the helper functions the routers call (each router unpacks the ones it needs)."""
@@ -50,6 +68,7 @@ def create_context() -> SimpleNamespace:
 
     @asynccontextmanager
     async def lifespan(_app: FastAPI):
+        set_worker_threads()
         ctx.analytics_refresher.recover()  # imports cut off by a restart
         ctx.job_runner.start()  # scheduled reports and background runs (its loop also starts due dataset refreshes)
         yield

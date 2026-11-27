@@ -17,14 +17,17 @@ from backend.app.constants import RIGHT_LABELS, USER_RIGHTS, USER_ROLES, USERNAM
 from backend.app.logs import LOG
 from backend.app.routers.accounts import check_contact
 from backend.app.security.users import (
+    delete_user,
+    find_user,
     is_permanent_super_admin,
     is_super_admin,
     is_temporary,
     load_users,
     needs_first_admin,
-    save_users,
+    save_user,
     set_user_password,
     user_rights,
+    users_lock,
 )
 
 # Old clients send role instead of rights.
@@ -114,7 +117,12 @@ def register(app: FastAPI, ctx: SimpleNamespace) -> None:
         username = str(payload.get("username", "")).strip()
         if not USERNAME_PATTERN.fullmatch(username):
             raise HTTPException(status_code=422, detail="Username: 2-64 letters, numbers, dot, @, _ or -")
-        if any(str(item["username"]).casefold() == username.casefold() for item in load_users()):
+        with users_lock():
+            return create_user(request, payload, username)
+
+    def create_user(request: Request, payload: dict[str, Any], username: str) -> dict[str, Any]:
+        """The rest of admin_create_user, while holding the accounts lock (two admins cannot take one name)."""
+        if find_user(username) is not None:
             raise HTTPException(status_code=409, detail={"field": "username", "message": "A user with this name already exists"})
         new_user: dict[str, Any] = {"username": username, "sessionVersion": 0, "createdAt": now_iso(),
                                     "createdBy": getattr(request.state, "actor", ""), "mustChangePassword": True,
@@ -125,7 +133,9 @@ def register(app: FastAPI, ctx: SimpleNamespace) -> None:
         users = load_users()
         users.append(new_user)
         removed = end_setup_admins(request, users, new_user)
-        save_users(users, by=getattr(request.state, "actor", ""))
+        save_user(new_user, by=getattr(request.state, "actor", ""))
+        for gone in removed:
+            delete_user(gone)
         LOG.info("User %s created by %s (rights %s%s)", username, getattr(request.state, "actor", "?"),
                  ",".join(new_user["rights"]), ", super admin" if new_user["superAdmin"] else "")
         ctx.audit_event(request, "user.created", username, {"rights": new_user["rights"], "superAdmin": new_user["superAdmin"]})
@@ -155,7 +165,9 @@ def register(app: FastAPI, ctx: SimpleNamespace) -> None:
             raise HTTPException(status_code=409, detail="Keep at least one active super admin")
         user["sessionVersion"] = int(user.get("sessionVersion", 0)) + 1  # signs this user out everywhere
         removed = end_setup_admins(request, users, user)
-        save_users(users, by=getattr(request.state, "actor", ""))
+        save_user(user, by=getattr(request.state, "actor", ""))
+        for gone in removed:
+            delete_user(gone)
         LOG.info("User %s changed by %s", user["username"], getattr(request.state, "actor", "?"))
         change: dict[str, Any] = {}
         if sorted(user_rights(before)) != sorted(user_rights(user)):
@@ -180,7 +192,7 @@ def register(app: FastAPI, ctx: SimpleNamespace) -> None:
         remaining = [item for item in users if item is not target]
         if super_admins_left(users) and not super_admins_left(remaining):
             raise HTTPException(status_code=409, detail="Keep at least one active super admin")
-        save_users(remaining)
+        delete_user(target["username"])
         LOG.info("User %s deleted by %s", target["username"], getattr(request.state, "actor", "?"))
         ctx.audit_event(request, "user.deleted", target["username"])
         return {"status": "deleted", "username": username}

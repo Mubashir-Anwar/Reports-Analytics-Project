@@ -94,6 +94,12 @@ REPORT_EXPORT_MAX_TIME_MS=600000
 REPORTING_EXPORT_DIR=
 # Background workers per process (default 2, at most 8).
 REPORTING_JOB_WORKERS=2
+# Requests that can be inside a handler at once (default 200, 40 to 2000). Most of them only wait (for a report place,
+# the database, a password check), so this is not CPU work; REPORT_MAX_CONCURRENT limits that.
+REPORTING_WORKER_THREADS=200
+
+# Turn on every Admin checklist item in .env (only missing values are added, nothing secret is printed):
+#   python tools/harden_env.py [--https] [--test-mailbox]
 
 # ------------------------------------------------------------------ secrets to keep (DEPLOYMENT.md → "What to keep")
 # Signs sign-in sessions and API-key links. Unset = derived from REPORTING_ADMIN_TOKEN (changing that token then signs everybody out).

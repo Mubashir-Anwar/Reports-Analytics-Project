@@ -299,3 +299,53 @@ body:has(.adm-new) { background: var(--bg); }
 @media (max-width: 980px) { .ov-grid { grid-template-columns: 1fr; } .ov-flow ol { grid-template-columns: 1fr 1fr; } .ov-flow li::after { display: none; } }
 @media (max-width: 520px) { .ov-flow ol { grid-template-columns: 1fr; } .ov-fix { padding-left: 12px; } }
 @media (prefers-reduced-motion: reduce) { .ov-flow li, .ov-fix { animation: none; } }
+
+/* ---- API & Postman in the PixelFX look of the sign-in page: hard edges, mono labels, a caret, square chips */
+.dev-hero { border: 2px solid var(--text); border-radius: 4px; box-shadow: 6px 6px 0 0 var(--accent); }
+.dev-hero h2 { font-family: var(--font-head); font-size: clamp(24px, 2.6vw, 32px); letter-spacing: -.035em; line-height: 1.04; margin: 8px 0; }
+.dev-node { border: 2px solid var(--text); border-radius: 4px; }
+.dev-node.key { border-color: var(--accent); box-shadow: 3px 3px 0 0 var(--accent); }
+.dev-wire { border-radius: 0; height: 4px; }
+.dev-steps li { border-radius: 4px; }
+.dev-step-ico { border-radius: 4px; }
+.dev-steps b em { border-radius: 2px; }
+.dev-tip { border-radius: 4px; border-left: 4px solid var(--accent); background: color-mix(in srgb, var(--accent) 7%, var(--panel)); }
+.dev-tip.warn { border-left-color: var(--warn, #b45309); background: color-mix(in srgb, var(--warn, #b45309) 9%, var(--panel)); }
+.dev-var { border-radius: 4px; }
+
+/* Try it: the form on the left, the calls on the right */
+.dev-try { display: grid; grid-template-columns: minmax(240px, 320px) minmax(0, 1fr); gap: 20px; align-items: start; }
+.dev-try-form { display: grid; gap: 12px; position: sticky; top: 12px; }
+.dev-try-form .field > span, .dev-step-label { display: flex; align-items: center; gap: 8px; font-family: var(--mono); font-size: 11.5px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); }
+.dev-try-form .field > span small { text-transform: none; letter-spacing: 0; font-weight: 500; }
+.dev-try em, .dev-step-label em { display: inline-grid; place-items: center; width: 20px; height: 20px; border-radius: 2px; background: var(--accent); color: var(--on-accent); font-style: normal; font-size: 11px; }
+.dev-try-form input, .dev-try-form select { border: 2px solid var(--line-strong, var(--line)); border-radius: 4px; min-height: 40px; }
+.dev-try-form input:focus, .dev-try-form select:focus { outline: none; border-color: var(--text); box-shadow: 4px 4px 0 0 var(--accent); }
+.dev-try-form .field small.muted { display: block; margin-top: 4px; font-size: 12px; line-height: 1.4; }
+.dev-keycheck { margin: 0; }
+.dev-keycheck .btn { border: 2px solid var(--text); border-radius: 4px; }
+.dev-verdict { border-radius: 4px; }
+.dev-note { margin: 0; padding-top: 10px; border-top: 1px dashed var(--line-strong, var(--line)); font-size: 12px; color: var(--muted); line-height: 1.5; }
+.dev-langs-row { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 10px; margin-bottom: 10px; }
+.dev-langs { margin: 0; border: 2px solid var(--text); border-radius: 4px; padding: 0; gap: 0; background: var(--panel); overflow: hidden; }
+.dev-langs button { border-radius: 0; font-family: var(--mono); font-size: 12px; padding: 7px 12px; }
+.dev-langs button + button { border-left: 2px solid var(--text); }
+.dev-langs button.on { background: var(--text); color: var(--panel); box-shadow: none; }
+
+/* one call: method + name + path, then the code on a dark terminal block */
+.dev-snippet { border: 2px solid var(--text); border-radius: 4px; overflow: hidden; background: var(--panel); }
+.dev-snippet-head { display: flex; align-items: center; gap: 10px; padding: 8px 10px; border-bottom: 2px solid var(--text); min-width: 0; }
+.dev-snippet-head b { font-size: 13.5px; white-space: nowrap; }
+.dev-method { padding: 2px 7px; border-radius: 2px; font-family: var(--mono); font-size: 11px; font-weight: 800; letter-spacing: .04em; }
+.dev-method.get { background: color-mix(in srgb, var(--ok, #16a34a) 16%, var(--panel)); color: var(--ok, #15803d); }
+.dev-method.post { background: color-mix(in srgb, var(--accent) 16%, var(--panel)); color: var(--accent); }
+.dev-path { flex: 1; min-width: 0; padding: 0; border: 0; background: none; font-family: var(--mono); font-size: 12px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dev-copy { margin-left: auto; border: 1.5px solid var(--text); border-radius: 4px; font-family: var(--mono); font-size: 11.5px; }
+.dev-copy:hover { box-shadow: 3px 3px 0 0 var(--accent); transform: translate(-1px, -1px); }
+.dev-copy.done { background: var(--ok, #16a34a); border-color: var(--ok, #16a34a); color: #fff; }
+.dev-snippet pre { margin: 0; padding: 12px 14px; background: #0d1020; color: #dfe4ff; font: 12.5px/1.6 var(--mono); white-space: pre-wrap; word-break: break-word; overflow-x: auto; }
+
+/* answers: a square code chip and the meaning */
+.dev-answer { border: 1.5px solid var(--line-strong, var(--line)); border-radius: 4px; align-items: center; }
+.dev-answer b { border-radius: 2px; font-family: var(--mono); }
+@media (max-width: 980px) { .dev-try { grid-template-columns: minmax(0, 1fr); } .dev-try-form { position: static; } }
