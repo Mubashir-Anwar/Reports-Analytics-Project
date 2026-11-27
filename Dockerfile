@@ -19,14 +19,14 @@ RUN apt-get update \
  && cp /usr/share/fonts/truetype/noto/NotoNaskhArabic-Regular.ttf /usr/share/fonts/truetype/noto/NotoNaskhArabic-Bold.ttf /fonts/
 
 # ---- 3) the Python packages, exactly the tested versions (constraints.txt)
-FROM python:3.12-slim-bookworm AS packages
+FROM python:3.15-slim-bookworm AS packages
 RUN python -m venv /opt/venv
 ENV PATH=/opt/venv/bin:$PATH
 COPY requirements.txt constraints.txt ./
 RUN pip install --no-cache-dir -r requirements.txt -c constraints.txt && pip check
 
 # ---- 4) the service
-FROM python:3.12-slim-bookworm
+FROM python:3.15-slim-bookworm
 
 ENV PATH=/opt/venv/bin:$PATH \
     HOME=/tmp \
