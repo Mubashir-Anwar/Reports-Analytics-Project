@@ -119,8 +119,7 @@ docker run -d -p 8000:8000 -v analysis-data:/data -e REPORTING_ADMIN_TOKEN=... -
 
 ## 3. Repository folders and data adapters
 
-`/admin` (Reports library) and `/designer` (Server tab) show the same tree as Jaspersoft Studio's
-Repository Explorer: **Data adapters** at the top level, then folders inside folders (for example
+`/admin` (Reports library) and `/designer` (Server tab) show one repository tree: **Data adapters** at the top level, then folders inside folders (for example
 `cascade / KMBLGL / Data Source`, `Reports`, `Images`). A data adapter can be saved at the top level or inside
 any folder, and moved later without re-entering its URL (`PUT /api/admin/connections/<id>/folder`, admin
 token). The folder only organises the adapter; its ID stays unique on the server, and a report on the
@@ -546,18 +545,18 @@ adapter addresses or passwords. **Add Resource** (or **Import** in Analytics) up
 are already on the server with the same query are reused, others are created and imported; another data adapter can
 be chosen when the file's adapter is not on this server.
 
-**Power BI (.pbit, .pbix).** Analytics → Dashboards → **Import** also takes a Power BI template (`.pbit`) or report
-(`.pbix`). A `.pbix` keeps its data model and data in Microsoft's closed format, so the browser takes only its report
+**Dashboard files from a desktop BI tool (.pbit, .pbix).** Analytics → Dashboards → **Import** also takes a template
+(`.pbit`) or a report file (`.pbix`). A `.pbix` keeps its data model and data in a closed binary format, so the browser takes only its report
 part (pages and visuals) out of the file and sends that — no data is uploaded and the file size does not matter. Its
-tables and columns are then known only from the visuals' fields: measures (no DAX), column types and relationships are
-missing, so visuals on measures are left out and two tables must be related in **Model**. For the full model, save a
-template in Power BI Desktop (*File → Export → Power BI template*) and import the `.pbit`. A dialog lists the pages (each becomes a dashboard) with what changes on each, and every Power BI table the
+tables and columns are then known only from the visuals' fields: formula measures, column types and relationships are
+missing, so visuals on measures are left out and two tables must be related in **Model**. For the full model, export the
+report as a template (`.pbit`) in the desktop tool that made it, and import that. A dialog lists the pages (each becomes a dashboard) with what changes on each, and every table the
 chosen pages use: match it to a dataset here (suggested when the names are the same), a new dataset on one of this
-server's data adapters (the collection or SQL table is suggested from the template's Power Query source), or leave it
+server's data adapters (the collection or SQL table is suggested from the template's query source), or leave it
 out. Converted: cards, column/bar/line/area/pie/donut/scatter charts, tables, matrices (as tables) and slicers at about
 the same place; summaries of columns, date levels (year, quarter, month, day), simple measures (`SUM`, `AVERAGE`,
 `MIN`, `MAX`, `COUNT`, `COUNTA`, `DISTINCTCOUNT`, `MEDIAN` of one column, `COUNTROWS` of a table) and the
-relationships. Not converted: other DAX, Power Query steps, page and report filters, formatting, text boxes and images.
+relationships. Not converted: other formula measures, query (data shaping) steps, page and report filters, formatting, text boxes and images.
 Columns are matched by name (ignoring case); a field the chosen dataset does not have is left out and named in the
 result. API: `POST /api/analytics/powerbi/inspect` and `POST /api/analytics/powerbi/import` (the file as base64, at
 most 15 MB; modellers only).

@@ -113,8 +113,8 @@ export async function notADashboardFile(file) {
   const name = (file?.name || '').toLowerCase();
   const head = new Uint8Array(await file.slice(0, 4).arrayBuffer());
   const zip = head[0] === 0x50 && head[1] === 0x4b;                   // "PK": a ZIP package
-  if (/\.pbi[tx]$/.test(name)) return 'Power BI files (.pbix, .pbit) are imported in Analytics: Dashboards → Import.';
-  if (/\.pbip$/.test(name)) return 'A Power BI project (.pbip) is a folder: export a Power BI template (.pbit) in Power BI Desktop and import that.';
+  if (/\.pbi[tx]$/.test(name)) return 'Dashboard files (.pbix, .pbit) are imported in Analytics: Dashboards → Import.';
+  if (/\.pbip$/.test(name)) return 'A .pbip project is a folder: export it as a template (.pbit) in the desktop tool that made it, and import that.';
   if (zip) return 'This is a ZIP package, not a dashboard file (.mdash). Choose a .mdash file downloaded from Analytics or the Report Server.';
   if (file.size > 2_000_000) return `This file is ${describeBytes(file.size)}: a dashboard file (.mdash) is at most 2 MB, because it holds no data.`;
   return '';

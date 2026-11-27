@@ -91,7 +91,7 @@ export default function AnalyticsRibbon({ info, view, go, onNewDashboard, onImpo
         </Group>
         {model && (
           <Group label="Files">
-            <Big icon="open" label="Import" onClick={onImport} title="A dashboard file (.mdash) or a Power BI report (.pbix) or template (.pbit)" />
+            <Big icon="open" label="Import" onClick={onImport} title="A dashboard file (.mdash), a report file (.pbix) or template (.pbit)" />
           </Group>
         )}
         <Group label="Dashboard">
@@ -226,7 +226,7 @@ export default function AnalyticsRibbon({ info, view, go, onNewDashboard, onImpo
               {model && <button type="button" role="menuitem" onClick={() => go('q/new')} title="Write a DAX or SQL query over the datasets"><RIcon name="code" /><span>New query</span></button>}
               {info.mayPipelines && <button type="button" role="menuitem" onClick={() => go('etl/new')} title="ETL / ELT steps into a new dataset"><RIcon name="datasets" /><span>New pipeline (ETL)</span></button>}
               {info.mayPython && <button type="button" role="menuitem" onClick={() => go('py/new')} title="Clean or model datasets with pandas, scikit-learn and scipy"><RIcon name="code" /><span>New Python script</span></button>}
-              {model && <button type="button" role="menuitem" onClick={onImport} title="Open a dashboard file (.mdash), or a Power BI report (.pbix) or template (.pbit)"><RIcon name="open" /><span>Open file (.mdash, .pbix, .pbit)</span></button>}
+              {model && <button type="button" role="menuitem" onClick={onImport} title="Open a dashboard file (.mdash), a report file (.pbix) or template (.pbit)"><RIcon name="open" /><span>Open file (.mdash, .pbix, .pbit)</span></button>}
               <hr />
               <button type="button" role="menuitem" disabled={!onDash || !dash.editing} onClick={() => send('bi-command', { cmd: 'save' })} title="Save the changes to this dashboard"><RIcon name="save" /><span>Save</span><kbd>Ctrl S</kbd></button>
               <button type="button" role="menuitem" disabled={!onDash || dash.editing || !dash.mayChange} onClick={() => send('bi-command', { cmd: 'edit' })} title="Add, move and change visuals"><RIcon name="canvas" /><span>Edit dashboard</span></button>

@@ -88,8 +88,8 @@ def read(content: Any) -> dict[str, Any]:
     """The bundle from the uploaded text (or an already parsed object), checked for its shape."""
     if isinstance(content, str):
         if content.startswith("PK"):                    # a ZIP package, as .pbix / .pbit files are
-            raise ValueError("This is a ZIP package (a Power BI .pbix or .pbit file?), not a dashboard file (.mdash): "
-                             "Power BI files cannot be opened here")
+            raise ValueError("This is a ZIP package (a .pbix or .pbit file?), not a dashboard file (.mdash): "
+                             "open .pbix / .pbit files with Dashboards → Import")
         if len(content) > MAX_FILE_WITH_DATA or (len(content) > MAX_FILE and '"parquet"' not in content[:MAX_FILE]):
             raise ValueError("The dashboard file is too big (at most 2 MB, or 20 MB with data)")
         try:

@@ -158,10 +158,10 @@ Needs the **Analytics** right; making datasets and relationships also needs **De
    then Ready, and the import is listed under **Recent imports**. **Change owner** of a dashboard to another user.
    **Delete** a dataset a dashboard uses → the confirmation names the dashboard. **Remove leftover files** is enabled
    only when there are files no dataset uses.
-10. **Power BI template**: in Power BI Desktop save a report with *File → Export → Power BI template*. In Analytics →
+10. **Dashboard template (.pbit)**: export a report as a template (`.pbit`) from the desktop BI tool that made it. In Analytics →
    **Import** choose the `.pbit` → a dialog lists its pages (with what changes on each) and its tables. Match each table
    to a dataset (or a new one on a data adapter), press **Import** → one dashboard per page opens, with its visuals at
-   about the same place. Then import a `.pbix` the same way: the dialog says *Import a Power BI report*, warns that
+   about the same place. Then import a `.pbix` the same way: the dialog says it is a report file (not a template), warns that
    measures, column types and relationships are not in the file, and lists only the columns the visuals use; in the
    browser's network tab the request carries only `parts` (`Report/…`), never the data.
 11. With an API key whose folders include the dataset's folder: `GET /api/v1/analytics/datasets` lists it and

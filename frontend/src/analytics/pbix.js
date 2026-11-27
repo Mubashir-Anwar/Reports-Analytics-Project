@@ -27,13 +27,13 @@ export async function readPbixReport(file) {
   for (let i = tail.length - 22; i >= 0; i -= 1) {
     if (tail[i] === 0x50 && tail[i + 1] === 0x4b && tail[i + 2] === 0x05 && tail[i + 3] === 0x06) { end = i; break; }
   }
-  if (end < 0) throw new Error('This is not a Power BI file: it is not a ZIP package');
+  if (end < 0) throw new Error('This is not a .pbix / .pbit file: it is not a ZIP package');
   const eocd = new DataView(tail.buffer, tail.byteOffset + end, 22);
   const count = eocd.getUint16(10, true);
   const dirSize = eocd.getUint32(12, true);
   const dirOffset = eocd.getUint32(16, true);
   if (dirOffset === 0xffffffff || count === 0xffff) {
-    throw new Error('This .pbix is larger than 4 GB: export a Power BI template (.pbit) in Power BI Desktop and import that');
+    throw new Error('This .pbix is larger than 4 GB: export it as a template (.pbit) in the desktop tool that made it, and import that');
   }
   const dir = await bytes(file, dirOffset, dirOffset + dirSize);
   const view = new DataView(dir.buffer, dir.byteOffset, dir.byteLength);
@@ -54,7 +54,7 @@ export async function readPbixReport(file) {
     at += 46 + nameLength + extra + comment;
   }
   if (!entries.length) {
-    throw new Error(file.name.toLowerCase().endsWith('.pbix') ? 'This .pbix has no report pages' : 'This is not a Power BI report: it has no report pages');
+    throw new Error(file.name.toLowerCase().endsWith('.pbix') ? 'This .pbix has no report pages' : 'This is not a .pbix report: it has no report pages');
   }
   const parts = {};
   let total = 0;

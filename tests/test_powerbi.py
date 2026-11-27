@@ -205,8 +205,8 @@ def test_files_that_are_not_templates(bi):
     def refused(content, word, path="inspect"):
         response = bi.post(f"/api/analytics/powerbi/{path}", json={"content": content, "name": "x"})
         assert response.status_code == 422 and word in response.json()["detail"], response.text
-    refused(pbit(data_model=False), "File → Export → Power BI template")
-    refused(base64.b64encode(b"hello").decode(), "not a Power BI template")
+    refused(pbit(data_model=False), "export it as a template (.pbit)")
+    refused(base64.b64encode(b"hello").decode(), "not a dashboard template")
     refused("%%%", "not base64")
     refused(base64.b64encode(b"PK\x03\x04broken").decode(), "damaged")
     response = bi.post("/api/analytics/powerbi/import", json={"content": pbit(), "pages": [], "tables": {}})

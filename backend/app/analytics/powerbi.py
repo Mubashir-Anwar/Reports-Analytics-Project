@@ -126,22 +126,22 @@ def open_template(content: Any) -> dict[str, Any]:
     if not isinstance(content, str) or not content:
         raise ValueError("Send the .pbit file as base64 text in 'content'")
     if len(content) > MAX_FILE * 4 // 3 + 16:
-        raise ValueError("The Power BI template is too big (at most 15 MB)")
+        raise ValueError("The template is too big (at most 15 MB)")
     try:
         raw = base64.b64decode(content, validate=True)
     except (binascii.Error, ValueError):
         raise ValueError("'content' is not base64 text") from None
     if not raw.startswith(b"PK"):
-        raise ValueError("This is not a Power BI template (.pbit)")
+        raise ValueError("This is not a dashboard template (.pbit)")
     try:
         package = _Zip(zipfile.ZipFile(io.BytesIO(raw)))
     except (zipfile.BadZipFile, ValueError):
-        raise ValueError("This is not a Power BI template (.pbit): the package is damaged") from None
+        raise ValueError("This is not a dashboard template (.pbit): the package is damaged") from None
     if "DataModelSchema" not in package.names:
         if "DataModel" in package.names:
-            raise ValueError("This is a Power BI report with its data (.pbix): import it as a .pbix file (only its report "
-                             "part is read), or export a template in Power BI Desktop (File → Export → Power BI template)")
-        raise ValueError("This is not a Power BI template (.pbit): it has no data model")
+            raise ValueError("This is a report file with its data (.pbix): import it as a .pbix file (only its report "
+                             "part is read), or export it as a template (.pbit) in the desktop tool that made it")
+        raise ValueError("This is not a dashboard template (.pbit): it has no data model")
     return _read(package, (package.json("DataModelSchema") or {}).get("model") or {}, "pbit")
 
 
@@ -544,7 +544,7 @@ def build(template: dict[str, Any], *, report_name: str, page_indexes: list[int]
             source = {key: choice.get(key) for key in bundle.SOURCE_FIELDS}
             columns = [{key: column[key] for key in ("name", "type", "kind")} for column in model_tables[table]["columns"]]
             datasets[table] = {"id": f"pbi_{number}", "name": str(choice.get("name") or table)[:120],
-                               "description": f"From the Power BI table {table}"[:500], **source, "columns": columns}
+                               "description": f"From the table {table} of the imported file"[:500], **source, "columns": columns}
             names = [column["name"] for column in columns]
         column_names[table] = {name.casefold(): name for name in names}
 
@@ -597,7 +597,7 @@ def build(template: dict[str, Any], *, report_name: str, page_indexes: list[int]
             notes.append(f"{page['name']}: only the first {store.MAX_TILES} of its {len(tiles)} visuals are kept")
             tiles = tiles[:store.MAX_TILES]
         name = page["name"] if len(page_indexes) == 1 and not report_name else f"{report_name} – {page['name']}" if report_name else page["name"]
-        boards.append({"name": name[:120], "description": f"Imported from the Power BI {'report' if template.get('kind') == 'pbix' else 'template'} {report_name or ''}".strip()[:500],
+        boards.append({"name": name[:120], "description": f"Imported from the {'report file' if template.get('kind') == 'pbix' else 'template'} {report_name or ''}".strip()[:500],
                        "tiles": tiles, "filters": []})
     if not any(board["tiles"] for board in boards):
         raise ValueError("No visual of the chosen pages could be converted: check the datasets chosen for the tables")
