@@ -2,11 +2,16 @@
 from __future__ import annotations
 
 import random
+import threading
 import time
 from datetime import datetime
 from typing import Any
 
 from backend.app.db import model
+
+# One audit append at a time in this process: the threads of one server no longer race each other for the next
+# number (and sleep between tries); the retry below is then only for other instances on the same database.
+_AUDIT_LOCK = threading.Lock()
 
 
 class DuplicateSeq(Exception):
@@ -124,6 +129,11 @@ class RecordsBackend:
         """Append one audit event at the end of the chain (retries when another instance appends at the same time)."""
         if actor_type not in model.ACTOR_TYPES:
             raise ValueError(f"Unknown actor type {actor_type!r}")
+        with _AUDIT_LOCK:
+            return self._append_event(action, actor, actor_type, target, details, client_ip, target_type)
+
+    def _append_event(self, action: str, actor: str, actor_type: str, target: str, details: Any, client_ip: str,
+                      target_type: str) -> dict[str, Any]:
         for attempt in range(60):
             if attempt:                                  # another writer took the number: wait a little (random, growing)
                 time.sleep(random.uniform(0, min(0.25, 0.004 * 2 ** min(attempt, 6))))  # noqa: S311 - timing jitter, not security

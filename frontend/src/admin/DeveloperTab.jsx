@@ -42,11 +42,20 @@ const ANSWERS = [
   ['503', 'err', 'Every report place is busy: try again shortly (Admin → Limits).'],
 ];
 
+/** One ready call: the method and path up top, the code below, one Copy button. */
 function Snippet({ title, text, notify }) {
+  const method = /\b(GET|POST)\b/.exec(title)?.[1] || (/-X POST|method: "POST"|requests\.post/.test(text) ? 'POST' : 'GET');
+  const path = (/https?:\/\/[^/"\s]+(\/[^"\s?]*)/.exec(text) || [])[1] || '';
+  const name = title.replace(/\s*\((GET|POST)\)/, '');
+  const [done, setDone] = useState(false);
+  const onCopy = () => { copy(text, name, notify); setDone(true); setTimeout(() => setDone(false), 1400); };
   return (
-    <div className="snippet dev-snippet">
-      <div className="snippet-head"><b>{title}</b>
-        <button type="button" className="btn sm" onClick={() => copy(text, title, notify)}>Copy</button>
+    <div className="dev-snippet">
+      <div className="dev-snippet-head">
+        <span className={`dev-method ${method.toLowerCase()}`}>{method}</span>
+        <b>{name}</b>
+        {path && <code className="dev-path">{path}</code>}
+        <button type="button" className={`btn sm dev-copy ${done ? 'done' : ''}`} onClick={onCopy}>{done ? '✓ Copied' : 'Copy'}</button>
       </div>
       <pre>{text}</pre>
     </div>
@@ -56,10 +65,10 @@ function Snippet({ title, text, notify }) {
 /** The animated picture at the top: your website → key → this server → the report. */
 function FlowHero() {
   return (
-    <div className="dev-hero card">
+    <div className="dev-hero card px-grid">
       <div className="dev-hero-text">
-        <p className="eyebrow">API &amp; Postman</p>
-        <h2>Connect any website in <span className="dev-grad">4 steps</span></h2>
+        <p className="px-kicker"><b>API</b> — Admin · API &amp; Postman</p>
+        <h2>Connect any website in 4 steps<span className="px-caret" aria-hidden="true" /></h2>
         <p className="muted">Your website's server sends an API key with each call; this server answers with the report. No sign-in, no cookies.</p>
       </div>
       <div className="dev-flow" aria-hidden="true">
@@ -211,29 +220,40 @@ rows = requests.post(
 
       <section className="card dev-card dev-wide">
         <div className="card-head"><div><p className="eyebrow">Try it</p><h2>Call a report from any website or server</h2></div></div>
-        <div className="form-grid-2">
-          <label className="field"><span>Report</span>
-            <select value={reportId} onChange={(e) => setReportId(e.target.value)}>
-              {reports.map((item) => <option key={item.id} value={item.id}>{item.id} — {item.title} ({item.folder})</option>)}
-            </select>
-          </label>
-          <label className="field"><span>API key (only used on this page)</span><input value={key} placeholder="mrk_…" autoComplete="off" spellCheck={false} onChange={(e) => setKey(e.target.value)} /></label>
-          {params.map((p) => (
-            <label key={p.name} className="field"><span>{p.label || p.name}</span>
-              <input value={filled[p.name] ?? ''} onChange={(e) => setValues({ ...values, [`${reportId}.${p.name}`]: e.target.value })} />
+        <div className="dev-try">
+          <div className="dev-try-form">
+            <label className="field"><span><em>1</em> Report</span>
+              <select value={reportId} disabled={!reports.length} onChange={(e) => setReportId(e.target.value)}>
+                {!reports.length && <option value="">No published reports yet</option>}
+                {reports.map((item) => <option key={item.id} value={item.id}>{item.id} — {item.title} ({item.folder})</option>)}
+              </select>
+              {!reports.length && <small className="muted">Publish a report from the Designer; the calls below use <code>&lt;REPORT_ID&gt;</code> until then.</small>}
             </label>
-          ))}
+            <label className="field"><span><em>2</em> API key <small>only used on this page</small></span>
+              <input value={key} placeholder="Paste mrk_… to test it" autoComplete="off" spellCheck={false} onChange={(e) => setKey(e.target.value)} />
+            </label>
+            {params.map((p) => (
+              <label key={p.name} className="field"><span>{p.label || p.name}</span>
+                <input value={filled[p.name] ?? ''} onChange={(e) => setValues({ ...values, [`${reportId}.${p.name}`]: e.target.value })} />
+              </label>
+            ))}
+            <KeyCheck apiKey={key.trim()} notify={notify} />
+            <p className="dev-note">The report ID is the first column of the report list (not the title). Parameters go in <code>parameters</code> by their names.</p>
+          </div>
+          <div className="dev-try-code">
+            <div className="dev-langs-row">
+              <span className="dev-step-label"><em>3</em> Copy a call</span>
+              <div className="dev-langs" role="tablist" aria-label="Language">
+                {LANGS.map(([value, label]) => (
+                  <button key={value} type="button" role="tab" aria-selected={lang === value} className={lang === value ? 'on' : ''} onClick={() => setLang(value)}>{label}</button>
+                ))}
+              </div>
+            </div>
+            <div className="dev-snippets" key={lang}>
+              {snippets[lang].map(([title, text]) => <Snippet key={title} notify={notify} title={title} text={text} />)}
+            </div>
+          </div>
         </div>
-        <KeyCheck apiKey={key.trim()} notify={notify} />
-        <div className="dev-langs" role="tablist" aria-label="Language">
-          {LANGS.map(([value, label]) => (
-            <button key={value} type="button" role="tab" aria-selected={lang === value} className={lang === value ? 'on' : ''} onClick={() => setLang(value)}>{label}</button>
-          ))}
-        </div>
-        <div className="dev-snippets" key={lang}>
-          {snippets[lang].map(([title, text]) => <Snippet key={title} notify={notify} title={title} text={text} />)}
-        </div>
-        <p className="muted" style={{ fontSize: 12 }}>The report ID is the first column of the report list (not the title). Parameters go in <code>parameters</code> by their names.</p>
       </section>
 
       <section className="card dev-card dev-wide">

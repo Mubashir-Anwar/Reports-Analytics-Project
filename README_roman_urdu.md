@@ -151,4 +151,20 @@ Kai instances: `deploy/docker-compose.yml` (PostgreSQL + 2 app instances + nginx
 - **`REPORTING_SECRETS_KEY`** zaroor set karein: adapters ke passwords aur admin token encrypt ho kar save hote hain.
 - Har data adapter ke liye database mein **read-only user** banayein.
 - Production: HTTPS, `REPORTING_SECURE_COOKIES=true`, `REPORTING_HSTS=true`; Docker image mein `/docs` band.
+- Admin checklist ek command mein: `python tools/harden_env.py --https` (sirf jo settings `.env` mein nahi hain woh
+  add hoti hain, koi secret print nahi hota, purani file ki copy rehti hai). `REPORTING_SECRETS_KEY` ki copy sambhal kar
+  rakhein. Storage Admin → System database se badlein (pehle data copy hota hai). E-mail test karne ke liye
+  `--test-mailbox` aur `python tools/test_mailbox.py` (mail `.eml` file ban kar isi PC par save hoti hai).
 - Poori checklist: DEPLOYMENT.md → "Keeping the data safe".
+- Sanity / load / security test (sirf test server par): `python tools/sanity_test.py setup | load | security`,
+  tareeqa TESTING.md → 12.
+
+## Load aur security test ke natije (sanity test)
+
+- Ek instance (ek process) lagbhag **10 report-jaisi requests/second** sambhalta hai. 100 log ek saath: koi error nahi,
+  wait 1–6 s. 1000 log: kuch crash nahi hua, memory 600 MB se kam rahi, lekin wait 35–50 s tha. Zyada logon ke liye
+  **instances barhayein** (`deploy/docker-compose.yml`, nginx). Har 50–100 active logon par ek instance rakhein.
+- Security run: har route bina sign-in aur bina rights ke, injection, API key ka ghalat istemal, path traversal, cookies
+  aur headers, aur har page / JS file / jawab mein password, key ya DB URL ki talaash: **0 FAIL**.
+- Is test se mile aur theek kiye gaye masle: ek saath bane accounts ke rights ghum ho jana, ek naam ke kai accounts,
+  event loop par database ka kaam, audit trail ka takraav, aur sign-in ki timing se username ka pata chalna.

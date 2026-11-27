@@ -53,7 +53,7 @@ def main(argv: list[str] | None = None) -> int:
     load_local_env_file()                       # the same .env (system database, secrets key) as the service
     from backend.app.db.upgrade import upgrade_storage  # noqa: PLC0415
     from backend.app.db.urls import redact  # noqa: PLC0415
-    from backend.app.security.users import find_user, is_super_admin, load_users, save_users, set_user_password  # noqa: PLC0415
+    from backend.app.security.users import find_user, is_super_admin, load_users, save_user, set_user_password  # noqa: PLC0415
     from backend.app.storage.files import initialize_data_directory  # noqa: PLC0415
     from backend.app.storage.store import storage_settings  # noqa: PLC0415
 
@@ -98,7 +98,7 @@ def main(argv: list[str] | None = None) -> int:
     user["updatedAt"] = datetime.now(timezone.utc).isoformat()
     if args.make_super_admin:
         user["superAdmin"] = True
-    save_users([user if item["username"] == user["username"] else item for item in users])
+    save_user(user)                                                       # only this account: never a stale copy of the others
     try:
         from backend.app.db import get_records  # noqa: PLC0415
         get_records().audit("user.password_recovered", actor="server console", actor_type="system", target=user["username"],

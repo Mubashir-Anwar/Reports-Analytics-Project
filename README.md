@@ -61,7 +61,8 @@ ui/                 Served as is: app/ (built React pages), the /ui runner (inde
                     SDK), brand/ (logo, theme)
 tests/              pytest suite (service_names.py: every module's names in one namespace, for older tests)
 postman/            Collection and environment for every endpoint (built by tools/postman/build_collection.py)
-tools/              Postman builder and demo data, embed example, theme generator
+tools/              Postman builder and demo data, embed example, theme generator, harden_env.py (Admin checklist
+                    settings into .env), test_mailbox.py, load_test.py, sanity_test.py (load + security test)
 deploy/             docker-compose (PostgreSQL + 2 instances + nginx HTTPS), nginx.conf
 Dockerfile          Multi-stage image (frontend build, then the Python service; no data inside)
 data/               Runtime data (local only: never in git or the image)

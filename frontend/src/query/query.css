@@ -500,3 +500,44 @@ body { margin: 0; background: var(--bg); color: var(--text); font-family: var(--
 .qs-tip { max-width: 420px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding: 2px 10px; border-radius: 999px; background: var(--soft); color: var(--muted); font-size: 11.5px; }
 @keyframes qs-pop { from { opacity: 0; transform: translateY(-4px); } }
 @media (max-width: 900px) { .qs-tip { display: none; } }
+
+/* ---- Query home in the PixelFX look of the sign-in page: a light pixel grid (not a dark slab), a mono label, a caret,
+   a live pixel chart and hard-edged cards. Follows the theme in light and dark. */
+.q-hero { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 24px; padding: 26px 28px; color: var(--text);
+  border: 2px solid var(--text); border-radius: 4px; background-color: var(--panel); box-shadow: 6px 6px 0 0 var(--accent); }
+.q-hero h1 { margin: 8px 0 8px; font-size: clamp(26px, 3vw, 36px); line-height: 1.02; letter-spacing: -.035em; }
+.q-hero p:not(.px-kicker) { color: var(--muted); opacity: 1; max-width: 58ch; }
+.q-hero-facts { list-style: none; display: flex; flex-wrap: wrap; gap: 8px; margin: 14px 0 0; padding: 0; }
+.q-hero-facts li { padding: 4px 10px; border: 1.5px solid var(--text); border-radius: 4px; background: var(--panel); font-family: var(--mono); font-size: 11.5px; color: var(--muted); }
+.q-hero-facts b { color: var(--text); }
+.q-hero-art { display: block; width: 220px; height: 120px; }
+.q-hero-art .px-field { height: 100%; }
+.q-hero-badge, .q-wave { display: none; }
+.q-home-grid { gap: 16px; margin-top: 22px; }
+.q-home-card { border: 2px solid var(--text); border-radius: 4px !important; box-shadow: 3px 3px 0 0 var(--text); transition: transform .14s steps(3, end), box-shadow .14s steps(3, end); }
+.q-home-card.add { border-style: dashed; box-shadow: none; }
+.q-home-go { font-family: var(--mono); letter-spacing: .02em; }
+@media (max-width: 760px) { .q-hero { grid-template-columns: minmax(0, 1fr); } .q-hero-art { display: none; } }
+
+/* sidebar: never scrolls sideways; the Sources / Saved switch is a quiet segment with an accent mark */
+.q-side { min-width: 0; overflow-x: hidden; }
+.q-side-seg { border: 1.5px solid var(--line); border-radius: 4px; background: var(--bg); }
+.q-side-seg button { border-radius: 2px; }
+.q-side-seg button.on { background: var(--panel); color: var(--text); box-shadow: inset 0 -3px 0 0 var(--accent), 0 0 0 1.5px var(--text); }
+
+/* ---- Aggregate: the pipeline head in two rows (title + view switch, then the actions), so nothing overflows into the output */
+.qm-stages { min-width: 0; }
+.qm-stages-head { flex-direction: column; align-items: stretch; gap: 8px; padding: 12px; border-bottom: 1px dashed var(--line-strong, var(--line)); }
+.qm-stages-title { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.qm-stages-title b { font-size: 16px; }
+.qm-count { padding: 2px 8px; border: 1.5px solid var(--line); border-radius: 4px; font-family: var(--mono); font-size: 11px; color: var(--muted); white-space: nowrap; }
+.qm-view { display: inline-flex; border: 1.5px solid var(--text); border-radius: 4px; overflow: hidden; flex: none; }
+.qm-view button { border: 0; background: var(--panel); color: var(--muted); font: inherit; font-family: var(--mono); font-size: 11.5px; font-weight: 700; padding: 4px 10px; cursor: pointer; }
+.qm-view button + button { border-left: 1.5px solid var(--text); }
+.qm-view button.on { background: var(--text); color: var(--panel); }
+.qm-stages-actions { display: flex; flex-wrap: wrap; gap: 6px; }
+.qm-stages-actions .btn { min-height: 32px; }
+.qm-out-head { flex-wrap: wrap; row-gap: 8px; min-width: 0; }
+.qm-out-head b { font-size: 16px; }
+.q-hero { background-image: linear-gradient(color-mix(in srgb, var(--line) 70%, transparent) 1px, transparent 1px),
+  linear-gradient(90deg, color-mix(in srgb, var(--line) 70%, transparent) 1px, transparent 1px); background-size: 16px 16px; }

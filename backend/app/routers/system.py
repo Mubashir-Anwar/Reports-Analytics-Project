@@ -112,7 +112,7 @@ def register(app: FastAPI, ctx: SimpleNamespace) -> None:
                   "docs": "security", "scheduler": "operations", "email": "operations"}
         fixes = {"storage": "REPORTING_STORAGE=sql", "secrets": "REPORTING_SECRETS_KEY=<a long random text>",
                  "session": "REPORTING_SESSION_SECRET=<a long random text>", "https": "REPORTING_SECURE_COOKIES=true\nREPORTING_HSTS=true",
-                 "docs": "REPORTING_ENABLED_AREAS=designer,server,admin,analytics,query", "email": "SMTP_HOST=smtp.example.com\nSMTP_FROM=reports@example.com"}
+                 "docs": "REPORTING_ENABLED_AREAS=runner,admin,designer,server,analytics", "email": "SMTP_HOST=smtp.example.com\nSMTP_FROM=reports@example.com"}
         for check in checks:
             check["group"] = groups.get(check["id"], "operations")
             if check["id"] in fixes:

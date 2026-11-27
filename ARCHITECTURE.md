@@ -358,6 +358,20 @@ revision changes (`services/versions.refresh_if_changed`). Move an existing data
 
 Writes go through `_write_json_atomically` (temp file + rename), so a crash never leaves half a file.
 
+**Many admins at once.** Accounts are written one at a time (`db/people.save_user` / `delete_user`: one row of
+`rs_users` and that user's rights) under one lock (`people.WRITE_LOCK`). Creating an account checks the name and
+saves it inside that lock, so the same name sent twice at once makes one account (409 for the rest). Sign-in and
+every request read only their own account (`people.find_user`), not the whole list. This was found by
+`tools/sanity_test.py setup`: when 1000 users were made 8 at a time, 7 lost their rights and one name could be made
+8 times, because every change wrote the whole list back from an older copy. Test: `tests/test_users_concurrency.py`.
+
+**Nothing slow on the event loop.** Handlers run in worker threads (`offload.ThreadedRoute`, up to
+`REPORTING_WORKER_THREADS`, default 200; AnyIO's own 40 were all taken at 250 users). The HTTP middleware in
+`factory.py` runs on the event loop, so its storage work (the repository revision check, the audit event of a change)
+goes to a worker thread too. Audit events are appended one at a time per process (`db/base._AUDIT_LOCK`); the
+retry on a taken number is left for other instances. With 32 threads this went from 296 to 807 events a second, and
+the slowest one from 627 ms to 42 ms.
+
 ---
 
 ## 7. Main flows
