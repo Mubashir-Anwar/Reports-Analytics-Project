@@ -42,7 +42,7 @@ jobs:
       MYSQL_TEST_URL: mysql://reporting_test:reporting_test@127.0.0.1:3306/reporting_test
       MONGO_TEST_URL: mongodb://127.0.0.1:27017
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
@@ -90,7 +90,7 @@ jobs:
       MSSQL_TEST_URL: sqlserver://sa:Reporting_Test_123@127.0.0.1:1433/master
       ORACLE_TEST_URL: oracle://reporting_test:reporting_test@127.0.0.1:1521/?service_name=FREEPDB1
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
@@ -116,7 +116,7 @@ jobs:
       run:
         working-directory: frontend
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
@@ -130,7 +130,7 @@ jobs:
     runs-on: ubuntu-latest
     needs: [backend, frontend, system-db]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Build the image (not pushed)
         run: docker build -t mongo-reporting:ci .
       - name: Start it and wait for an HTTP answer
