@@ -3,7 +3,7 @@
 #   docker run -p 8000:8000 -v analysis-data:/data --env-file .env analysis
 
 # ---- 1) build the React pages (designer, /server, /admin, /analytics) into ui/app
-FROM node:22-alpine AS frontend
+FROM node:26-alpine AS frontend
 WORKDIR /src/frontend
 COPY frontend/package.json frontend/package-lock.json ./
 RUN npm ci --no-audit --no-fund
