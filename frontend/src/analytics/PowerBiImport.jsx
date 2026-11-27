@@ -1,4 +1,4 @@
-// Import a Power BI template (.pbit) or the report part of a .pbix: choose the pages, match every Power BI table to a dataset here (or a new one
+// Import a dashboard template (.pbit) or the report part of a .pbix: choose the pages, match every table of the file to a dataset here (or a new one
 // on a data adapter), then each page becomes a dashboard. The server reads the file twice (inspect, then import),
 // so nothing is kept between the steps.
 import { useEffect, useMemo, useRef, useState } from 'react';
@@ -72,15 +72,15 @@ export default function PowerBiImport({ file, content, parts, info, datasets, on
     <div className="pbi-back" role="presentation" onMouseDown={(e) => { if (e.target === e.currentTarget && !busy) onCancel(); }}>
       <form className="pbi-dialog" role="dialog" aria-modal="true" aria-labelledby="pbi-title" tabIndex={-1} ref={dialog} onSubmit={submit}>
         <header>
-          <h2 id="pbi-title">{pbix ? 'Import a Power BI report' : 'Import a Power BI template'}</h2>
+          <h2 id="pbi-title">{pbix ? 'Import a report file (.pbix)' : 'Import a dashboard template (.pbit)'}</h2>
           <p className="muted">{file.name} · {info.pages.length} page{info.pages.length === 1 ? '' : 's'} · {info.tables.length} table{info.tables.length === 1 ? '' : 's'} used{info.relationships ? ` · ${info.relationships} relationship${info.relationships === 1 ? '' : 's'}` : ''}</p>
         </header>
         <div className="pbi-body">
           {pbix && (
-            <p className="pbi-note">Only the report pages were read from this .pbix — its data model is in Microsoft's closed format, so
+            <p className="pbi-note">Only the report pages were read from this .pbix — its data model is in a closed format, so
               {' '}<b>measures, column types and relationships are not in it</b>. Visuals built on measures are left out; relate the
-              datasets in <b>Model</b> if a visual uses two tables. For the full model, export a Power BI template (.pbit) in Power BI
-              Desktop (File → Export → Power BI template) and import that instead.</p>
+              datasets in <b>Model</b> if a visual uses two tables. For the full model, export the report as a template (.pbit) in the
+              desktop tool that made it, and import that instead.</p>
           )}
           <section>
             <h3>1. Pages <small className="muted">each becomes a dashboard</small></h3>
@@ -101,7 +101,7 @@ export default function PowerBiImport({ file, content, parts, info, datasets, on
           </section>
 
           <section>
-            <h3>2. Data <small className="muted">a dataset here for every Power BI table</small></h3>
+            <h3>2. Data <small className="muted">a dataset here for every table of the file</small></h3>
             {needed.length === 0 && <p className="muted">Choose a page first.</p>}
             {needed.map((t) => {
               const c = choices[t.name];
@@ -139,7 +139,7 @@ export default function PowerBiImport({ file, content, parts, info, datasets, on
                         <textarea className="code-area" rows={3} spellCheck={false} value={c.querySource} onChange={(e) => set(t.name, { querySource: e.target.value })} required /></label>
                     </div>
                   )}
-                  <p className="hint">Columns are matched by name ({t.columns.slice(0, 6).map((col) => col.name).join(', ')}{t.columns.length > 6 ? '…' : ''}).{unconverted.length ? ` Measures left out (${pbix ? 'a .pbix does not include their DAX' : 'their DAX cannot be converted'}): ${unconverted.map((m) => m.name).join(', ')}.` : ''}</p>
+                  <p className="hint">Columns are matched by name ({t.columns.slice(0, 6).map((col) => col.name).join(', ')}{t.columns.length > 6 ? '…' : ''}).{unconverted.length ? ` Measures left out (${pbix ? 'a .pbix does not include their formulas' : 'their formulas cannot be converted'}): ${unconverted.map((m) => m.name).join(', ')}.` : ''}</p>
                 </fieldset>
               );
             })}
@@ -149,7 +149,7 @@ export default function PowerBiImport({ file, content, parts, info, datasets, on
             <h3>3. Folder</h3>
             <label className="field"><span>Save the dashboards in</span><input value={folder} onChange={(e) => setFolder(e.target.value)} maxLength={200} /></label>
           </section>
-          <p className="muted small">Not converted: other DAX, Power Query steps, page and report filters, formatting, text boxes and images. New datasets are imported from their data adapter right after.</p>
+          <p className="muted small">Not converted: other formula measures, query (data shaping) steps, page and report filters, formatting, text boxes and images. New datasets are imported from their data adapter right after.</p>
           {error && <Notice message={{ text: error, kind: 'error' }} />}
         </div>
         <footer>

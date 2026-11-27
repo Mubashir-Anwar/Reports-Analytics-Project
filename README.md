@@ -1,7 +1,6 @@
 # Analysis — reporting and analytics
 
-**Analysis** is a browser-based reporting product in the style of Jaspersoft Studio + JasperReports Server, with
-Power BI–style analytics. Designers build band-based reports, publish them to a server repository, and people or
+**Analysis** is a browser-based reporting and analytics product. Designers build band-based reports, publish them to a server repository, and people or
 other systems run them as PDF, Excel or CSV. Analytics imports query results into fast columnar datasets and shows
 them on interactive dashboards. "Analysis" is the default product name; a super admin can rename it and change the
 logo in **Admin → Branding**.
@@ -11,7 +10,7 @@ logo in **Admin → Branding**.
 | `/home` | What you can do here, by your rights, next step, recent work (first page after signing in) | any |
 | `/designer` | Report designer: bands, elements, queries, preview, publish | Designer |
 | `/server` | Report Server: folders, reports and dashboards, ZIP export, runs, schedules, versions, folder permissions | Report Server |
-| `/analytics` | Datasets, model (relationships), dashboards, maps, machine learning (ML lab), embedding guide; import `.mdash` and Power BI `.pbit` / `.pbix` | Analytics (+ Designer or Admin for datasets) |
+| `/analytics` | Datasets, model (relationships), dashboards, maps, machine learning (ML lab), embedding guide; import `.mdash`, `.pbit` and `.pbix` dashboard files | Analytics (+ Designer or Admin for datasets) |
 | `/admin` | Users and rights, API keys, data sources, analytics, branding, system database, logs and audit | Admin |
 | `/ui` | Report runner | Run reports |
 | `/api/v1/…`, `/generate/…` | Public API and report URLs for websites (API keys) | — |
@@ -53,8 +52,8 @@ Checks (CI runs the same): `ruff check .` and `python -m pytest -q`.
 ```text
 backend/app/        FastAPI service: routers/ (one module per area), services/, security/, storage/ and db/
                     (system storage), connectors/ (MongoDB + SQL), queries/, rendering/ (fill engine, PDF/Excel/CSV),
-                    expressions/ (Jasper expressions), importers/ (JRXML), jobs/ (scheduler), analytics/ (DuckDB,
-                    Parquet, dashboards, .mdash and Power BI import)
+                    expressions/ (report expressions), importers/ (.jrxml), jobs/ (scheduler), analytics/ (DuckDB,
+                    Parquet, dashboards, .mdash / .pbit / .pbix import)
 frontend/src/       Designer (top level), server/, admin/, analytics/, portal/ (page shell), shared/ (theme, nav,
                     folders, adapters)
 ui/                 Served as is: app/ (built React pages), the /ui runner (index.html, runner.*), embed/ (embed

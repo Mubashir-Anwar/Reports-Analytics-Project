@@ -1,7 +1,7 @@
 # Analysis — reporting aur analytics (Roman Urdu guide)
 
-**Analysis** browser mein reports banane, chalane aur dashboards dekhne ka product hai (Jaspersoft Studio + JasperReports
-Server jaisa, saath mein Power BI jaisi Analytics). Product ka naam default "Analysis" hai; super admin **Admin →
+**Analysis** browser mein reports banane, chalane aur dashboards dekhne ka product hai: band wala report designer, report server,
+aur apne dashboards khud banane wali Analytics. Product ka naam default "Analysis" hai; super admin **Admin →
 Branding** mein naam aur logo badal sakta hai.
 
 Backend: Python (FastAPI), `backend/app/`. Frontend: React (Vite), `frontend/` (build `ui/app/` mein jata hai). Har
@@ -14,7 +14,7 @@ Khud test karna: [TESTING.md](TESTING.md). English mein mukhtasar: [README.md](R
 |---|---|---|
 | `/designer` | Report banana: bands, elements, query, preview; apne workspace mein save, server par publish | Designer |
 | `/server` | Report Server: folders, published reports aur dashboards, chalana, schedules, versions, permissions | Report Server |
-| `/analytics` | Datasets (Parquet mein import), model (relationships), dashboards; `.mdash` aur Power BI `.pbit` / `.pbix` import | Analytics (datasets ke liye Designer ya Admin bhi) |
+| `/analytics` | Datasets (Parquet mein import), model (relationships), dashboards; `.mdash`, `.pbit` aur `.pbix` dashboard files ka import | Analytics (datasets ke liye Designer ya Admin bhi) |
 | `/admin` | Users aur rights, API keys, data sources, Analytics, branding, system database, logs aur audit | Admin |
 | `/ui` | Report runner (parameters bhar kar PDF / Excel / CSV) | Run reports |
 
@@ -63,11 +63,11 @@ Tests: `python -m pytest -q` aur lint: `ruff check .` (CI dono chalata hai).
 - Beech mein tabs: **Setup** (naam, adapter, collection, query, fields, parameters), **Design** (bands wala canvas),
   **Source** (report ka JSON) aur **Preview** (sample ya live data, Export PDF / Excel / CSV).
 - **Save** sirf designer ke workspace mein rakhta hai; **Publish** report ko server ke kisi folder mein bhejta hai.
-  **Save as file** / Open file: `.mrd` (poori report ek file mein). Jaspersoft Studio ki `.jrxml` bhi import hoti hai.
+  **Save as file** / Open file: `.mrd` (poori report ek file mein). `.jrxml` report files bhi import hoti hain.
 - Bands: Title, Page Header, Column Header, Group Header/Footer, Detail, Column Footer, Page Footer, Last Page Footer,
   Summary, No Data, Background. Elements: Text Field, Static Text, Image, Break, Rectangle, Ellipse, Line, Frame,
-  Barcode, Chart, Table, Crosstab, List, Subreport, Note. Expressions Jasper jaisi (`$F{}`, `$P{}`, `$V{}`, Java-jaisi
-  syntax) — safe interpreter se chalti hain, koi code execute nahi hota.
+  Barcode, Chart, Table, Crosstab, List, Subreport, Note. Expressions (`$F{}`, `$P{}`, `$V{}`, Java-jaisi
+  syntax, `.jrxml` wali hi) — safe interpreter se chalti hain, koi code execute nahi hota.
 - Ek hi hisse ki **kai bands**: Outline mein band ke **＋** se (ya right-click → Add another band) Detail 2, Detail 3, Summary 2…
   banti hain; har band ki apni **Print When Expression** ho sakti hai. JRXML ki saari detail bands bhi import hoti hain.
 - **Apne fonts** (Urdu bhi): **File → Fonts** ya kisi bhi font list mein **＋ Add a font** se `.ttf` file dein. Canvas, PDF aur
@@ -87,7 +87,7 @@ field aur value khud likhe jate hain aur data type data wala hi rehta hai (`"123
 
 | Adapter | Language |
 |---|---|
-| MongoDB | Aggregation pipeline (JSON), Mongo shell (`db.getCollection("x").aggregate([...])`), JavaScript pipeline, Python pipeline (`pipeline = [...]`), Jaspersoft `runCommand` |
+| MongoDB | Aggregation pipeline (JSON), Mongo shell (`db.getCollection("x").aggregate([...])`), JavaScript pipeline, Python pipeline (`pipeline = [...]`), `.jrxml` wala `runCommand` |
 | PostgreSQL, MySQL, MariaDB, SQL Server, Oracle | SQL: sirf ek `SELECT` / `WITH`; `$P{x}` bound value, `$X{IN, column, Param}` list; read-only transaction |
 | Snowflake, ClickHouse, Elasticsearch, Redis | Wahi SQL. Redis mein har key prefix ek table banta hai (`user:1` → `user`) |
 | Files & Sheets: CSV, Excel, JSON, Parquet, Google Sheets, SQLite / DuckDB file | File upload karein (ya Sheet ka link dein); har file / sheet / tab ek table hai, DuckDB SQL se parhi jati hai |
@@ -117,11 +117,11 @@ JavaScript/Python sirf data ke taur par parhe jate hain (literal pipeline), chal
    **ML lab**: regression, random forest, forecast, groups waghera; models ka muqabla, "what if" aur dashboard par lagana.
    **Dashboard**: card, column / bar / line / area / pie / donut / scatter chart, **map**, ML, table aur slicer. Toolbar mein **Auto refresh** (10 second se 1 ghanta). Kisi bar par click
    karne se baqi visuals filter ho jate hain. Dashboards `/server` par bhi apne folder mein nazar aate hain.
-4. **Import**: `.mdash` (doosre server se dashboard + datasets ki definitions, data nahi) ya Power BI template
-   **`.pbit`** (har page ek dashboard; har Power BI table ke liye yahan ka dataset chunein). **`.pbix`** bhi chalti hai:
+4. **Import**: `.mdash` (doosre server se dashboard + datasets ki definitions, data nahi) ya kisi desktop BI tool ka template
+   **`.pbit`** (har page ek dashboard; us file ki har table ke liye yahan ka dataset chunein). **`.pbix`** bhi chalti hai:
    browser us mein se sirf report wala hissa (pages aur visuals) nikal kar bhejta hai, data upload nahi hota. Lekin
-   `.pbix` ka data model Microsoft ke band format mein hai, is liye measures, column types aur relationships nahi
-   milte; poora model chahiye to Power BI Desktop mein *File → Export → Power BI template* karke `.pbit` import karein.
+   `.pbix` ka data model ek band (closed) format mein hai, is liye measures, column types aur relationships nahi
+   milte; poora model chahiye to jis desktop tool ne file banayi usi mein template (`.pbit`) export karke import karein.
 5. **Admin → Analytics**: har dataset ka status, records, size, schedule, *Import now*, delete, dashboard ka owner
    badalna, disk space aur limits (`ANALYTICS_*` settings).
 

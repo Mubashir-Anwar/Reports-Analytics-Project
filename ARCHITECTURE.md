@@ -1,7 +1,7 @@
 # Architecture — Analysis
 
-**Analysis** (default product name; Admin → Branding renames it) is a Jaspersoft Studio + JasperReports Server
-style reporting product with Power BI–style analytics, written in **Python (FastAPI)** and **React**. Designers
+**Analysis** (default product name; Admin → Branding renames it) is a reporting and analytics product: a band-based report designer, a report server and
+self-service dashboards, written in **Python (FastAPI)** and **React**. Designers
 build band-based reports in the browser, save them in their own workspace, publish them to a server repository,
 and users or other systems run them as PDF, Excel or CSV. Analytics imports query results into Parquet datasets
 and shows them on dashboards.
@@ -39,14 +39,14 @@ flowchart LR
   API --> P[("data/analytics<br/>Parquet (DuckDB)")]
 ```
 
-| Jaspersoft product | Here | Purpose |
+| Part | Here | Purpose |
 |---|---|---|
-| Jaspersoft Studio | `/designer` | Build reports: bands, elements, palette, outline, properties, query, preview, source |
+| Report designer | `/designer` | Build reports: bands, elements, palette, outline, properties, query, preview, source |
 | Workspace / project folder | `data/workspace/` | The designer's drafts. Saving never changes the server |
-| JasperReports Server repository | `data/reports/` + `/server` | Published reports in folders; run, edit properties, copy/move, history |
-| JRXML file | `.mrd` file | One file with the whole report (query, parameters, adapter, design, images) |
+| Report repository | `data/reports/` + `/server` | Published reports in folders; run, edit properties, copy/move, history |
+| Report file | `.mrd` file | One file with the whole report (query, parameters, adapter, design, images) |
 | Data Adapter | `data/connections.json` + `data/private_secrets.json` | Named database connections; secrets kept apart |
-| JasperReports Library (Java) | `rendering/engine.py` + `expressions/jexpr.py` | Fills the design with data and draws PDF / Excel / CSV |
+| Fill and export engine | `rendering/engine.py` + `expressions/jexpr.py` | Fills the design with data and draws PDF / Excel / CSV |
 
 ---
 
@@ -107,7 +107,7 @@ backend/app/
     system.py              /health, /ready, adapter status, whoami, logs, audit
     generate.py            /reports and /generate/<ID>.<format>
     home.py                /api/home (summary by right for /home)
-    analytics.py           /api/analytics/… (datasets, relationships, dashboards, query, .mdash and Power BI import),
+    analytics.py           /api/analytics/… (datasets, relationships, dashboards, query, .mdash and `.pbit` / `.pbix` import),
                            /api/server/dashboards/…, /api/admin/analytics/… and /api/v1/analytics/…
     api_keys.py, public_api.py, embed.py   API keys, the public API v1 (/api/v1/…), embedding
     admin_tools.py         branding, system database, Postman files, capacity
@@ -125,15 +125,15 @@ backend/app/
   connectors/              mongodb.py (connection checks, run a pipeline) · sql.py (PostgreSQL, MySQL/MariaDB, SQL
                            Server, Oracle: test, read-only run, Read Fields) · profiles.py (data adapters, their type
                            and secrets) · mongo_fallback.py (in-process pipeline stages) · errors.py
-  queries/mongo_query.py   Query parsing: Mongo shell / JSON / JS / Python, Jasper runCommand, $P{}, read-only checks
+  queries/mongo_query.py   Query parsing: Mongo shell / JSON / JS / Python, runCommand (as in .jrxml), $P{}, read-only checks
   queries/sql_query.py     SQL report queries: one read-only statement, $P{} bound, $X{IN,…} lists, $P!{} refused
   definitions.py           ParameterSpec, ReportDefinition, saved JSON → definition, repository loader, parameter values
   mrd.py                   The .mrd file format
   rendering/
     engine.py              Design validation and the fill engine (PDF, pixel-perfect and table Excel/CSV)
     outputs.py             Simple table outputs and render_report_output() (band design or simple table)
-  expressions/jexpr.py     Safe interpreter for Jasper's Java-like expressions
-  importers/jrxml.py       Jaspersoft Studio .jrxml → report definition + design
+  expressions/jexpr.py     Safe interpreter for the Java-like report expressions ($F{}, $P{}, $V{})
+  importers/jrxml.py       .jrxml report files → report definition + design
   analytics/               settings.py (ANALYTICS_* limits, data/analytics folder) · store.py
                            (validation and CRUD of datasets, relationships, dashboards, import history) ·
                            importer.py (run the dataset query, flatten records, write Parquet with DuckDB, read
@@ -141,7 +141,7 @@ backend/app/
                            relationships; cross-filters; row and time limits) · refresher.py (background imports,
                            scheduled refresh called from the job scheduler, recovery after a restart) ·
                            bundle.py (a dashboard with its datasets as one .mdash file: export, check, install) ·
-                           powerbi.py (Power BI .pbit, or the report part of a .pbix → page bundles: tables, visuals, measures)
+                           powerbi.py (a .pbit template, or the report part of a .pbix → page bundles: tables, visuals, measures)
   healthcheck.py           Container liveness probe
 ```
 
@@ -168,8 +168,8 @@ router sees the same objects. Lower layers (`storage`, `security`, `connectors`,
 | Settings, data directory | `Settings.from_env()`, `data_directory()` (`REPORTING_DATA_DIR`) | Everything is configured with environment variables; data lives in one mountable folder |
 | Logs | Rotating `data/logs/service.log`, request logging middleware | Admins read logs on `/admin → Logs` without server access |
 | Access policy | Enabled areas (`REPORTING_ENABLED_AREAS`), admin IP allow-list, trusted proxies | The same image can run as a public runner or an internal designer instance |
-| Users and sessions | PBKDF2 password hashes in `users.json`, signed HttpOnly session cookie, roles viewer/designer/admin, lockout after failed logins | `/server` needs real user accounts like JasperReports Server |
-| Query parsing | Mongo shell / aggregation JSON / JavaScript / Python pipeline literal, Jasper `runCommand` and `collectionName/findQuery`, `$P{}` → parameters, read-only stage check | Designers paste their Jasper queries unchanged; nothing in a query can write to the database |
+| Users and sessions | PBKDF2 password hashes in `users.json`, signed HttpOnly session cookie, roles viewer/designer/admin, lockout after failed logins | `/server` needs real, named user accounts |
+| Query parsing | Mongo shell / aggregation JSON / JavaScript / Python pipeline literal, the `runCommand` and `collectionName/findQuery` forms of `.jrxml` reports, `$P{}` → parameters, read-only stage check | Queries copied from existing `.jrxml` reports work unchanged; nothing in a query can write to the database |
 | Report definitions | `_dynamic_report()` turns saved JSON into a `ReportDefinition` (parameters, columns, pipeline builder); `discover_reports()` loads the repository | One validated, in-memory object per published report |
 | Connections | `load_connection_profiles()`, `_profile_credentials()`, `get_connection()` (cached `MongoClient`s) | Adapter names are public; URLs/passwords stay in `private_secrets.json` or environment variables |
 | Outputs | `render_report_output()` picks the band designer or the simple table output; subreport loader | `/generate`, `/server` and the admin "Run" share one code path |
@@ -179,7 +179,7 @@ router sees the same objects. Lower layers (`storage`, `security`, `connectors`,
 * `validate_design(design, columns, parameter_names)` — the only gate for a design. It rebuilds every element
   from an allow-list (types, sizes, colours, fonts, expressions, images ≤ 2.5 MB), so the renderer only ever
   sees clean data. Unknown `$F/$P/$V` names are refused here, not at run time.
-* `_Render` — Jasper's fill engine, simplified:
+* `_Render` — the fill engine (data rows in, laid-out pages out):
   * rows → calculated fields → **dataset filter expression** → sort → groups;
   * variables (Sum/Count/Average/Min/Max/First, reset per report or group);
   * a section can have several bands: `bands.detail.more: [{height, elements, printWhenExpression}]` is Detail 2, 3… (the
@@ -187,18 +187,18 @@ router sees the same objects. Lower layers (`storage`, `security`, `connectors`,
   * own fonts (`app/fonts.py`, TrueType files in the system database) and Urdu / Arabic text (`rendering/rtl.py` orders each
     line, `rendering/shaping.py` joins letters with HarfBuzz by the font's own tables, Nastaliq too; without the `uharfbuzz`
     package `rtl.py` joins Naskh letters itself)
-  * bands in Jasper order: Background, Title, Page Header, Column Header, group headers, Detail, group
+  * bands in the usual order (the same as in `.jrxml`): Background, Title, Page Header, Column Header, group headers, Detail, group
     footers, Column Footer, Page Footer / Last Page Footer, Summary, No Data;
   * report properties: When No Data Type, Title / Summary on a new page, Float column footer, Ignore pagination;
   * stretch-with-overflow, Print When, Evaluation Time (two passes so "Page X of Y" and report totals are right);
   * components that print many records — **Table, Crosstab, List, Subreport** — expand into rows, break
     across pages and repeat their header.
 * Outputs: `render_design_pdf` (ReportLab), `render_grid_xlsx/csv` (pixel-perfect: every printed element in
-  its cell, merged like Jasper's XLSX exporter), `render_design_xlsx/csv` in table mode (one row per record).
+  its cell, merged, like a pixel-exact spreadsheet export), `render_design_xlsx/csv` in table mode (one row per record).
 
 ### 3.3 `expressions/jexpr.py` — expressions
 
-A small tokenizer + parser + evaluator for the Java subset Jasper reports use (`$F{A}.equals("x")`,
+A small tokenizer + parser + evaluator for the Java-like expressions that `.jrxml` reports use (`$F{A}.equals("x")`,
 `new SimpleDateFormat(...)`, ternaries, `DecimalFormat`, `Math`, `String` and `Date` methods). It never calls
 Python `eval`; unknown methods are errors. Used for text fields, Print When, filters, computed parameters.
 
@@ -300,9 +300,9 @@ slicer, map, ML; the validated palette for light and dark), `PowerBiImport` (the
 **`.mrd` file** = that JSON inside `<mongoReportDefinition version="1"><definition encoding="json">…</definition></mongoReportDefinition>`.
 The Source tab shows and edits exactly this JSON (pictures shortened to `@image:<id>`).
 
-*Why JSON and not JRXML?* The engine is not the Java JasperReports library, so a JRXML we wrote could not be
-run by Jasper anyway and would hide features (subreports with their own query, pixel-perfect grid export) or
-lose ours. JRXML is supported **in** (import); `.mrd` is the native format, like `.jrxml` is for Jasper.
+*Why JSON and not JRXML?* The engine is our own, not the Java library that runs `.jrxml` files, so a JRXML we wrote could
+not be run there anyway and would hide features (subreports with their own query, pixel-perfect grid export) or
+lose ours. JRXML is supported **in** (import); `.mrd` is the native format and `.jrxml` stays an import format.
 
 ---
 
@@ -452,11 +452,11 @@ FROM). Uploads: `POST /api/data-sources/{id}/files` `{kind, name, file: base64}`
 the files and tables, `DELETE …/files/{name}`; `POST /api/data-sources/sheet {link}` reads a Sheet now.
 Tests: `tests/test_more_sources.py` (Redis, ClickHouse and Elasticsearch with stand-ins).
 
-## 10. Sub-datasets and the Table editor (Jasper's `Dataset1` and the "Table" tab)
+## 10. Sub-datasets and the Table editor (`Dataset1` and the "Table" tab)
 
 `design.datasets = [{ name, connectionId, queryLanguage, collection, querySource, fields, parameters }]`
 (Dataset and Query → **Datasets** tab). A Table or Crosstab gets `datasetName` and `datasetParameters` (expressions
-in the report's scope, like Jasper's dataset run); a dataset parameter without a value takes the report parameter of
+in the report's scope, like a dataset run in `.jrxml`); a dataset parameter without a value takes the report parameter of
 the same name. The query is checked like a report query when publishing (`definitions.compile_dataset`) and runs
 through `services/runs.dataset_loader` (cached per parameter set, at most 200 runs, read-only as always). Without an
 adapter the designer preview shows sample records; a failing dataset prints its error in place of the table.

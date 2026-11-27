@@ -331,7 +331,7 @@ def test_dashboard_file_round_trip(bi):
     # wrong files and adapters
     assert bi.post("/api/server/dashboards/upload", json={"content": "{}", "folder": "X"}).status_code == 422
     zipped = bi.post("/api/server/dashboards/upload", json={"content": "PK power bi", "folder": "X"})
-    assert zipped.status_code == 422 and "Power BI" in zipped.json()["detail"]
+    assert zipped.status_code == 422 and "Dashboards → Import" in zipped.json()["detail"]
     other = {**content, "datasets": [{**content["datasets"][0], "id": "ds_111111111111", "connectionId": "nowhere"}]}
     refused = bi.post("/api/server/dashboards/upload", json={"content": other, "folder": "X"})
     assert refused.status_code == 422 and "nowhere" in refused.json()["detail"]

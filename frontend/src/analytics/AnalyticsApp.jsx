@@ -147,7 +147,7 @@ Type the ID of the data adapter to use: ${info.adapters.map((a) => a.id).join(',
     setPowerBi(null);
     await reload();
     if (result.dashboards[0]) go(`dash/${result.dashboards[0].id}`);
-    const parts = [`Imported ${result.dashboards.length} dashboard(s) from Power BI`,
+    const parts = [`Imported ${result.dashboards.length} dashboard(s) from ${powerBi?.file?.name || 'the file'}`,
       result.created.length ? `${result.created.length} new dataset(s) importing` : '', result.reused.length ? `${result.reused.length} dataset(s) reused` : '',
       result.relationships ? `${result.relationships} relationship(s)` : ''].filter(Boolean);
     const notes = result.notes.length ? ` Left out: ${result.notes.slice(0, 5).join('; ')}${result.notes.length > 5 ? ` and ${result.notes.length - 5} more` : ''}.` : '';
@@ -194,7 +194,7 @@ Type the ID of the data adapter to use: ${info.adapters.map((a) => a.id).join(',
         <aside className="bi-side" aria-label="Analytics contents">
           <div className="bi-group">
             <div className="bi-group-head"><span>Dashboards <em className="bi-count">{dashboards.length}</em></span><span className="row tight">
-              {info.mayModel && <button type="button" className="btn small" onClick={() => picker.current?.click()} title="Import a dashboard file (.mdash) or a Power BI report (.pbix) or template (.pbit)">Import</button>}
+              {info.mayModel && <button type="button" className="btn small" onClick={() => picker.current?.click()} title="Import a dashboard file (.mdash), a report file (.pbix) or template (.pbit)">Import</button>}
               <button type="button" className="btn small" onClick={newDashboard} title="New dashboard">+ New</button></span>
               <input ref={picker} type="file" accept=".mdash,.pbit,.pbix" hidden onChange={(e) => { importFile(e.target.files[0]); e.target.value = ''; }} />
             </div>

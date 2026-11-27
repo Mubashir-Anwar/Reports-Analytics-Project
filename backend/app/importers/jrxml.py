@@ -563,7 +563,7 @@ def import_jrxml(xml_text: str, resources: dict[str, str] | None = None) -> dict
     except ET.ParseError as exc:
         raise ValueError(f"The JRXML is not valid XML: {exc}") from None
     if _local(root.tag) != "jasperReport":
-        raise ValueError("This does not look like a JasperReports .jrxml file (the root must be <jasperReport>)")
+        raise ValueError("This does not look like a .jrxml report file (the root must be <jasperReport>)")
 
     warnings: list[str] = []
     styles = _collect_styles(root)
