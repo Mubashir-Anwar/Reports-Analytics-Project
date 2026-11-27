@@ -124,7 +124,10 @@ backend/app/
                            pool) · store.py (schedules, runs, output files) · mailer.py (SMTP)
   connectors/              mongodb.py (connection checks, run a pipeline) · sql.py (PostgreSQL, MySQL/MariaDB, SQL
                            Server, Oracle: test, read-only run, Read Fields) · profiles.py (data adapters, their type
-                           and secrets) · mongo_fallback.py (in-process pipeline stages) · errors.py
+                           and secrets) · mongo_fallback.py (in-process pipeline stages) · errors.py ·
+                           options.py (Advanced Connection Options: TLS files and SSH tunnel applied only where a
+                           connection opens, never in comparisons or summaries) · tunnel.py (paramiko SSH tunnels on
+                           127.0.0.1, host key checked against the trusted SHA256 fingerprint)
   queries/mongo_query.py   Query parsing: Mongo shell / JSON / JS / Python, runCommand (as in .jrxml), $P{}, read-only checks
   queries/sql_query.py     SQL report queries: one read-only statement, $P{} bound, $X{IN,…} lists, $P!{} refused
   definitions.py           ParameterSpec, ReportDefinition, saved JSON → definition, repository loader, parameter values

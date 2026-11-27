@@ -266,7 +266,8 @@ def run_definition_file(ctx: SimpleNamespace, definition: ReportDefinition, payl
             rows = [{key: _row_value(row, key) for key in definition.columns} for row in rows]
             body, media_type = render_report_output(definition, parameters, rows, output_format,
                                                     ctx.subreport_loader(ctx.report_allowed_for(session), definition.folder),
-                                                    ctx.dataset_loader(connection_id, definition.report_id))
+                                                    ctx.dataset_loader(connection_id, definition.report_id),
+                                                    link_base=str(request.base_url) if request is not None else "")
             row_count = len(rows)
             del rows
         audit.update({"status": "success", "rowCount": row_count})

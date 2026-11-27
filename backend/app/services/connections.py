@@ -10,10 +10,11 @@ from fastapi import HTTPException
 from pymongo import MongoClient
 from pymongo.errors import PyMongoError
 
-from backend.app.connectors import mongodb, sql as sql_connector
+from backend.app.connectors import mongodb, options as connection_options, sql as sql_connector
 from backend.app.connectors.errors import ConnectorQueryError
 from backend.app.connectors.mongodb import _mongo_database_from_uri, _safe_mongo_error
-from backend.app.connectors.profiles import _profile_credentials, load_connection_profiles
+from backend.app.connectors.profiles import _profile_credentials, load_connection_profiles, profile_extra
+from backend.app.connectors.tunnel import UnknownHostKey
 from backend.app.definitions import ReportDefinition
 from backend.app.logs import LOG
 
@@ -41,7 +42,8 @@ def get_connection(ctx: SimpleNamespace, connection_id: str) -> tuple[MongoClien
             status_code=503,
             detail=detail,
         )
-    signature = (uri, database)
+    uri = _resolved("mongodb", uri, profile_extra(profile), connection_id)
+    signature = (uri, database)  # a new tunnel port or certificate file opens a new client
     client = ctx.state["clients"].get(connection_id)
     if client is not None and ctx.state["connection_signatures"].get(connection_id) != signature:
         client.close()
@@ -226,7 +228,7 @@ def test_adapter_by_id(ctx: SimpleNamespace, connection_id: str) -> dict[str, An
         else:
             detail = f"Set {profile['uriEnv']} and {profile['databaseEnv']} in .env or the server environment"
         raise HTTPException(status_code=422, detail=detail)
-    return ctx.test_mongo_connection(uri, database, connection_id)
+    return ctx.test_mongo_connection(_resolved("mongodb", uri, profile_extra(profile), connection_id), database, connection_id)
 
 
 def adapter_kind(ctx: SimpleNamespace, connection_id: str) -> str:
@@ -246,19 +248,46 @@ def sql_adapter(ctx: SimpleNamespace, connection_id: str) -> tuple[str, str]:
     url, _database = _profile_credentials(profile)
     if not url:
         raise HTTPException(status_code=503, detail=f"No connection URL is saved for data adapter '{connection_id}'")
-    return kind, url
+    return kind, _resolved(kind, url, profile_extra(profile), connection_id)
 
 
-def test_adapter_values(ctx: SimpleNamespace, kind: str, uri: str, database: str, connection_id: str) -> dict[str, Any]:
-    """Test connection values typed in the adapter wizard (any adapter kind)."""
+def _resolved(kind: str, url: str, extra: dict[str, Any], connection_id: str) -> str:
+    """The URL to open, with the adapter's certificate files and SSH tunnel (connectors/options.py)."""
+    try:
+        return connection_options.resolve(kind, url, extra)
+    except ConnectorQueryError as exc:
+        raise HTTPException(status_code=503, detail=f"Data adapter '{connection_id}': {exc}") from None
+
+
+def test_adapter_values(ctx: SimpleNamespace, kind: str, uri: str, database: str, connection_id: str,
+                        extra: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Test connection values typed in the adapter wizard (any adapter kind), with its Advanced Connection Options.
+
+    An SSH server whose host key is not trusted yet answers {"status": "hostKey", "fingerprint"}: the wizard asks the
+    person to trust it and tests again with that key."""
+    if kind in sql_connector.SQL_TYPES and not sql_connector.valid_url(kind, uri):
+        raise HTTPException(status_code=422, detail=sql_connector.url_hint(kind))
+    try:
+        open_url = connection_options.resolve(kind, uri, extra)
+    except UnknownHostKey as exc:
+        ssh = (extra or {}).get("ssh") or {}
+        return {"status": "hostKey", "fingerprint": exc.fingerprint,
+                "message": f"First connection to the SSH server {ssh.get('host')}: check that its host key is {exc.fingerprint}, then trust it"}
+    except ConnectorQueryError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from None
     if kind in sql_connector.SQL_TYPES:
-        if not sql_connector.valid_url(kind, uri):
-            raise HTTPException(status_code=422, detail=sql_connector.url_hint(kind))
         try:
-            return sql_connector.test(kind, uri)
+            result = sql_connector.test(kind, open_url)
         except ConnectorQueryError as exc:
             raise HTTPException(status_code=503, detail=str(exc)) from None
-    return ctx.test_mongo_connection(uri, database, connection_id)
+    else:
+        if not uri.startswith(("mongodb://", "mongodb+srv://")):
+            raise HTTPException(status_code=422, detail="The MongoDB URL must start with mongodb:// or mongodb+srv://")
+        result = ctx.test_mongo_connection(open_url, database or _mongo_database_from_uri(uri), connection_id)
+    if (extra or {}).get("ssh"):
+        result = {**result, "sshHostKey": extra["ssh"].get("hostKey", ""),
+                  "message": f"{result.get('message', 'Connected')} (through the SSH server {extra['ssh'].get('host')})"}
+    return result
 
 
 def test_saved_adapter(ctx: SimpleNamespace, connection_id: str) -> dict[str, Any] | None:

@@ -46,10 +46,12 @@ def register(app: FastAPI, ctx: SimpleNamespace) -> None:
         # Checked before anything else, so an unauthenticated caller learns nothing (not even
         # whether a report ID exists) and cannot fill the audit file.
         access = require_report_access(request, report_file)
-        query_pairs = [(key, value) for key, value in request.query_params.multi_items() if key not in SIGNED_LINK_KEYS]
-        return produce_report(request, report_file, access, query_pairs)
+        # View=inline (a report hyperlink of another report): show the PDF in the browser instead of downloading it
+        inline = request.query_params.get("View") == "inline"
+        query_pairs = [(key, value) for key, value in request.query_params.multi_items() if key not in (*SIGNED_LINK_KEYS, "View")]
+        return produce_report(request, report_file, access, query_pairs, inline=inline)
 
-    def produce_report(request: Request, report_file: str, access: str, query_pairs: list[tuple[str, str]]) -> Response:
+    def produce_report(request: Request, report_file: str, access: str, query_pairs: list[tuple[str, str]], inline: bool = False) -> Response:
         """Run a report the caller may run (access already checked) and return the file; one run record either way.
         Used by /generate (parameters in the URL) and POST /api/v1/reports/{id}/run (parameters in JSON)."""
         started = time.monotonic()
@@ -91,7 +93,8 @@ def register(app: FastAPI, ctx: SimpleNamespace) -> None:
                 rows = run_report_rows(definition, parameters, definition.connection_id, max_rows=settings.max_rows, limit_rows=False)
                 rows = [{key: _row_value(row, key) for key in definition.columns} for row in rows]
                 body, media_type = render_report_output(definition, parameters, rows, output_format, subreport_loader(None, definition.folder),
-                                                        dataset_loader(definition.connection_id, definition.report_id))
+                                                        dataset_loader(definition.connection_id, definition.report_id),
+                                                        link_base=str(request.base_url))
                 row_count = len(rows)
                 del rows
             audit.update({"status": "success", "rowCount": row_count})
@@ -101,7 +104,8 @@ def register(app: FastAPI, ctx: SimpleNamespace) -> None:
                 ctx.log_run_from_audit(audit, definition=definition, body=body, request=request, required=True)
                 audit_saved = True
             filename = f"{definition.report_id}.{output_format}"
-            return Response(body, media_type=media_type, headers={"Content-Disposition": f'attachment; filename="{filename}"'})
+            disposition = "inline" if inline and output_format == "pdf" else "attachment"
+            return Response(body, media_type=media_type, headers={"Content-Disposition": f'{disposition}; filename="{filename}"'})
         except HTTPException as exc:
             audit["errorCode"] = str(exc.status_code)
             audit["errorMessage"] = str(exc.detail)[:300]

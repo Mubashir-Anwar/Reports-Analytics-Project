@@ -140,6 +140,60 @@ all (`/admin → Data sources`, or the connect buttons of each part and of Home)
 No data adapter is preselected for Preview or Run: pick any one each time. The adapter saved on the report is
 used only by `/generate` and `/ui`.
 
+### Advanced Connection Options (TLS certificates, SSH tunnel)
+
+The Data Adapter Wizard has an **Advanced Connection Options** box under the connection fields.
+
+* **MongoDB**: tabs General (mongodb / mongodb+srv, one or more hosts, Direct Connection), Authentication (None,
+  Username/Password with the authentication database and SCRAM mechanism, X.509, LDAP), TLS/SSL (on / off, CA file,
+  client certificate and key, key password, allow invalid host names / certificates), Proxy/SSH, In-Use Encryption and
+  Advanced (read preference, replica set, default database, app name, timeouts, pool size, any other URL option). The
+  tabs and the URL field are the same thing: a change in one shows in the other.
+* **PostgreSQL, MySQL, MariaDB**: TLS/SSL files (CA, client certificate, client key), Proxy/SSH and Advanced (extra URL
+  options such as `application_name`). **SQL Server, Oracle, ClickHouse, Redis, Elasticsearch**: Proxy/SSH (Redis also
+  takes TLS files).
+* **Certificate files** are PEM text files of at most 64 KB. They are saved encrypted with the URL in the private
+  settings, and written to a private temporary folder (removed when the service stops) only when a connection opens.
+* **SSH tunnel**: password or private key (OpenSSH / PEM: RSA, ECDSA, Ed25519, with its passphrase). The first **Test**
+  shows the SSH server's host key fingerprint (`SHA256:…`); check it with the server's administrator
+  (`ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub`) and press **Trust this host key**. A changed host key stops the
+  connection. The database host and port are reached from the SSH server; the tunnel listens on `127.0.0.1` of this
+  service only and is shared by all reports on that adapter. A MongoDB adapter through a tunnel uses one server
+  (`mongodb://`, Direct Connection); `mongodb+srv://` cannot go through a tunnel. With PostgreSQL `verify-full` the
+  host name check fails through a tunnel: use `require`.
+* Saved secrets are never shown again. On edit, leave the SSH password empty to keep the saved one (same server and
+  user); a saved certificate file stays until it is removed or replaced.
+* **Not available without an extra package** (ask before installing): Kerberos (GSSAPI), AWS IAM sign-in and In-Use
+  Encryption for MongoDB, and a SOCKS5 proxy (the MongoDB driver has none: use the SSH tunnel).
+
+Over the API, `POST /api/data-sources` and `POST /api/data-sources/test` take `options`:
+`{"files": {"ca": {"name": "ca.pem", "data": "<base64>"}, "cert": …, "key": …}, "ssh": {"host", "port", "user", "auth":
+"password" | "key", "password" | "privateKey", "passphrase", "hostKey"}}`. A file set to `null` is removed, `"ssh": null`
+removes the tunnel, and a missing key keeps what is saved. A test against an SSH server that is not trusted yet answers
+`{"status": "hostKey", "fingerprint": "SHA256:…"}`. The list (`GET /api/data-sources`) shows the file names and the SSH
+server under `options`, never a secret.
+
+### Driver versions and updates
+
+Nothing updates by itself. The Docker image installs exactly the versions in `constraints.txt`. Once a month GitHub
+(`.github/dependabot.yml`) opens pull requests with newer versions of the drivers, the web packages, the base images and
+the CI actions; CI tests each one with those exact versions, and a person merges it when it is green.
+
+### Hyperlinks in reports and dashboards
+
+* **Designer**: a Text Field, Static Text or Image has a **Hyperlink** tab: a web address, an e-mail address or another
+  report (drill-down) with the values sent to its parameters. The address may hold `$F{…}` / `$P{…}` or be a formula
+  (`=…`). Links are clickable in the PDF and in the Excel cells (with a tooltip); CSV has none. Only `http://`,
+  `https://` and `mailto:` links are made (`www.` gets https); a record with a bad value gets no link.
+* A report link opens `/generate/<ID>.pdf?<parameters>&View=inline` (the PDF shows in the browser; Excel and CSV
+  download). The reader signs in and needs the right to run that report. The address of this service comes from
+  `REPORTING_PUBLIC_URL`, else from the address the report was run on; set it when reports are e-mailed by schedules.
+* `.jrxml` import and export keep `hyperlinkType="Reference"` (web / `mailto:`) and `ReportExecution` (`_report` and
+  its parameters); other kinds (local anchors and pages) are reported as not converted.
+* **Analytics**: a table visual has **Links**: the values of a column open a web address (`{Field}` puts a value of the
+  same row in it), an e-mail, a report (PDF, the value goes to one of its parameters) or another dashboard filtered by
+  that value (`/analytics#dash/<id>?Column=Value`; the dashboard shows *Opened for: Column = value*, × shows all).
+
 ## 4. Logs
 
 * **Service log**: `<REPORTING_DATA_DIR>/logs/service.log`, rotated at 5 MB, 5 old files kept

@@ -23,8 +23,9 @@ import PipelineEditor from './PipelineEditor.jsx';
 import { readPbixReport } from './pbix.js';
 
 const readHash = () => {
-  const [kind, id] = window.location.hash.slice(1).split('/');
-  return ['dash', 'ds', 'model', 'q', 'ml', 'py', 'etl', 'embed', 'sources'].includes(kind) ? { kind, id: id || '' } : { kind: 'home', id: '' };
+  const [kind, rest = ''] = window.location.hash.slice(1).split('/');
+  const [id, query = ''] = rest.split('?');            // #dash/ID?Column=Value: opened from another dashboard's link
+  return ['dash', 'ds', 'model', 'q', 'ml', 'py', 'etl', 'embed', 'sources'].includes(kind) ? { kind, id: id || '', query } : { kind: 'home', id: '', query: '' };
 };
 
 /** A number (or "a/b", "a · b") that counts up from 0 when the page opens. */
@@ -245,7 +246,7 @@ Type the ID of the data adapter to use: ${info.adapters.map((a) => a.id).join(',
           {message && <div style={{ marginBottom: 12 }}><Notice message={message} /></div>}
           {view.kind === 'home' && <Home info={info} datasets={datasets} dashboards={dashboards} queries={savedQueries} relationships={relationships} onNew={newDashboard} />}
           {view.kind === 'dash' && (
-            <Dashboard key={view.id} dashboardId={view.id} datasets={datasets} relationships={relationships} notify={notify}
+            <Dashboard key={`${view.id}?${view.query}`} dashboardId={view.id} drill={view.query} datasets={datasets} relationships={relationships} notify={notify}
               onSaved={reload} onDeleted={() => { reload(); go(''); }}
               actions={(() => {
                 const entry = dashboards.find((d) => d.id === view.id);

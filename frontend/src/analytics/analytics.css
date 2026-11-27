@@ -594,3 +594,9 @@ a.btn.primary, a.btn.primary:hover { color: var(--on-accent); }
 
 /* the Analytics ribbon keeps its tabs on the first row; they scroll sideways when the window is narrow */
 @media (max-width: 1024px) { .bi-ribbon .rb-tabs { order: 0; flex: 1 1 0; min-width: 0; margin: 0 0 0 6px; padding: 0; } }
+
+/* Links of a table visual (links.js) */
+.viz-table a.viz-link { color: var(--accent); text-decoration: underline; text-underline-offset: 2px; }
+.viz-link-edit { display: grid; gap: 4px; padding: 6px 0; border-bottom: 1px solid var(--line); }
+.viz-link-row { display: flex; gap: 4px; align-items: center; }
+.viz-link-row select { flex: 1; min-width: 0; }

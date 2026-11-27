@@ -5,7 +5,7 @@ import {
 } from './designModel.js';
 import { FontSelect } from './fonts.jsx';
 import { selectedIds } from './arrange.js';
-import { CrosstabProps, DatasetProps, ListProps, NoteProps, SubreportProps, TableProps } from './ComponentProps.jsx';
+import { CrosstabProps, DatasetProps, HyperlinkProps, ListProps, NoteProps, SubreportProps, TableProps } from './ComponentProps.jsx';
 import { componentFields } from './DatasetsEditor.jsx';
 import PatternDialog, { patternSample } from './PatternDialog.jsx';
 import RichTextEditor from './RichTextEditor.jsx';
@@ -227,7 +227,7 @@ export default function Properties({ state, dispatch, notify, actions, onEditExp
     const fieldNames = [...report.columns, ...design.calculatedFields.map((c) => c.name)];
     const specificTab = { textField: 'Text Field', staticText: 'Static Text', image: 'Image', chart: 'Chart', barcode: 'Barcode', table: 'Table', crosstab: 'Crosstab', list: 'List', subreport: 'Subreport', note: 'Note' }[element.type];
     const datasetTab = ['table', 'crosstab', 'list'].includes(element.type);
-    const tabs = [['appearance', 'Appearance'], ...(element.type === 'barcode' || ['table', 'crosstab'].includes(element.type) ? [['text', 'Text']] : []),...(specificTab ? [['specific', specificTab]] : []), ...(datasetTab ? [['dataset', 'Dataset']] : []), ...(boxed && !['table', 'crosstab', 'subreport', 'note'].includes(element.type) ? [['borders', 'Borders']] : []), ['advanced', 'Advanced']];
+    const tabs = [['appearance', 'Appearance'], ...(element.type === 'barcode' || ['table', 'crosstab'].includes(element.type) ? [['text', 'Text']] : []),...(specificTab ? [['specific', specificTab]] : []), ...(datasetTab ? [['dataset', 'Dataset']] : []), ...(boxed && !['table', 'crosstab', 'subreport', 'note'].includes(element.type) ? [['borders', 'Borders']] : []), ...(['staticText', 'textField', 'image'].includes(element.type) ? [['link', element.hyperlink ? 'Hyperlink •' : 'Hyperlink']] : []), ['advanced', 'Advanced']];
     const tab = tabs.some(([id]) => id === elementTab) ? elementTab : (specificTab ? 'specific' : 'appearance');
     const borders = element.borders || { top: 0, right: 0, bottom: 0, left: 0 };
     const setSide = (side, value) => {
@@ -488,6 +488,8 @@ export default function Properties({ state, dispatch, notify, actions, onEditExp
         {tab === 'specific' && element.type === 'subreport' && <SubreportProps element={element} patch={patch} report={report} design={design} />}
         {tab === 'specific' && element.type === 'note' && <NoteProps element={element} patch={patch} />}
         {tab === 'dataset' && datasetTab && <DatasetProps element={element} patch={patch} fields={componentFields(element, report, design)} bandKey={bandKey} report={report} design={design} onOpenDatasets={() => onOpenQuery?.('datasets')} />}
+
+        {tab === 'link' && <HyperlinkProps element={element} patch={patch} report={report} design={design} />}
 
         {tab === 'borders' && boxed && (
           <>

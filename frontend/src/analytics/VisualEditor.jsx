@@ -1,7 +1,7 @@
 // The editing pane of one visual: its type, dataset, the field wells (Axis, Legend, Values, …), filters and format.
 // Fields can be dragged from the field list into a well, or chosen in the well's own list.
-import { useMemo, useState } from 'react';
-import { AGG_LABELS, BUCKET_LABELS, KIND_ICON } from './api.js';
+import { useEffect, useMemo, useState } from 'react';
+import { AGG_LABELS, BUCKET_LABELS, KIND_ICON, bi } from './api.js';
 import MlSetup from './MlSetup.jsx';
 
 export const VISUAL_TYPES = [
@@ -218,6 +218,8 @@ export default function VisualEditor({ tile, datasets, relationships, onChange, 
             }}>+ Add a filter</button>
           </details>
 
+          {tile.type === 'table' && <LinksSection tile={tile} set={set} />}
+
           <details className="viz-section">
             <summary>Format and order</summary>
             <label className="field"><span>Numbers</span>
@@ -267,5 +269,71 @@ export default function VisualEditor({ tile, datasets, relationships, onChange, 
         </>
       )}
     </aside>
+  );
+}
+
+/** Links of a table: the values of a column open a web page, an e-mail, a report (PDF) or another dashboard for that value. */
+function LinksSection({ tile, set }) {
+  const [targets, setTargets] = useState({ dashboards: [], reports: [] });
+  useEffect(() => {
+    let alive = true;
+    bi.dashboards().then((r) => alive && setTargets((t) => ({ ...t, dashboards: r.dashboards || [] }))).catch(() => {});
+    fetch('/reports', { credentials: 'same-origin' }).then((r) => (r.ok ? r.json() : { reports: [] }))   // only the reports this user may run
+      .then((r) => alive && setTargets((t) => ({ ...t, reports: r.reports || [] }))).catch(() => {});
+    return () => { alive = false; };
+  }, []);
+  const links = tile.options?.links || [];
+  const columns = [...new Set([...(tile.detail ? tile.columns : tile.groupBy).map((f) => f.column), ...links.map((l) => l.column)])].filter(Boolean);
+  const save = (next) => set({ options: { ...tile.options, links: next } });
+  const change = (index, values) => save(links.map((l, i) => (i === index ? { ...l, ...values } : l)));
+  return (
+    <details className="viz-section" open={links.length > 0 || undefined}>
+      <summary>Links ({links.length})</summary>
+      {!columns.length && <p className="muted small">Add a column first.</p>}
+      {links.map((link, index) => {
+        const report = targets.reports.find((r) => r.id === link.report);
+        return (
+          <div key={index} className="viz-link-edit">
+            <div className="viz-link-row">
+              <select aria-label="Column" value={link.column} onChange={(e) => change(index, { column: e.target.value })}>{columns.map((c) => <option key={c} value={c}>{c}</option>)}</select>
+              <select aria-label="Opens" value={link.kind} onChange={(e) => change(index, { kind: e.target.value })}>
+                <option value="url">opens a web address</option><option value="email">writes an e-mail</option><option value="report">runs a report</option><option value="dashboard">opens a dashboard</option>
+              </select>
+              <button type="button" className="x" aria-label="Remove link" onClick={() => save(links.filter((_, i) => i !== index))}>×</button>
+            </div>
+            {(link.kind === 'url' || link.kind === 'email') && (
+              <input aria-label="Address" value={link.template || ''} onChange={(e) => change(index, { template: e.target.value })}
+                placeholder={link.kind === 'url' ? `https://crm.example.com/find?q={${link.column}}   (empty: the value is the address)` : `{${link.column}}   or   sales@example.com?subject={${link.column}}`} />
+            )}
+            {link.kind === 'report' && (
+              <>
+                <select aria-label="Report" value={link.report || ''} onChange={(e) => { const next = targets.reports.find((r) => r.id === e.target.value); change(index, { report: e.target.value, folder: next?.folder || '', parameter: next?.parameters?.[0]?.name || '' }); }}>
+                  <option value="">Choose a report…</option>
+                  {targets.reports.map((r) => <option key={`${r.folder}/${r.id}`} value={r.id}>{r.folder} / {r.title}</option>)}
+                </select>
+                <select aria-label="Parameter" value={link.parameter || ''} onChange={(e) => change(index, { parameter: e.target.value })}>
+                  <option value="">The value goes to no parameter</option>
+                  {(report?.parameters || []).map((p) => <option key={p.name} value={p.name}>The value goes to {p.label || p.name}</option>)}
+                </select>
+              </>
+            )}
+            {link.kind === 'dashboard' && (
+              <>
+                <select aria-label="Dashboard" value={link.dashboard || ''} onChange={(e) => change(index, { dashboard: e.target.value })}>
+                  <option value="">Choose a dashboard…</option>
+                  {targets.dashboards.map((d) => <option key={d.id} value={d.id}>{d.folder ? `${d.folder} / ` : ''}{d.name}</option>)}
+                </select>
+                <input aria-label="Filter column" value={link.filter || ''} onChange={(e) => change(index, { filter: e.target.value.trim() })} placeholder={`filters its column: ${link.column} (or another name)`} />
+              </>
+            )}
+            <input aria-label="Tooltip" value={link.tooltip || ''} maxLength={120} onChange={(e) => change(index, { tooltip: e.target.value })} placeholder="Tooltip (optional)" />
+          </div>
+        );
+      })}
+      {columns.length > 0 && links.length < 10 && (
+        <button type="button" className="link-btn" onClick={() => save([...links, { column: columns[0], kind: 'url', template: '' }])}>+ Add a link</button>
+      )}
+      <p className="muted small">Write <code>{'{Field}'}</code> to put a value of the same row in the address. Only http(s) and e-mail addresses are linked.</p>
+    </details>
   );
 }
