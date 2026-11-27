@@ -2,6 +2,7 @@
 // Colours: the validated categorical palette (separate light and dark steps), assigned in fixed order by entity.
 // Text uses the theme's text colours, never a series colour; one value axis only; a legend from 2 series on.
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { columnIndex, linkHref } from './links.js';
 import * as echarts from 'echarts/core';
 import { BarChart, EffectScatterChart, HeatmapChart, LineChart, MapChart, PieChart, ScatterChart } from 'echarts/charts';
 import { GeoComponent, GridComponent, LegendComponent, TooltipComponent, VisualMapComponent } from 'echarts/components';
@@ -305,6 +306,16 @@ function Kpi({ tile, result }) {
 
 function Table({ tile, result, selected, onPick }) {
   const groupIndex = result.columns.findIndex((c) => c.role === 'group');
+  // Links (tile.options.links): the cells of a column open a web page, an e-mail, a report or another dashboard
+  const links = {};
+  for (const link of tile.options?.links || []) { const at = columnIndex(result.columns, link.column); if (at >= 0 && !(at in links)) links[at] = link; }
+  const cell = (value, i, row) => {
+    const text = result.columns[i]?.kind === 'number' ? formatNumber(value, tile.options?.format) : label(value);
+    const target = links[i] && linkHref(links[i], row, result.columns);
+    if (!target) return text;
+    return <a className="viz-link" href={target.href} title={links[i].tooltip || undefined} onClick={(e) => e.stopPropagation()}
+      {...(target.newTab ? { target: '_blank', rel: 'noopener noreferrer' } : {})}>{text}</a>;
+  };
   return (
     <div className="viz-table-wrap">
       <table className="viz-table">
@@ -313,8 +324,7 @@ function Table({ tile, result, selected, onPick }) {
           {result.rows.map((row, r) => (
             <tr key={r} className={groupIndex >= 0 && selected !== undefined && row[groupIndex] === selected ? 'picked' : ''}
               onClick={groupIndex >= 0 && onPick ? () => onPick(row[groupIndex]) : undefined}>
-              {row.map((value, i) => <td key={i} className={result.columns[i]?.kind === 'number' ? 'num' : ''}>
-                {result.columns[i]?.kind === 'number' ? formatNumber(value, tile.options?.format) : label(value)}</td>)}
+              {row.map((value, i) => <td key={i} className={result.columns[i]?.kind === 'number' ? 'num' : ''}>{cell(value, i, row)}</td>)}
             </tr>
           ))}
         </tbody>

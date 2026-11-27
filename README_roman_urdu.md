@@ -78,6 +78,16 @@ Tests: `python -m pytest -q` aur lint: `ruff check .` (CI dono chalata hai).
 - **Outline** aur canvas par right-click menus: band banana/hatana, parameters, variables, calculated fields, groups.
 - **Sub-datasets**: Dataset & Query → **Datasets**; Table ya Crosstab apna dataset parh sakta hai (Table editor:
   Table par double-click).
+- **Hyperlink**: Text Field, Static Text ya Image ke **Hyperlink** tab mein web address, e-mail ya doosri report
+  (drill-down, parameters ke saath). Address mein `$F{City}` jaisi values aa sakti hain. PDF aur Excel mein click hota
+  hai; sirf `http(s)://` aur `mailto:` links bante hain. Doosri report PDF browser mein khulti hai (run ka right chahiye).
+- **Data Adapter Wizard → Advanced Connection Options**: MongoDB ke tabs (General, Authentication, TLS/SSL,
+  Proxy/SSH, In-Use Encryption, Advanced) URL ke saath dono taraf chalte hain. PostgreSQL / MySQL / MariaDB mein TLS
+  certificate files; SQL Server, Oracle, ClickHouse, Redis, Elasticsearch mein SSH tunnel. Pehle Test par SSH server
+  ki host key (`SHA256:…`) dikhti hai: admin se mila kar **Trust** karein. Kerberos, AWS IAM, In-Use Encryption aur
+  SOCKS5 ke liye alag package chahiye (abhi install nahi).
+- **Driver versions**: khud update nahi hote. Har mahine GitHub naye versions ki pull request kholta hai, CI test karta
+  hai, aur hum green hone par merge karte hain.
 
 ### Query page: drag & drop aur views
 Result **Tree**, **Columns** ya **JSON** mein dekhein. Koi bhi value pakar kar Query helper ya query box par chhor dein:
@@ -117,6 +127,8 @@ JavaScript/Python sirf data ke taur par parhe jate hain (literal pipeline), chal
    **ML lab**: regression, random forest, forecast, groups waghera; models ka muqabla, "what if" aur dashboard par lagana.
    **Dashboard**: card, column / bar / line / area / pie / donut / scatter chart, **map**, ML, table aur slicer. Toolbar mein **Auto refresh** (10 second se 1 ghanta). Kisi bar par click
    karne se baqi visuals filter ho jate hain. Dashboards `/server` par bhi apne folder mein nazar aate hain.
+   **Table ke Links**: kisi column ki value web address, e-mail, report (PDF) ya doosra dashboard (usi value se
+   filter) khol sakti hai: visual settings → **Links**.
 4. **Import**: `.mdash` (doosre server se dashboard + datasets ki definitions, data nahi) ya kisi desktop BI tool ka template
    **`.pbit`** (har page ek dashboard; us file ki har table ke liye yahan ka dataset chunein). **`.pbix`** bhi chalti hai:
    browser us mein se sirf report wala hissa (pages aur visuals) nikal kar bhejta hai, data upload nahi hota. Lekin

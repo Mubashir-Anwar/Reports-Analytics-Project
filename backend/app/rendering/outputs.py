@@ -184,15 +184,18 @@ MEDIA_TYPES = {
 
 
 def render_report_output(definition: ReportDefinition, parameters: dict[str, Any], rows: list[dict[str, Any]], output_format: str,
-                         subreport_loader: Any = None, dataset_loader: Any = None) -> tuple[bytes, str]:
+                         subreport_loader: Any = None, dataset_loader: Any = None, link_base: str = "") -> tuple[bytes, str]:
     """Turn report rows into the requested file. Shared by /generate and the admin 'Run report'.
     `subreport_loader` fills the design's Subreport elements (each runs its own published report's query);
-    `dataset_loader` fills Tables / Crosstabs that have their own dataset."""
+    `dataset_loader` fills Tables / Crosstabs that have their own dataset; `link_base` is this server's address for
+    hyperlinks that open another report (REPORTING_PUBLIC_URL wins)."""
     token = designer_render.SUBREPORT_LOADER.set(subreport_loader)
     dataset_token = designer_render.DATASET_LOADER.set(dataset_loader)
+    link_token = designer_render.LINK_BASE.set(link_base)
     try:
         return _render_report_output(definition, parameters, rows, output_format)
     finally:
+        designer_render.LINK_BASE.reset(link_token)
         designer_render.DATASET_LOADER.reset(dataset_token)
         designer_render.SUBREPORT_LOADER.reset(token)
 

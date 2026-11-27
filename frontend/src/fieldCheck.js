@@ -60,7 +60,7 @@ export function missingFields(text, report, design) {
 /** Text of the band elements (not tables / lists / crosstabs, which read their own dataset). */
 function elementText(element) {
   if (!['textField', 'staticText', 'barcode', 'image', 'chart'].includes(element.type)) return '';
-  return [element.expression, element.text, element.printWhenExpression, element.hyperlinkExpression, element.categoryField && `$F{${element.categoryField}}`,
+  return [element.expression, element.text, element.printWhenExpression, element.hyperlink?.target, ...(element.hyperlink?.parameters || []).map((p) => p.expression), element.categoryField && `$F{${element.categoryField}}`,
     element.valueField && `$F{${element.valueField}}`].filter(Boolean).join(' ');
 }
 

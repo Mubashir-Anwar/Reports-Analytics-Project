@@ -264,3 +264,68 @@ export function SubreportProps({ element, patch, report, design }) {
     </>
   );
 }
+
+/** Hyperlink of a Text Field / Static Text / Image: a web address, an e-mail address or another report (drill-down).
+ *  Clickable in the PDF and in the Excel cells; only http(s) and mailto: links are made. */
+export function HyperlinkProps({ element, patch, report, design }) {
+  const { reports, error } = useServerReports();
+  const link = element.hyperlink || null;
+  const kind = link?.type || '';
+  const fields = [...report.columns, ...design.calculatedFields.map((c) => c.name)];
+  const set = (values) => patch({ hyperlink: { ...link, ...values } });
+  const choose = (next) => {
+    if (!next) { patch({ hyperlink: null }); return; }
+    if (next === 'report') { patch({ hyperlink: { type: 'report', report: '', folder: '', parameters: [], tooltip: link?.tooltip || '' } }); return; }
+    patch({ hyperlink: { type: next, target: link?.type === next ? link.target : '', tooltip: link?.tooltip || '' } });
+  };
+  const insert = (name) => { if (name) set({ target: `${link.target || ''}$F{${name}}` }); };
+  const target = reports.find((r) => r.id === link?.report);
+  const mapping = link?.parameters || [];
+  const names = [...new Set([...(target?.parameters || []).map((p) => p.name), ...mapping.map((m) => m.name)])];
+  const setParam = (name, expression) => set({ parameters: [...mapping.filter((m) => m.name !== name), { name, expression }].filter((m) => names.includes(m.name)) });
+  return (
+    <>
+      <Row label="Link to">
+        <select value={kind} onChange={(e) => choose(e.target.value)}>
+          <option value="">None</option><option value="url">A web address (URL)</option><option value="email">An e-mail address</option><option value="report">Another report (drill-down)</option>
+        </select>
+      </Row>
+      {(kind === 'url' || kind === 'email') && (
+        <>
+          <Row label={kind === 'url' ? 'Address' : 'E-mail address'}>
+            <textarea rows={2} className="mono" value={link.target || ''} onChange={(e) => set({ target: e.target.value })}
+              placeholder={kind === 'url' ? 'https://maps.example.com/?q=$F{City}' : '$F{Email}   or   sales@example.com?subject=Report'} />
+          </Row>
+          <Row label="Insert a field">
+            <select value="" onChange={(e) => insert(e.target.value)}><option value="">Choose…</option>{fields.map((f) => <option key={f} value={f}>{f}</option>)}</select>
+          </Row>
+          <p className="hint">{kind === 'url' ? <>Text with <code>$F&#123;…&#125;</code> / <code>$P&#123;…&#125;</code> in it, or a formula starting with <code>=</code>. Only <code>http://</code> and <code>https://</code> addresses become links (<code>www.</code> gets https).</> : <>Opens the reader&apos;s mail program. A record without a valid address gets no link.</>}</p>
+        </>
+      )}
+      {kind === 'report' && (
+        <>
+          <Row label="Report (published on the server)">
+            <select value={link.report || ''} onChange={(e) => { const next = reports.find((r) => r.id === e.target.value); set({ report: e.target.value, folder: next?.folder || '', parameters: defaultMapping(next, report, design) }); }}>
+              <option value="">Choose a report…</option>
+              {reports.filter((r) => r.id !== report.id).map((r) => <option key={`${r.folder}/${r.id}`} value={r.id}>{r.folder} / {r.title} ({r.id})</option>)}
+            </select>
+          </Row>
+          {error && <p className="err">{error}</p>}
+          {link.report && !target && reports.length > 0 && <p className="hint warn">{link.report} is not published on the server (publish it first).</p>}
+          <Row label="Opens as">
+            <select value={link.format || 'pdf'} onChange={(e) => set({ format: e.target.value })}><option value="pdf">PDF in the browser</option><option value="xlsx">Excel download</option><option value="csv">CSV download</option></select>
+          </Row>
+          <div className="prop-section">Parameters <small>(sent to that report)</small></div>
+          {!names.length && <p className="hint">The chosen report has no parameters.</p>}
+          {names.map((name) => (
+            <Row key={name} label={`$P{${name}}`}>
+              <input className="mono" value={mapping.find((m) => m.name === name)?.expression || ''} placeholder="$F{Branch}" onChange={(e) => setParam(name, e.target.value)} />
+            </Row>
+          ))}
+          <p className="hint">Clicking the element runs that report for this record, e.g. a branch name that opens the branch&apos;s detail report. The reader needs the right to run it.</p>
+        </>
+      )}
+      {kind && <Row label="Tooltip (Excel)"><input value={link.tooltip || ''} maxLength={200} onChange={(e) => set({ tooltip: e.target.value })} placeholder="Open the map" /></Row>}
+    </>
+  );
+}

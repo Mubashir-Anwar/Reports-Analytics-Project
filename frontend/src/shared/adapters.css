@@ -73,3 +73,27 @@
 .sf-tables ul { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 6px; }
 .sf-tables li { display: inline-flex; align-items: center; gap: 6px; padding: 4px 8px; border-radius: 999px; background: var(--accent-soft); font-size: 12px; }
 .sf-tables li span { color: var(--muted); font-size: 11px; }
+
+/* Advanced Connection Options (ConnectionOptions.jsx) */
+.co-box { margin: 10px 0 4px; border: 1px solid var(--line); border-radius: 10px; background: var(--panel); }
+.co-box > summary { cursor: pointer; padding: 8px 12px; font-weight: 700; font-size: 12px; list-style-position: inside; }
+.co-box[open] > summary { border-bottom: 1px solid var(--line); }
+.co-tabs { display: flex; flex-wrap: wrap; gap: 2px; padding: 6px 8px 0; border-bottom: 1px solid var(--line); }
+.co-tabs button { padding: 6px 10px; border: 0; border-bottom: 2px solid transparent; background: none; color: var(--muted); font: inherit; font-size: 12px; font-weight: 600; cursor: pointer; }
+.co-tabs button.on { color: var(--accent); border-bottom-color: var(--accent); }
+.co-panel { padding: 8px 12px 10px; }
+.co-choice { display: flex; flex-wrap: wrap; gap: 6px; margin: 6px 0; }
+.co-choice button { padding: 5px 10px; border: 1px solid var(--line); border-radius: 999px; background: var(--panel); color: var(--text); font: inherit; font-size: 12px; cursor: pointer; }
+.co-choice button.on { border-color: var(--accent); background: var(--accent-soft); color: var(--accent); font-weight: 600; }
+.co-choice button:disabled { opacity: .5; cursor: not-allowed; }
+.co-kv { display: flex; gap: 6px; margin-bottom: 4px; }
+.co-kv input { flex: 1; min-width: 0; }
+.co-add { justify-self: start; }
+.co-check { display: flex; gap: 8px; align-items: center; margin: 6px 0; font-size: 12px; }
+.co-file-row { display: flex; gap: 8px; align-items: center; font-weight: 400; }
+.co-file-row > span:first-child { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.co-note { margin: 6px 0; font-size: 12px; }
+.co-note code, .co-trust code { font-size: 11px; word-break: break-all; }
+.co-trust { margin: 8px 0; padding: 10px 12px; border: 1px solid var(--warn, var(--accent)); border-radius: 10px; background: var(--warn-soft, var(--accent-soft)); }
+.co-trust p { margin: 0 0 8px; }
+small.err { color: var(--danger); }

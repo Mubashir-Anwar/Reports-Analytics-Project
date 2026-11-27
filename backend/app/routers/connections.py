@@ -11,10 +11,10 @@ from typing import Any
 from fastapi import FastAPI, HTTPException, Request
 from starlette.concurrency import run_in_threadpool
 
-from backend.app.connectors import sources, sql as sql_connector
+from backend.app.connectors import options as connection_options, sources, sql as sql_connector
 from backend.app.connectors.errors import ConnectorQueryError
 from backend.app.connectors.mongodb import _mongo_database_from_uri
-from backend.app.connectors.profiles import AREA_NAMES, AREAS, DEFAULT_REMOVED, _profile_credentials, load_connection_profiles, usable
+from backend.app.connectors.profiles import AREA_NAMES, AREAS, DEFAULT_REMOVED, _profile_credentials, load_connection_profiles, profile_extra, usable
 from backend.app.constants import ADAPTER_TYPES, CONNECTION_ID_PATTERN, ENV_KEY_PATTERN
 from backend.app.security.secrets import _load_private_secrets, _save_private_secrets
 from backend.app.storage.files import add_saved_folder, normalize_folder_path
@@ -41,6 +41,20 @@ def register(app: FastAPI, ctx: SimpleNamespace) -> None:
         ctx.may_use_area(request, profile.get("area", ""))
         return profile
 
+    def saved_options(request: Request, connection_id: str, kind: str) -> dict[str, Any]:
+        """The saved Advanced Connection Options of a data source the caller may change (same kind), else {}."""
+        try:
+            profile = managed(request, connection_id) if connection_id else None
+        except HTTPException:
+            return {}
+        return profile_extra(profile) if profile and profile.get("type", "mongodb") == kind else {}
+
+    def sent_options(request: Request, payload: dict[str, Any], connection_id: str, kind: str) -> dict[str, Any]:
+        try:
+            return connection_options.clean(kind, payload.get("options"), saved_options(request, connection_id, kind))
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from None
+
     def is_admin(request: Request) -> bool:
         return ctx.managed_areas(request) == set(AREAS)
 
@@ -65,6 +79,7 @@ def register(app: FastAPI, ctx: SimpleNamespace) -> None:
                 "credentialSource": "Private local file" if profile.get("storage") == "file" else "Environment settings",
                 "configured": bool(uri and database),
                 "area": profile.get("area", ""),
+                "options": connection_options.summary(profile_extra(profile)),
                 "usedBy": uses.get(profile["id"], {}).get("server", []),
                 "uses": {key: value for key, value in uses.get(profile["id"], {}).items() if key in mine},
             })
@@ -168,9 +183,10 @@ def register(app: FastAPI, ctx: SimpleNamespace) -> None:
         if not replaced:
             updated.append(profile)
 
+        extra = sent_options(request, payload, connection_id if current is not None else "", kind)             if profile.get("storage") == "file" else {}
         if profile.get("storage") == "file":
             private = _load_private_secrets()
-            private["mongo_connections"][connection_id] = {"uri": uri, "database": database}
+            private["mongo_connections"][connection_id] = {"uri": uri, "database": database, **({"extra": extra} if extra else {})}
             _save_private_secrets(private)
         else:
             private = _load_private_secrets()
@@ -197,7 +213,9 @@ def register(app: FastAPI, ctx: SimpleNamespace) -> None:
         uri = str(payload.get("uri", "")).strip()
         database = str(payload.get("database", "")).strip()
         connection_id = str(payload.get("id", "")).strip().lower()
-        return test_adapter_values(str(payload.get("type", "mongodb") or "mongodb").lower(), uri, database, connection_id)
+        kind = str(payload.get("type", "mongodb") or "mongodb").lower()
+        extra = sent_options(request, payload, connection_id, kind)
+        return test_adapter_values(kind, uri, database, connection_id, extra)
 
     @app.delete("/api/data-sources/{connection_id}")
     @app.delete("/api/admin/connections/{connection_id}")

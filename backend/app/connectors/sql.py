@@ -173,7 +173,9 @@ class _Session:
 
     def _open_mysql(self, timeout_ms: int):
         p = _url_parts(self.kind, self.url)
-        ssl = {"ssl": {}} if p["query"].get("ssl", "").lower() in ("1", "true", "required") else {}
+        files = {name: p["query"][f"ssl_{name}"] for name in ("ca", "cert", "key") if p["query"].get(f"ssl_{name}")}
+        wanted = files or p["query"].get("ssl", "").lower() in ("1", "true", "required")
+        ssl = {"ssl": files} if wanted else {}   # certificate files from Advanced Connection Options (options.py)
         connection = self.module.connect(
             host=p["host"], port=p["port"], user=p["user"], password=p["password"], database=p["database"],
             connect_timeout=CONNECT_TIMEOUT_SECONDS, read_timeout=max(5, timeout_ms // 1000 + 5), charset="utf8mb4",

@@ -3,6 +3,7 @@
 // `source` says where the dashboard and its data come from (/analytics, or the Report Server's read-only viewer);
 // `actions` are extra buttons for the header (Download, Back, …).
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { drillFromHash } from './links.js';
 import { bi, newTileId, tileQuery, tileReady } from './api.js';
 import Visual from './Visual.jsx';
 import VisualEditor, { TypeIcon, VISUAL_TYPES } from './VisualEditor.jsx';
@@ -18,7 +19,8 @@ function blankTile(type, y, dataset) {
 
 const sameValue = (a, b) => a === b || (a == null && b == null);
 
-export default function Dashboard({ dashboardId, datasets = [], relationships = [], notify, onSaved, onDeleted, source = bi, actions = null, refreshSeconds = null, embedded = false }) {
+export default function Dashboard({ dashboardId, drill = '', datasets = [], relationships = [], notify, onSaved, onDeleted, source = bi, actions = null, refreshSeconds = null, embedded = false }) {
+  const [drilled, setDrilled] = useState(() => drillFromHash(drill)); // filters a link of another dashboard opened this one with
   const [saved, setSaved] = useState(null);
   const [draft, setDraft] = useState(null);           // the dashboard being edited (null = view mode)
   const [selected, setSelected] = useState(null);     // tile id whose settings are open
@@ -67,8 +69,16 @@ export default function Dashboard({ dashboardId, datasets = [], relationships = 
       if (tile.type === 'slicer' && slicers[tile.id]?.length) out.push({ ...base, op: 'in', values: slicers[tile.id] });
       if (tile.type !== 'slicer' && tile.type !== 'ml' && tile.id in picks) out.push({ ...base, op: 'in', values: [picks[tile.id]] });
     }
+    // a drill-down link: the value filters every dataset of this dashboard that has that column
+    const used = new Set(tiles.map((t) => t.dataset).filter(Boolean));
+    for (const { column, value } of drilled) {
+      for (const dataset of datasets.filter((d) => used.has(d.id))) {
+        const found = dataset.columns.find((c) => c.name === column);
+        if (found) out.push({ dataset: dataset.id, column, op: 'in', values: [found.kind === 'number' && value !== '' && !Number.isNaN(Number(value)) ? Number(value) : value] });
+      }
+    }
     return out;
-  }, [current, tiles, slicers, picks]);
+  }, [current, tiles, slicers, picks, drilled, datasets]);
 
   const load = useCallback(async (quiet) => {
     const ready = tiles.filter(tileReady);
@@ -204,6 +214,16 @@ export default function Dashboard({ dashboardId, datasets = [], relationships = 
         </div>
       )}
 
+      {drilled.length > 0 && (
+        <div className="dash-filters" role="status">
+          <span className="muted small">Opened for:</span>
+          {drilled.map((f) => (
+            <span key={f.column} className="filter-chip">{f.column} = {f.value}
+              <button type="button" aria-label="Show all, not only this value" onClick={() => setDrilled((d) => d.filter((x) => x.column !== f.column))}>×</button>
+            </span>
+          ))}
+        </div>
+      )}
       {activeFilters.length > 0 && (
         <div className="dash-filters" role="status">
           <span className="muted small">Filtered by:</span>

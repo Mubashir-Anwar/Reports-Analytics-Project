@@ -34,6 +34,10 @@ deletes test reports, a user, an API key and a data adapter (all named `PM_…` 
 | Collection name with a parameter (e.g. `Edith-$P{ProductCode}-PaymentPlans`) | Preview asks for ProductCode; any letters/numbers/_/- work |
 | Preview, then run PDF / Excel / CSV | Files download |
 | Publish to a folder | It appears on the Report Server |
+| Text Field → **Hyperlink** → web address `https://maps.example.com/?q=$F{City}`; Preview PDF, Export Excel | Each value is a link in the PDF and in the Excel cell |
+| Hyperlink → **Another report**, choose a published report and its parameter | The PDF link opens that report for the record in the browser |
+| Data Adapter Wizard → **Advanced Connection Options** (MongoDB): fill General / Authentication / Advanced | The URL field changes with the tabs, and typing a URL fills the tabs; **Test** connects |
+| Proxy/SSH with an SSH server you have → **Test** | It shows the host key (`SHA256:…`); after **Trust this host key** the test connects through the tunnel |
 
 ## 3. Report Server (/server)
 
@@ -135,6 +139,9 @@ folders, drafts, adapters, schedules, versions, run log, audit trail); `.env` is
 ## 11. Analytics (dashboards)
 
 Needs the **Analytics** right; making datasets and relationships also needs **Designer** or **Admin**.
+
+Links: edit a dashboard, open a table visual → **Links** → a column that opens a web address, a report or another
+dashboard. In view mode the values are links; a dashboard link opens the other dashboard with *Opened for: Column = value*.
 
 1. Open `/analytics` → **Datasets + New**. Choose a data adapter, a collection and a query (or `[{"$match": {}}]`),
    press **Test query** → the first records show with nested fields as `customer.city`-style columns.

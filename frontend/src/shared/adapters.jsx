@@ -2,6 +2,7 @@
 // Data Adapter Wizard (databases, warehouses, NoSQL, Files & Sheets).
 import PasswordInput from './PasswordInput.jsx';
 import SourceForm, { OWN_FORM } from './SourceForm.jsx';
+import { MongoOptions, SqlOptions, optionsPayload } from './ConnectionOptions.jsx';
 import { useState } from 'react';
 import { createPortal } from 'react-dom';
 import { api } from '../api.js';
@@ -126,7 +127,7 @@ export const SQL_KINDS = {
 export const adapterId = (name) => name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 39);
 
 /** SQL connection fields → scheme://user:password@host:port/database (+ ?sslmode=… / ?ssl=true) */
-export function sqlUrl(type, { host, port, database, user, password, sslmode }) {
+export function sqlUrl(type, { host, port, database, user, password, sslmode, params = [] }) {
   const kind = SQL_KINDS[type] || SQL_KINDS.postgresql;
   if (!host.trim() || !database.trim()) return '';
   const auth = user.trim() ? `${encodeURIComponent(user.trim())}${password ? `:${encodeURIComponent(password)}` : ''}@` : '';
@@ -134,6 +135,8 @@ export function sqlUrl(type, { host, port, database, user, password, sslmode }) 
   if (type === 'postgresql' && sslmode && sslmode !== 'prefer') suffix = `?sslmode=${sslmode}`;
   if ((type === 'mysql' || type === 'mariadb') && sslmode === 'require') suffix = '?ssl=true';
   if (type === 'clickhouse' && sslmode === 'require') suffix = '?secure=true';
+  const extra = params.filter(([k]) => k).map(([k, v]) => `${encodeURIComponent(k)}=${v}`).join('&');   // Advanced tab
+  if (extra) suffix += `${suffix ? '&' : '?'}${extra}`;
   return `${kind.scheme}://${auth}${host.trim()}:${(port || kind.port).toString().trim()}/${encodeURIComponent(database.trim())}${suffix}`;
 }
 
@@ -145,12 +148,15 @@ export function AdapterWizard({ initial, folders = [], existingIds = [], area: o
   const [step, setStep] = useState(initial?.id || initial?.name ? 2 : 1); // edit / duplicate skip the type page
   const [type, setType] = useState(initial?.type || 'mongodb');
   const [form, setForm] = useState({ name: '', uri: '', database: '', folder: '', ...initial, id: initial?.id || '' });
-  const [pg, setPg] = useState({ host: 'localhost', port: SQL_KINDS[initial?.type]?.port || '5432', database: initial?.database || '', user: '', password: '', sslmode: 'prefer' });
+  const [pg, setPg] = useState({ host: 'localhost', port: SQL_KINDS[initial?.type]?.port || '5432', database: initial?.database || '', user: '', password: '', sslmode: 'prefer', params: [] });
   const [result, setResult] = useState(null); // { ok, text }
   const [busy, setBusy] = useState('');
   const [other, setOther] = useState({ uri: '', database: '' }); // SourceForm's answer for the newer kinds
   const [preset, setPreset] = useState('');
   const [search, setSearch] = useState('');
+  const [opts, setOptsState] = useState({}); // Advanced Connection Options: certificate files, SSH tunnel (changes only)
+  const savedOptions = (initial?.type || 'mongodb') === type ? initial?.options || {} : {};
+  const setOpts = (next) => { setOptsState(next); setResult(null); };
   const id = editing ? form.id : adapterId(form.name);
   const duplicateId = !editing && id && existingIds.includes(id);
   const typeInfo = ADAPTER_TYPES.find((t) => t.id === type) || ADAPTER_TYPES[0];
@@ -170,7 +176,10 @@ export function AdapterWizard({ initial, folders = [], existingIds = [], area: o
 
   const test = async () => {
     setBusy('test'); setResult(null);
-    try { const r = await api.testConnectionValues({ type, id: id || 'test', uri, database: own ? other.database : isSql ? pg.database.trim() : form.database.trim() }); setResult({ ok: true, text: `Successful: ${r.message || 'connected'}` }); }
+    try {
+      const r = await api.testConnectionValues({ type, id: id || 'test', uri, database: own ? other.database : isSql ? pg.database.trim() : form.database.trim(), options: optionsPayload(opts) });
+      setResult(r.status === 'hostKey' ? { ok: false, hostKey: r.fingerprint, text: r.message } : { ok: true, text: `Successful: ${r.message || 'connected'}` });
+    }
     catch (error) { setResult({ ok: false, text: error.message }); }
     finally { setBusy(''); }
   };
@@ -178,7 +187,7 @@ export function AdapterWizard({ initial, folders = [], existingIds = [], area: o
     setBusy('save');
     try {
       const saved = await api.saveConnection({ type, id, name: form.name.trim(), uri, database: own ? other.database : isSql ? pg.database.trim() : form.database.trim(), folder: form.folder || '',
-        ...(editing ? {} : { area, create: true }) });
+        options: optionsPayload(opts), ...(editing ? {} : { area, create: true }) });
       notify(`Data adapter “${form.name.trim()}” ${editing ? 'updated' : 'created'}`, 'ok');
       onSaved(saved.connection);
     } catch (error) { setResult({ ok: false, text: error.message }); setBusy(''); }
@@ -232,7 +241,10 @@ export function AdapterWizard({ initial, folders = [], existingIds = [], area: o
             <label className="aw-field">Name<input autoFocus value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder={own ? ({ files: 'Sales sheets', gsheets: 'Budget sheet', sqlite: 'Branch SQLite', duckdb: 'Warehouse DuckDB' }[type] || `Finance ${typeInfo.name.split(' ')[0]}`) : isSql ? `Finance ${(presetInfo?.name || typeInfo.name).split(' ')[0]}` : 'KMBL UAT MongoDB'} /></label>
             {!editing && id && <small className={duplicateId ? 'err' : 'muted'}>ID: {id}{duplicateId ? ' — already used, choose another name' : ''}</small>}
             {own ? (
-              <SourceForm type={type} id={id} editing={editing} onChange={(v) => { setOther(v); setResult(null); }} notify={notify} />
+              <>
+                <SourceForm type={type} id={id} editing={editing} onChange={(v) => { setOther(v); setResult(null); }} notify={notify} />
+                <SqlOptions type={type} opts={opts} onOpts={setOpts} saved={savedOptions} />
+              </>
             ) : isSql ? (
               <>
                 <div className="pg-grid">
@@ -250,6 +262,7 @@ export function AdapterWizard({ initial, folders = [], existingIds = [], area: o
                   <label className="aw-field">Password<PasswordInput autoComplete="new-password" value={pg.password} onChange={(e) => setPgField({ password: e.target.value })} /></label>
                 </div>
                 <small className="muted">{editing ? 'The saved password is never shown: enter the connection again (it replaces the old one).' : 'Saved with the password in a private file on the server; never shown again.'} Give the report user read-only rights — reports only read, and every query runs in a read-only transaction.</small>
+                <SqlOptions type={type} opts={opts} onOpts={setOpts} saved={savedOptions} params={pg.params} onParams={(rows) => setPgField({ params: rows })} />
               </>
             ) : (
               <>
@@ -258,6 +271,7 @@ export function AdapterWizard({ initial, folders = [], existingIds = [], area: o
                   <small className="muted">{editing ? 'The saved URL is never shown. Enter it again (it replaces the old one).' : 'Saved with its password in a private file on the server; never shown again. For a remote MongoDB connect the VPN first.'}</small>
                 </label>
                 <label className="aw-field">Database <small>(optional when the URL has one)</small><input value={form.database} onChange={(e) => setForm({ ...form, database: e.target.value })} /></label>
+                <MongoOptions uri={form.uri} onUri={(value) => { setForm((current) => ({ ...current, uri: value })); setResult(null); }} opts={opts} onOpts={setOpts} saved={savedOptions} />
               </>
             )}
             {folders.length > 0 && area !== 'analytics' && area !== 'query' && <label className="aw-field">Folder
@@ -266,7 +280,18 @@ export function AdapterWizard({ initial, folders = [], existingIds = [], area: o
                 {folders.map((f) => <option key={f} value={f}>{f.split('/').join(' / ')}</option>)}
               </select>
             </label>}
-            {result && <p className={`aw-result ${result.ok ? 'ok' : 'err'}`}>{result.ok ? '✓ ' : '✕ '}{result.text}</p>}
+            {result && !result.hostKey && <p className={`aw-result ${result.ok ? 'ok' : 'err'}`}>{result.ok ? '✓ ' : '✕ '}{result.text}</p>}
+            {result?.hostKey && (
+              <div className="co-trust" role="alert">
+                <p><b>New SSH server.</b> Its host key is <code>{result.hostKey}</code>. Check it with the server’s administrator
+                  (<code>ssh-keygen -lf /etc/ssh/ssh_host_*_key.pub</code>): if it is the same, trust it.</p>
+                <button type="button" className="btn primary small" onClick={() => {
+                  const ssh = opts.ssh || { ...savedOptions.ssh, password: '', privateKey: '', passphrase: '' };
+                  setOpts({ ...opts, ssh: { ...ssh, hostKey: result.hostKey } });
+                  setResult({ ok: true, text: 'Host key trusted: press Test again' });
+                }}>Trust this host key</button>
+              </div>
+            )}
           </div>
         )}
         <div className="aw-buttons">

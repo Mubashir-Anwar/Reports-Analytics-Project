@@ -301,6 +301,33 @@ def clean_visual(value: Any, where: str) -> dict[str, Any]:
     }
 
 
+LINK_KINDS = ("url", "email", "report", "dashboard")
+
+
+def _clean_links(raw: Any, where: str) -> list[dict[str, str]]:
+    """Links of a table visual (frontend analytics/links.js): which column, and what its values open."""
+    if not isinstance(raw, list) or len(raw) > 10:
+        raise ValueError(f"{where}: at most 10 links")
+    links = []
+    for index, item in enumerate(raw):
+        if not isinstance(item, dict) or item.get("kind") not in LINK_KINDS or not str(item.get("column") or "").strip():
+            raise ValueError(f"{where}[{index}] needs a column and a kind ({', '.join(LINK_KINDS)})")
+        link = {"column": str(item["column"]).strip()[:120], "kind": item["kind"]}
+        for name, size in (("template", 2000), ("report", 80), ("folder", 300), ("parameter", 80), ("dashboard", 80), ("filter", 120), ("tooltip", 120)):
+            value = re.sub(r"[\x00-\x1f]", "", str(item.get(name) or "")).strip()[:size]
+            if value:
+                link[name] = value
+        template = link.get("template", "")
+        if link["kind"] == "url" and template and not re.match(r"^(https?://|www\.|\{)", template, re.IGNORECASE):
+            raise ValueError(f"{where}[{index}]: a web address starts with http:// or https://")
+        if link.get("report") and not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_-]{0,79}", link["report"]):
+            raise ValueError(f"{where}[{index}]: invalid report ID")
+        if link.get("dashboard") and not re.fullmatch(r"[A-Za-z0-9_-]{1,80}", link["dashboard"]):
+            raise ValueError(f"{where}[{index}]: invalid dashboard ID")
+        links.append(link)
+    return links
+
+
 def clean_dashboard(payload: dict[str, Any], current: dict[str, Any] | None = None) -> dict[str, Any]:
     if not isinstance(payload, dict):
         raise ValueError("Send the dashboard as a JSON object")
@@ -325,6 +352,8 @@ def clean_dashboard(payload: dict[str, Any], current: dict[str, Any] | None = No
         options = tile.get("options") or {}
         if not isinstance(options, dict):
             raise ValueError(f"{where}.options must be an object")
+        if "links" in options:
+            options = {**options, "links": _clean_links(options["links"], f"{where}.options.links")}
         layout = {name: int(tile.get(name) or 0) for name in ("x", "y", "w", "h")}
         layout["w"] = max(1, min(12, layout["w"] or 4))
         layout["x"] = max(0, min(12 - layout["w"], layout["x"]))

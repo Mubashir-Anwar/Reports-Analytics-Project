@@ -358,7 +358,41 @@ def _convert_element(node: ET.Element, ctx: _Ctx, band_name: str, dx: float = 0,
     print_when = _text(_kid(rep, "printWhenExpression")).strip()
     if print_when:
         element["printWhenExpression"] = java_condition(print_when, ctx.aliases, ctx.warnings, f"{band_name} print when")
+    if element.get("type") in ("staticText", "textField", "image"):
+        link = _hyperlink(node, ctx, band_name)
+        if link:
+            element["hyperlink"] = link
     return element
+
+
+def _hyperlink(node: ET.Element, ctx: "_Ctx", band_name: str) -> dict[str, Any] | None:
+    """hyperlinkType Reference (a web or mailto: address) and ReportExecution (open another report) → Hyperlink."""
+    kind = node.get("hyperlinkType") or ""
+    if kind in ("", "None"):
+        return None
+    where = f"{band_name} hyperlink"
+    tooltip, _ = translate_expression(_text(_kid(node, "hyperlinkTooltipExpression")), ctx.aliases, ctx.warnings, where)
+    tooltip = "" if tooltip.startswith("=") or "$" in tooltip else tooltip
+    if kind == "Reference":
+        target, _ = translate_expression(_text(_kid(node, "hyperlinkReferenceExpression")), ctx.aliases, ctx.warnings, where)
+        if not target:
+            return None
+        if target.lower().startswith("mailto:"):
+            return {"type": "email", "target": target[7:], "tooltip": tooltip}
+        return {"type": "url", "target": target, "tooltip": tooltip}
+    if kind == "ReportExecution":
+        report, parameters = "", []
+        for item in _kids(node, "hyperlinkParameter"):
+            value = _text(_kid(item, "hyperlinkParameterExpression"))
+            if item.get("name") == "_report":
+                report = re.sub(r"[^A-Za-z0-9_-]", "", value.strip().strip('"').rstrip("/").rsplit("/", 1)[-1])[:80]
+            elif item.get("name") and not item.get("name").startswith("_"):
+                expression, _ = translate_expression(value, ctx.aliases, ctx.warnings, where)
+                parameters.append({"name": item.get("name"), "expression": expression})
+        if report:
+            return {"type": "report", "report": report, "parameters": parameters, "tooltip": tooltip}
+    ctx.warnings.append(f"{where}: a {kind} hyperlink is not converted (web addresses, e-mail and other reports are)")
+    return None
 
 
 def _convert_section(holder: ET.Element | None, name: str, ctx: _Ctx, table_out: dict[str, Any]) -> dict[str, Any]:

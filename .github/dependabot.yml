@@ -1,0 +1,32 @@
+# Once a month GitHub opens pull requests with newer versions of the database drivers and other packages.
+# Nothing is updated by itself: CI tests each pull request, and a person merges it only when it is green.
+# The Docker image installs exactly the versions in constraints.txt, so a merge is the only way a version changes.
+version: 2
+updates:
+  - package-ecosystem: pip            # requirements.txt ranges and the exact versions in constraints.txt
+    directory: "/"
+    schedule:
+      interval: monthly
+    open-pull-requests-limit: 5
+    groups:
+      python-minor:                   # small updates together in one pull request
+        update-types: ["minor", "patch"]
+
+  - package-ecosystem: npm            # the web pages (frontend/package-lock.json)
+    directory: "/frontend"
+    schedule:
+      interval: monthly
+    open-pull-requests-limit: 5
+    groups:
+      web-minor:
+        update-types: ["minor", "patch"]
+
+  - package-ecosystem: docker         # python / node base images of the Dockerfile
+    directory: "/"
+    schedule:
+      interval: monthly
+
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: monthly

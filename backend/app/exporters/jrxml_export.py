@@ -232,12 +232,35 @@ def _graphic(parent: ET.Element, el: dict[str, Any], default_width: float = 1) -
     _sub(graphic, "pen", {"lineWidth": f"{width:g}", "lineColor": str(el.get("borderColor") or el.get("color") or "#000000")})
 
 
+def _hyperlink(node: ET.Element, el: dict[str, Any], out: _Out, where: str) -> None:
+    """Hyperlink → hyperlinkType Reference (web / mailto:) or ReportExecution (another report)."""
+    link = el.get("hyperlink")
+    if not link:
+        return
+    node.set("hyperlinkTarget", "Blank")
+    if link.get("type") == "report":
+        node.set("hyperlinkType", "ReportExecution")
+    else:
+        node.set("hyperlinkType", "Reference")
+        template = ("mailto:" if link.get("type") == "email" else "") + str(link.get("target") or "")
+        _sub(node, "hyperlinkReferenceExpression", text=out.expression(template, where)[0])
+    if link.get("tooltip"):
+        _sub(node, "hyperlinkTooltipExpression", text=java_string(str(link["tooltip"])))
+    if link.get("type") == "report":
+        report = _sub(node, "hyperlinkParameter", {"name": "_report"})
+        path = "/".join(part for part in (str(link.get("folder") or "").strip("/"), str(link.get("report") or "")) if part)
+        _sub(report, "hyperlinkParameterExpression", text=java_string("/" + path))
+        for item in link.get("parameters") or []:
+            parameter = _sub(node, "hyperlinkParameter", {"name": str(item.get("name") or "")})
+            _sub(parameter, "hyperlinkParameterExpression", text=out.expression(str(item.get("expression") or ""), where)[0])
+
+
 def _element(parent: ET.Element, el: dict[str, Any], out: _Out, where: str, width_limit: float) -> None:
     kind = el.get("type")
     if kind in SKIPPED_TYPES:
         out.warn(f"{where}: the {SKIPPED_TYPES[kind]} has no JRXML match and was left out; add it again in the other designer")
         return
-    if kind == "staticText" and TOKEN.search(str(el.get("text") or "")):
+    if kind == "staticText" and (TOKEN.search(str(el.get("text") or "")) or el.get("hyperlink")):  # classic static text has no link
         kind = "textField"                                 # text with values in it needs an expression in classic reports
         el = {**el, "expression": el.get("text")}
     if kind == "staticText":
@@ -260,6 +283,7 @@ def _element(parent: ET.Element, el: dict[str, Any], out: _Out, where: str, widt
         _sub(node, "textFieldExpression", text=expression)
         if el.get("patternExpression"):
             _sub(node, "patternExpression", text=out.refs(str(el["patternExpression"]), where))
+        _hyperlink(node, el, out, where)
     elif kind == "line":
         node = _sub(parent, "line")
         _report_element(node, {**el, "height": max(_num(el.get("height")), 0)}, out, where, width_limit, back=False)
@@ -292,6 +316,7 @@ def _element(parent: ET.Element, el: dict[str, Any], out: _Out, where: str, widt
             expression = java_string(name)
             out.warn(f"{where}: the picture '{name}' is too big to put inside the .jrxml; save it next to the .jrxml with that name")
         _sub(node, "imageExpression", text=expression)
+        _hyperlink(node, el, out, where)
     else:
         out.warn(f"{where}: an element of type '{kind}' was left out")
 

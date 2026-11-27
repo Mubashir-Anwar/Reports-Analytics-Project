@@ -19,6 +19,15 @@ def _profile_credentials(profile: dict[str, str]) -> tuple[str, str]:
     return os.getenv(profile.get("uriEnv", ""), "").strip(), os.getenv(profile.get("databaseEnv", ""), "").strip()
 
 
+def profile_extra(profile: dict[str, str]) -> dict:
+    """The saved Advanced Connection Options (TLS files, SSH tunnel) of a data adapter (connectors/options.py)."""
+    if profile.get("storage") != "file":
+        return {}
+    saved = _load_private_secrets()["mongo_connections"].get(profile["id"], {})
+    extra = saved.get("extra") if isinstance(saved, dict) else None
+    return extra if isinstance(extra, dict) else {}
+
+
 DEFAULT_REMOVED = "meta/default-adapter.json"
 
 

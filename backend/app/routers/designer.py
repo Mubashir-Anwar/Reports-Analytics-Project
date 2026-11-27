@@ -308,6 +308,7 @@ def register(app: FastAPI, ctx: SimpleNamespace) -> None:
             adapter = str(payload.get("connectionId") or "").strip()
             dataset_token = designer_render.DATASET_LOADER.set(
                 dataset_loader(adapter, str(payload.get("reportId") or "preview")) if adapter else None)
+            link_token = designer_render.LINK_BASE.set(str(request.base_url))   # hyperlinks to other reports
             try:
                 if output_format == "pdf":
                     body = designer_render.render_design_pdf(design, title, columns, rows, raw_parameters, str(payload.get("reportId", "")))
@@ -321,6 +322,7 @@ def register(app: FastAPI, ctx: SimpleNamespace) -> None:
                     media_type = {"xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                                   "csv": "text/csv; charset=utf-8"}[output_format]
             finally:
+                designer_render.LINK_BASE.reset(link_token)
                 designer_render.DATASET_LOADER.reset(dataset_token)
                 designer_render.SUBREPORT_LOADER.reset(token)
         except ValueError as exc:

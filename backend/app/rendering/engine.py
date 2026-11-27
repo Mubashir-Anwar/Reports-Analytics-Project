@@ -17,6 +17,7 @@ import os
 import re
 from datetime import date, datetime
 from typing import Any, Iterable
+from urllib.parse import urlencode
 
 from backend.app import fonts as own_fonts
 from backend.app.expressions import jexpr
@@ -83,6 +84,13 @@ NAME_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]{0,63}$")
 COLOR_RE = re.compile(r"^#[0-9a-fA-F]{6}$")
 TOKEN_RE = re.compile(r"\$([FPV])\{([^{}]+)\}")
 IMAGE_RE = re.compile(r"^data:image/(png|jpeg);base64,([A-Za-z0-9+/=]+)$")
+# Hyperlinks of Text Field / Static Text / Image: a web address, an e-mail address or another report (drill-down)
+HYPERLINK_TYPES = ("url", "email", "report")
+LINK_ELEMENTS = ("staticText", "textField", "image")
+LINK_REPORT_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]{0,79}$")
+LINK_PARAMETER = re.compile(r"^[A-Za-z_][A-Za-z0-9_]{0,79}$")
+EMAIL_RE = re.compile(r"^[^@\s<>\"'()]{1,64}@[A-Za-z0-9.-]{1,253}\.[A-Za-z]{2,63}$")
+WEB_LINK_RE = re.compile(r"^https?://[^\s<>\"]+$", re.IGNORECASE)
 
 DEFAULT_PAGE = {"width": 595, "height": 842, "margins": {"top": 30, "right": 30, "bottom": 30, "left": 30}}
 
@@ -545,6 +553,7 @@ def validate_design(design: Any, columns: list[str], parameter_names: set[str]) 
         element["printInFirstWholeBand"] = raw.get("printInFirstWholeBand") is True
         element["printWhenDetailOverflows"] = raw.get("printWhenDetailOverflows") is True
         element["printWhenGroupChanges"] = str(raw.get("printWhenGroupChanges") or "")[:80]
+        element["hyperlink"] = _clean_hyperlink(raw.get("hyperlink"), band_name, check_expression) if kind in LINK_ELEMENTS else None
         if kind in ("staticText", "textField"):
             # Text Field / Static Text: Text Adjust, Rotation and Paragraph
             adjust = raw.get("textAdjust")
@@ -1020,6 +1029,47 @@ SUBREPORT_LOADER: contextvars.ContextVar = contextvars.ContextVar("subreport_loa
 # Set by the service around a render: loader(dataset, parameter_values) -> list of records, for Tables / Crosstabs
 # with their own dataset. Without a loader (designer preview without a data adapter) they show sample records.
 DATASET_LOADER: contextvars.ContextVar = contextvars.ContextVar("dataset_loader", default=None)
+# The address of this server for "open another report" links (REPORTING_PUBLIC_URL wins; else the run's own address)
+LINK_BASE: contextvars.ContextVar = contextvars.ContextVar("link_base", default="")
+
+
+def link_base() -> str:
+    return (os.getenv("REPORTING_PUBLIC_URL", "").strip() or LINK_BASE.get() or "").rstrip("/")
+
+
+def _clean_hyperlink(raw: Any, where: str, check_expression) -> dict[str, Any] | None:
+    """The Hyperlink of an element, checked; None when it has none."""
+    if not isinstance(raw, dict) or raw.get("type") not in HYPERLINK_TYPES:
+        return None
+    kind = raw["type"]
+    link: dict[str, Any] = {"type": kind, "tooltip": re.sub(r"[\x00-\x1f]", "", str(raw.get("tooltip") or ""))[:200]}
+    if kind == "report":
+        report = str(raw.get("report") or "").strip()
+        if not LINK_REPORT_ID.fullmatch(report):
+            raise ValueError(f"{where}: choose the report the hyperlink opens")
+        link["report"] = report
+        link["folder"] = str(raw.get("folder") or "").strip()[:300]
+        link["format"] = raw.get("format") if raw.get("format") in ("pdf", "xlsx", "csv") else "pdf"
+        parameters = []
+        for item in (raw.get("parameters") or [])[:30]:
+            if not isinstance(item, dict):
+                continue
+            name = str(item.get("name") or "").strip()
+            expression = str(item.get("expression") or "").strip()[:2000]
+            if not name:
+                continue
+            if not LINK_PARAMETER.fullmatch(name):
+                raise ValueError(f"{where}: invalid hyperlink parameter name {name[:40]!r}")
+            check_expression(expression, f"{where} hyperlink parameter {name}")
+            parameters.append({"name": name, "expression": expression})
+        link["parameters"] = parameters
+    else:
+        target = str(raw.get("target") or "").strip()[:2000]
+        if not target:
+            raise ValueError(f"{where}: give the hyperlink's {'address' if kind == 'url' else 'e-mail address'}")
+        check_expression(target, f"{where} hyperlink")
+        link["target"] = target
+    return link
 
 
 class DatasetError(Exception):
@@ -1829,6 +1879,34 @@ class _Render:
         if dash:
             canvas.setDash(*dash)
 
+    def text_of(self, expression: str, element: dict[str, Any], row: dict[str, Any] | None) -> str:
+        """An expression or a text with $F{}/$P{}/$V{} in it, as printed (no pattern)."""
+        return self.evaluate({"expression": expression, "markup": "none", "evaluationTime": element.get("evaluationTime", "Now")}, row)
+
+    def link_url(self, element: dict[str, Any], row: dict[str, Any] | None) -> str:
+        """The address an element's hyperlink opens for this record; "" when it has none or the value is not safe."""
+        link = element.get("hyperlink")
+        if not link:
+            return ""
+        try:
+            if link["type"] == "report":
+                values = [(item["name"], self.text_of(item["expression"], element, row)) for item in link["parameters"]]
+                if link.get("folder"):
+                    values.append(("Folder", link["folder"]))
+                if link["format"] == "pdf":
+                    values.append(("View", "inline"))   # opens in the browser instead of downloading
+                return f"{link_base()}/generate/{link['report']}.{link['format']}?{urlencode(values)}"
+            text = self.text_of(link["target"], element, row).strip()
+        except Exception:  # noqa: BLE001 - a link that cannot be worked out for one record is left out, not an error
+            return ""
+        if link["type"] == "email":
+            address = text[7:] if text.lower().startswith("mailto:") else text
+            address, _, query = address.partition("?")
+            return f"mailto:{address}{'?' + query if query else ''}" if EMAIL_RE.fullmatch(address) else ""
+        if text.lower().startswith("www."):
+            text = "https://" + text
+        return text if WEB_LINK_RE.fullmatch(text) else ""   # only web addresses: no javascript:, file: or data: links
+
     def draw_element(self, canvas, element, x, y_top, row, scope_rows, height=None) -> None:
         height_page = self.page["height"]
         w, h = element["width"], element["height"] if height is None else height
@@ -1876,6 +1954,8 @@ class _Render:
                     raise
         elif kind == "chart":
             self.draw_chart(canvas, element, x, y, w, h)
+        if element.get("hyperlink") and (url := self.link_url(element, row)):
+            canvas.linkURL(url, (x, y, x + w, y + h), relative=0, thickness=0)   # a clickable area in the PDF
 
     def draw_barcode(self, canvas, element, value: str, x, y, w, h) -> None:
         """QR code or a 1-D barcode (Code 128, Code 39, EAN-13) of the evaluated value, scaled into the box."""
@@ -2402,6 +2482,8 @@ class _GridCollector(_Render):
             if element["type"] in NOT_DRAWN or not eng.printing(element, row):
                 continue
             item = {"element": element, "x": element["x"] + eng.x_offset, "y": self.cursor + y, "w": element["width"], "h": h}
+            if element.get("hyperlink") and (url := eng.link_url(element, row)):
+                item["link"] = url
             if element["type"] == "barcode":  # the sheet gets the barcode's value as text
                 item["value"], item["format"] = eng.evaluate(element, row or {}), None
             elif element["type"] in ("staticText", "textField"):
@@ -2631,6 +2713,9 @@ def _paint_grid(sheet, items: list[dict[str, Any]], ys: list[float], row_offset:
                 cell.fill = PatternFill("solid", start_color=element["backColor"].lstrip("#"), end_color=element["backColor"].lstrip("#"))
             if item.get("format"):
                 cell.number_format = item["format"]
+            if item.get("link"):                        # Hyperlink: a link of the cell (not a =HYPERLINK formula)
+                cell.hyperlink = item["link"]
+                cell.hyperlink.tooltip = element["hyperlink"].get("tooltip") or None
             if len(span) > 1 and not (span & occupied):
                 sheet.merge_cells(start_row=r1 + 1, start_column=c1 + 1, end_row=r2 + 1, end_column=c2 + 1)
                 occupied |= span
